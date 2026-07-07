@@ -1061,10 +1061,14 @@ $('#sc-pay').onclick=async ()=>{
   paying=false;
   if(error){ $('#pay-error').textContent=error.message||'Payment could not be completed.'; btn.innerHTML=label; btn.disabled=false; return; }
   if(paymentIntent && paymentIntent.status==='succeeded'){
-    // Save the customer + their SMS choice (fire-and-forget; the webhook also saves the contact).
-    try{ fetch('/api/save-customer',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
-      name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim(),
-      sms: $('#sc-sms') ? $('#sc-sms').checked : undefined }) }); }catch(e){}
+    // Turn the paid hold into a real booking + save the customer (works without a Stripe webhook).
+    btn.textContent='Confirming…';
+    try{
+      await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        paymentIntentId: paymentIntent.id,
+        name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim(),
+        sms: $('#sc-sms') ? $('#sc-sms').checked : undefined }) });
+    }catch(e){ /* payment already succeeded; the webhook backup can still catch it */ }
     $('#pay-overlay').classList.remove('show');
     showConfirmation($('#sc-name').value.trim()||'Guest');
   }else{ btn.innerHTML=label; btn.disabled=false; }
@@ -1076,7 +1080,11 @@ async function handleReturn(){
   if(!cs || !STRIPE) return;
   try{
     const { paymentIntent }=await STRIPE.retrievePaymentIntent(cs);
-    if(paymentIntent && paymentIntent.status==='succeeded') showStripeConfirmation(paymentIntent);
+    if(paymentIntent && paymentIntent.status==='succeeded'){
+      // Confirm the booking on return too (billing details are pulled server-side from the charge).
+      try{ await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ paymentIntentId: paymentIntent.id }) }); }catch(e){}
+      showStripeConfirmation(paymentIntent);
+    }
   }catch(e){}
   history.replaceState({}, '', location.pathname);
 }

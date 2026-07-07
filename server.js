@@ -11,6 +11,7 @@ import { getSettings, getBookingsForDate, getOverridesForDate, insertBooking, db
   createHold, releaseHold, confirmHold, cleanupExpiredHolds, upsertCustomer } from './lib/db.js';
 import signWaiver from './api/sign-waiver.js';
 import saveCustomer from './api/save-customer.js';
+import confirmBooking from './api/confirm-booking.js';
 
 // Local dev server. On Vercel the same logic runs as serverless functions in /api.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,6 +86,7 @@ app.use(express.static(path.join(__dirname, 'demo')));
 // Waiver signing + customer save (same handlers the Vercel functions use).
 app.all('/api/sign-waiver', (req, res) => signWaiver(req, res));
 app.all('/api/save-customer', (req, res) => saveCustomer(req, res));
+app.all('/api/confirm-booking', (req, res) => confirmBooking(req, res));
 
 // Customer booking lookup + self-service cancellation (24-hour policy enforced server-side).
 app.get('/api/booking', async (req, res) => {
