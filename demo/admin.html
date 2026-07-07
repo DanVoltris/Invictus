@@ -1732,6 +1732,7 @@ function openCustomer(c){
     </div>
     ${c.membership_flag?`<div class="note-flag"><span class="fbadge" data-tip="${esc(c.membership_flag)}">!</span><span>${esc(c.membership_flag)}</span></div>`:''}
     ${c.waiver_code?`<div class="kv" style="margin-bottom:12px"><span class="k">Waiver on file</span><span class="wv-code">${esc(c.waiver_code)}${c.waiver_signed_at?` <span class="dim">· signed ${shortDate(c.waiver_signed_at.slice(0,10))}</span>`:''}</span></div>`:''}
+    ${c.sms_opt_in!=null?`<div class="kv" style="margin-bottom:12px"><span class="k">SMS updates</span><span>${c.sms_opt_in?'<span class="pill confirmed">On</span>':'<span class="pill cancelled">Off</span>'}</span></div>`:''}
     <div class="field"><label>Notes</label><input class="input" id="c-notes" value="${esc(c.notes||'')}" placeholder="Optional" /></div>
     ${isNew?'':`<div class="field" style="margin-bottom:0"><label>Booking history</label><div class="cust-history" id="c-hist"><div class="dim" style="font-size:13px;padding:6px 0">Loading…</div></div></div>`}
     <button class="btn btn-primary" id="c-save" style="width:100%;margin-top:16px">${isNew?'Add customer':'Save changes'}</button>

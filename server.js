@@ -8,8 +8,9 @@ import {
   overrideEffects, overrideConflicts, weeklyStatusBlocked, weeklyStatusConflicts,
 } from './lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, insertBooking, dbEnabled, admin,
-  createHold, releaseHold, confirmHold, cleanupExpiredHolds } from './lib/db.js';
+  createHold, releaseHold, confirmHold, cleanupExpiredHolds, upsertCustomer } from './lib/db.js';
 import signWaiver from './api/sign-waiver.js';
+import saveCustomer from './api/save-customer.js';
 
 // Local dev server. On Vercel the same logic runs as serverless functions in /api.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,6 +67,7 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
         error = ins.error;
       }
       console.log(error ? `⚠ Booking save failed: ${error}` : `✅ Booking PAID & saved — ${md.summary}`);
+      await upsertCustomer({ name, email, phone });   // save the booker into the customer database
     }
   }
   res.json({ received: true });
@@ -80,8 +82,9 @@ app.get('/manage', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'man
 app.get('/waiver', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'waiver.html')));
 app.use(express.static(path.join(__dirname, 'demo')));
 
-// Waiver signing (same handler the Vercel function uses).
+// Waiver signing + customer save (same handlers the Vercel functions use).
 app.all('/api/sign-waiver', (req, res) => signWaiver(req, res));
+app.all('/api/save-customer', (req, res) => saveCustomer(req, res));
 
 // Customer booking lookup + self-service cancellation (24-hour policy enforced server-side).
 app.get('/api/booking', async (req, res) => {

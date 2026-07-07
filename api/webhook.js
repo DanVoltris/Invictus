@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
 import { stripeStatus, normalizeSettings } from '../lib/booking.js';
-import { insertBooking, getSettings, confirmHold } from '../lib/db.js';
+import { insertBooking, getSettings, confirmHold, upsertCustomer } from '../lib/db.js';
 
 function readRaw(req) {
   return new Promise((resolve, reject) => {
@@ -69,6 +69,8 @@ export default async function handler(req, res) {
       console.log(error
         ? `⚠ Booking save failed (${md.summary}): ${error}`
         : `✅ Booking PAID & saved — ${md.bayName} · ${md.summary}`);
+      // Save the booker into the customer database (contact only; the SMS toggle is set by /api/save-customer).
+      await upsertCustomer({ name, email, phone });
     }
   }
   res.status(200).json({ received: true });
