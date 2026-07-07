@@ -3,20 +3,32 @@ import { admin } from '../lib/db.js';
 // Find the customer this waiver belongs to: an explicit customer id, the contact on a booking,
 // or an email/phone match. Only creates a new customer row when `create` is true (i.e. on submit,
 // never on a status check). The waiver lives on the customer so it covers all their visits (clause 12).
+// Fill in any contact fields the matched customer is missing (so signing saves their email/phone).
+async function backfill(db, cust, { e, p, n }) {
+  const patch = {};
+  if (e && !cust.email) patch.email = e;
+  if (p && !cust.phone) patch.phone = p;
+  if (n && !cust.name) patch.name = n;
+  if (!Object.keys(patch).length) return cust;
+  const { data, error } = await db.from('customers').update(patch).eq('id', cust.id).select('*').maybeSingle();
+  return (!error && data) ? data : { ...cust, ...patch };   // email is unique — if it collides, keep the row as-is
+}
+
 async function resolveCustomer(db, { customerId, bookingId, email, phone, name }, create = false) {
+  let e = (email || '').trim().toLowerCase(), p = (phone || '').trim(), n = (name || '').trim();
   if (customerId) {
     const { data } = await db.from('customers').select('*').eq('id', customerId).maybeSingle();
-    if (data) return data;
+    if (data) return create ? backfill(db, data, { e, p, n }) : data;
   }
-  let e = (email || '').trim().toLowerCase(), p = (phone || '').trim(), n = (name || '').trim();
   if (bookingId && /^[0-9a-fA-F-]{10,}$/.test(bookingId)) {
     const { data: bk } = await db.from('bookings')
       .select('customer_email,customer_phone,customer_name').eq('id', bookingId).maybeSingle();
     if (bk) { e = e || (bk.customer_email || '').trim().toLowerCase(); p = p || (bk.customer_phone || '').trim(); n = n || (bk.customer_name || '').trim(); }
   }
-  if (e) { const { data } = await db.from('customers').select('*').ilike('email', e).limit(1); if (data && data[0]) return data[0]; }
-  if (p) { const { data } = await db.from('customers').select('*').eq('phone', p).limit(1); if (data && data[0]) return data[0]; }
-  if (create && (e || p || n)) {
+  if (e) { const { data } = await db.from('customers').select('*').ilike('email', e).limit(1); if (data && data[0]) return create ? backfill(db, data[0], { e, p, n }) : data[0]; }
+  if (p) { const { data } = await db.from('customers').select('*').eq('phone', p).limit(1); if (data && data[0]) return create ? backfill(db, data[0], { e, p, n }) : data[0]; }
+  // Only create when there's a real identifier (an email) — never a name-only duplicate.
+  if (create && e) {
     const { data, error } = await db.from('customers')
       .insert({ name: n || null, email: e || null, phone: p || null }).select('*').single();
     if (!error) return data;
@@ -48,7 +60,7 @@ export default async function handler(req, res) {
     if (signer.length < 2) return res.status(400).json({ ok: false, error: 'Please enter your full name to sign.' });
 
     const cust = await resolveCustomer(db, { customerId, bookingId, email, phone, name: signer }, true);
-    if (!cust) return res.status(400).json({ ok: false, error: 'We couldn’t match this to a customer. Please book first, or ask the shop to add you.' });
+    if (!cust) return res.status(400).json({ ok: false, error: 'Please enter your email so we can save your waiver to your profile.' });
 
     const signedAt = new Date().toISOString();
     const code = 'W-' + signedAt.slice(0, 10).replace(/-/g, '') + '-' + String(cust.id).replace(/-/g, '').slice(0, 4).toUpperCase();

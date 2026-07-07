@@ -64,6 +64,7 @@ const ctx = {
   customerId: params.get('c') || '',
   bookingId:  params.get('b') || '',
   email:      params.get('e') || '',
+  phone:      params.get('p') || '',
   name:       params.get('n') || '',
 };
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -103,25 +104,30 @@ function formView(){
     <div class="sign">
       <label class="fld" for="w-name">Full name</label>
       <input class="input" id="w-name" placeholder="Type your full legal name" autocomplete="name" value="${esc(ctx.name)}" />
+      <label class="fld" for="w-email" style="margin-top:16px">Email</label>
+      <input class="input" id="w-email" type="email" placeholder="you@email.com" autocomplete="email" value="${esc(ctx.email)}" />
+      <label class="fld" for="w-phone" style="margin-top:16px">Phone <span style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">(optional)</span></label>
+      <input class="input" id="w-phone" type="tel" placeholder="(204) 000-0000" autocomplete="tel" value="${esc(ctx.phone)}" />
       <label class="agree"><input type="checkbox" id="w-agree" />
         <span>I have read and understood this waiver, and I agree to its terms on behalf of myself and all members of my group.</span></label>
       <div class="err" id="w-err"></div>
       <button class="btn btn-primary" id="w-submit" disabled>Sign &amp; submit</button>
-      <div class="fine">By clicking "Sign &amp; submit" you are signing this waiver electronically. Your name, the date, and the waiver version are recorded.</div>
+      <div class="fine">By clicking "Sign &amp; submit" you are signing this waiver electronically. Your name, email, the date, and the waiver version are recorded.</div>
     </div>`);
-  const nameEl=$('#w-name'), agreeEl=$('#w-agree'), btn=$('#w-submit'), err=$('#w-err');
-  const sync=()=>{ btn.disabled = !(nameEl.value.trim().length>=2 && agreeEl.checked); };
-  nameEl.addEventListener('input',()=>{ nameEl.classList.remove('invalid'); sync(); });
+  const nameEl=$('#w-name'), emailEl=$('#w-email'), phoneEl=$('#w-phone'), agreeEl=$('#w-agree'), btn=$('#w-submit'), err=$('#w-err');
+  const sync=()=>{ btn.disabled = !(nameEl.value.trim().length>=2 && validEmail(emailEl.value) && agreeEl.checked); };
+  [nameEl,emailEl,phoneEl].forEach(el=>el.addEventListener('input',()=>{ el.classList.remove('invalid'); sync(); }));
   agreeEl.addEventListener('change', sync);
   btn.onclick=async()=>{
-    const name=nameEl.value.trim();
+    const name=nameEl.value.trim(), email=emailEl.value.trim(), phone=phoneEl.value.trim();
     if(name.length<2){ err.textContent='Please enter your full name.'; nameEl.classList.add('invalid'); nameEl.focus(); return; }
+    if(!validEmail(email)){ err.textContent='Please enter a valid email so we can save your waiver to your profile.'; emailEl.classList.add('invalid'); emailEl.focus(); return; }
     if(!agreeEl.checked){ err.textContent='Please check the box to agree.'; return; }
     err.textContent=''; btn.disabled=true; btn.textContent='Submitting…';
     let r;
     try{
       r = await (await fetch('/api/sign-waiver',{ method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ name, version:WAIVER_VERSION, customerId:ctx.customerId, bookingId:ctx.bookingId, email:ctx.email }) })).json();
+        body: JSON.stringify({ name, email, phone, version:WAIVER_VERSION, customerId:ctx.customerId, bookingId:ctx.bookingId }) })).json();
     }catch(e){ r={ ok:false, error:'Network error — please try again.' }; }
     if(r && r.ok){ signedView(name, r.signedAt); }
     else { btn.disabled=false; btn.textContent='Sign & submit'; err.textContent=(r&&r.error)||'Something went wrong — please try again.'; }

@@ -1064,10 +1064,11 @@ async function handleReturn(){
 }
 
 // Post-booking prompt to sign the participant waiver (first visit only; it covers future visits).
-function fillWaiverCTA(email, name){
+function fillWaiverCTA(email, phone, name){
   const host=$('#conf-waiver'); if(!host) return;
   const p=new URLSearchParams();
   if(email && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) p.set('e', email.trim());
+  if(phone && phone.trim()) p.set('p', phone.trim());
   if(name && name!=='Guest') p.set('n', name);
   const href='/waiver'+(p.toString()?('?'+p.toString()):'');
   host.innerHTML=`<div class="wv-cta">
@@ -1086,7 +1087,7 @@ function showStripeConfirmation(pi){
     <div class="row"><span class="k">Bay</span><span>${pi.metadata?.bayName||''}</span></div>
     <div class="row"><span class="k">When</span><span>${pi.metadata?.summary||''}</span></div>
     <div class="row"><span class="k">Paid</span><span>${money(pi.amount/100)}</span></div>`;
-  fillWaiverCTA($('#sc-email')?.value, ($('#sc-name')?.value||'').trim());
+  fillWaiverCTA($('#sc-email')?.value, ($('#sc-phone')?.value||'').trim(), ($('#sc-name')?.value||'').trim());
   $('#conf-overlay').classList.add('show');
   setStep(4);
 }
@@ -1107,7 +1108,7 @@ function showConfirmation(name){
     <div class="row"><span class="k">Time</span><span>${fmtFull(state.startMin)} – ${fmtFull(state.endMin)}</span></div>
     <div class="row"><span class="k">Group</span><span>${state.party} ${state.party>1?'players':'player'}</span></div>
     <div class="row"><span class="k">Paid</span><span>${money(price)}</span></div>`;
-  fillWaiverCTA($('#cust-email')?.value, name);
+  fillWaiverCTA($('#cust-email')?.value, ($('#cust-phone')?.value||'').trim(), name);
   $('#conf-overlay').classList.add('show');
   setStep(4);
 }
