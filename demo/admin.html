@@ -154,6 +154,10 @@
   .hist-sum{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;padding:10px 0 6px;border-bottom:1px solid var(--border)}
   .hist-row{padding:10px 0;border-bottom:1px solid var(--border);font-size:13.5px}
   .hist-row:last-child{border-bottom:none}
+  .hist-row.hist-click{cursor:pointer;margin:0 -14px;padding:10px 14px;transition:background .12s}
+  .hist-row.hist-click:hover{background:var(--surface-2)}
+  .hist-go{margin-left:auto;color:var(--dim);font-family:'Space Grotesk';font-weight:700;font-size:16px}
+  .hist-row.hist-click:hover .hist-go{color:var(--orange)}
   .hist-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .hist-sub{font-size:12px;margin-top:4px}
   textarea.input{resize:vertical;min-height:64px;line-height:1.4}
@@ -1776,11 +1780,27 @@ async function loadCustHistory(c, hostId){
     const isC=b.status==='cancelled';
     const pill=isC?'<span class="pill cancelled">Cancelled</span>':'<span class="pill confirmed">Booked</span>';
     const sub=[ b.created_at?`Booked ${fmtTs(b.created_at)}`:'', (isC&&b.cancelled_at)?`Cancelled ${fmtTs(b.cancelled_at)}`:'' ].filter(Boolean).join('  ·  ');
-    return `<div class="hist-row">
-      <div class="hist-main">${pill} <span>${shortDate(b.booking_date)} · ${fmtMin(b.start_min)}–${fmtMin(b.end_min)}</span> <span class="dim">· ${esc(bayName(b.bay_id))}</span></div>
+    return `<div class="hist-row${isC?'':' hist-click'}"${isC?'':` data-id="${b.id}" data-date="${b.booking_date}"`}>
+      <div class="hist-main">${pill} <span>${shortDate(b.booking_date)} · ${fmtMin(b.start_min)}–${fmtMin(b.end_min)}</span> <span class="dim">· ${esc(bayName(b.bay_id))}</span>${isC?'':'<span class="hist-go">›</span>'}</div>
       ${sub?`<div class="hist-sub dim">${sub}</div>`:''}
     </div>`;
   }).join('');
+  host.querySelectorAll('.hist-click').forEach(el=>el.onclick=()=>goToBooking(el.dataset.id, el.dataset.date));
+}
+
+// Jump from a customer's history to the reservation on the tee sheet (that day, day view).
+async function goToBooking(id, dateISO){
+  closeSheet();
+  if(typeof setBrush==='function') setBrush(null);
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x.dataset.tab==='bookings'));
+  TAB_IDS.forEach(x=>$('#tab-'+x).classList.toggle('hidden', x!=='bookings'));
+  VIEW='day';
+  $('#view-toggle').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.v==='day'));
+  $('#day-layout').classList.remove('week');
+  const wbWrap=$('#week-bay').closest('.cs-wrap')||$('#week-bay'); if(wbWrap) wbWrap.style.display='none';
+  $('#bk-date').value=dateISO; dpSync('#bk-date');
+  await loadSchedule();
+  openManage(id);
 }
 
 /* ---------- Membership ---------- */
