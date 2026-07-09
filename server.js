@@ -10,11 +10,8 @@ import {
 import { getSettings, getBookingsForDate, getOverridesForDate, insertBooking, dbEnabled, admin,
   createHold, releaseHold, confirmHold, cleanupExpiredHolds, upsertCustomer } from './lib/db.js';
 import signWaiver from './api/sign-waiver.js';
-import saveCustomer from './api/save-customer.js';
 import confirmBooking from './api/confirm-booking.js';
-import listMemberships from './api/memberships.js';
-import createMembershipCheckout from './api/create-membership-checkout.js';
-import confirmMembership from './api/confirm-membership.js';
+import membership from './api/membership.js';
 
 // Local dev server. On Vercel the same logic runs as serverless functions in /api.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -87,13 +84,10 @@ app.get('/waiver', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'wai
 app.get('/membership', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'membership.html')));
 app.use(express.static(path.join(__dirname, 'demo')));
 
-// Waiver signing + customer save + membership purchase (same handlers the Vercel functions use).
+// Waiver signing + booking confirmation + membership purchase (same handlers the Vercel functions use).
 app.all('/api/sign-waiver', (req, res) => signWaiver(req, res));
-app.all('/api/save-customer', (req, res) => saveCustomer(req, res));
 app.all('/api/confirm-booking', (req, res) => confirmBooking(req, res));
-app.all('/api/memberships', (req, res) => listMemberships(req, res));
-app.all('/api/create-membership-checkout', (req, res) => createMembershipCheckout(req, res));
-app.all('/api/confirm-membership', (req, res) => confirmMembership(req, res));
+app.all('/api/membership', (req, res) => membership(req, res));
 
 // Customer booking lookup + self-service cancellation (24-hour policy enforced server-side).
 app.get('/api/booking', async (req, res) => {

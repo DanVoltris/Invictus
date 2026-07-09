@@ -125,7 +125,7 @@ function buyView(plan){
     if(!validEmail(email)){ err.textContent='Please enter a valid email — your membership links to it.'; emailEl.classList.add('invalid'); emailEl.focus(); return; }
     err.textContent=''; go.disabled=true; go.textContent='Redirecting to payment…';
     let r;
-    try{ r = await (await fetch('/api/create-membership-checkout',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ membershipId:plan.id, name, email, phone }) })).json(); }
+    try{ r = await (await fetch('/api/membership?action=checkout',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ membershipId:plan.id, name, email, phone }) })).json(); }
     catch(e){ r={ error:'Network error — please try again.' }; }
     if(r && r.url){ window.location.href = r.url; return; }
     go.disabled=false; go.textContent='Continue to secure payment';
@@ -136,7 +136,7 @@ function buyView(plan){
 async function confirmView(sessionId){
   render('<div class="spin">Confirming your membership…</div>');
   let r;
-  try{ r = await (await fetch('/api/confirm-membership',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ sessionId }) })).json(); }
+  try{ r = await (await fetch('/api/membership?action=confirm',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ sessionId }) })).json(); }
   catch(e){ r={ ok:false, error:'Network error.' }; }
   if(r && r.ok){
     render(`<div class="center">
@@ -154,7 +154,7 @@ async function confirmView(sessionId){
 async function load(){
   if(params.get('success')==='1' && params.get('session_id')){ confirmView(params.get('session_id')); return; }
   let canceled = params.get('canceled')==='1';
-  try{ const d = await (await fetch('/api/memberships')).json(); PLANS = (d.plans||[]).filter(p=>p.price_cents>0); }catch(e){ PLANS=[]; }
+  try{ const d = await (await fetch('/api/membership?action=list')).json(); PLANS = (d.plans||[]).filter(p=>p.price_cents>0); }catch(e){ PLANS=[]; }
   plansView();
   if(canceled){ history.replaceState({}, '', '/membership'); const n=document.createElement('div'); n.className='note'; n.style.maxWidth='520px'; n.style.margin='18px auto 0'; n.textContent='Payment canceled — you have not been charged. Pick a plan to try again.'; $('#content').prepend(n); }
 }
