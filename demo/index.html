@@ -53,6 +53,8 @@
   .brand-fallback .joy { color: var(--white); }
   .brand-fallback .hg { color: var(--green); }
   .nav-cta { font-size: 13px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  .nav-mem { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 13px; color: var(--orange); text-decoration: none; border: 1px solid var(--orange); padding: 8px 16px; border-radius: 999px; transition: .15s; white-space: nowrap; }
+  .nav-mem:hover { background: rgba(240,82,61,.12); }
 
   /* Hero / progress */
   .hero { padding: 34px 0 4px; }
@@ -355,7 +357,7 @@
            onerror="this.style.display='none';document.getElementById('bf').style.display='block'" />
       <span id="bf" class="brand-fallback" style="display:none"><span class="joy">JOY</span><span class="hg">HOUSE GOLF</span></span>
     </div>
-    <div class="nav-cta">Go farther with Joy</div>
+    <a class="nav-mem" href="/membership">Memberships</a>
   </div>
 </header>
 

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Joy House Golf — Memberships</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{ --black:#000;--near-black:#0E0E0E;--surface:#181818;--surface-2:#222;--border:#333;
+    --white:#fff;--muted:#B5B5B5;--dim:#7A7A7A;--orange:#F0523D;--danger:#ff5b5b;--ok:#4ec06a;--radius:16px; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  *{scrollbar-width:none;-ms-overflow-style:none} *::-webkit-scrollbar{width:0;height:0;display:none}
+  body{background:radial-gradient(1200px 600px at 70% -10%,#1a1a1a 0%,var(--black) 55%),var(--black);
+    color:var(--white);font-family:'Raleway',system-ui,sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;padding:24px}
+  h1,h2,h3{font-family:'Space Grotesk',sans-serif;letter-spacing:-.01em}
+  .wrap{max-width:940px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 0 26px}
+  header img{height:46px;width:auto}
+  .brand-fallback{font-family:'Space Grotesk';font-weight:700;font-size:20px}
+  .brand-fallback .joy{color:var(--orange);margin-right:6px}
+  header a.back{color:var(--muted);text-decoration:none;font-size:13px}
+  header a.back:hover{color:#fff}
+  .head-block{text-align:center;margin-bottom:26px}
+  .head-block h1{font-size:30px;margin-bottom:8px}
+  .head-block .sub{color:var(--dim);font-size:14.5px;line-height:1.55;max-width:520px;margin:0 auto}
+  .plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .plan{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 22px;display:flex;flex-direction:column;border-top-width:3px}
+  .plan-name{font-family:'Space Grotesk';font-weight:700;font-size:19px;margin-bottom:8px}
+  .plan-price{font-family:'Space Grotesk';font-weight:700;font-size:32px;line-height:1}
+  .plan-price .per{font-size:14px;font-weight:500;color:var(--dim);margin-left:4px}
+  .plan-disc{display:inline-block;align-self:flex-start;margin-top:12px;font-size:12px;font-weight:700;color:var(--ok);background:rgba(78,192,106,.12);border:1px solid rgba(78,192,106,.4);border-radius:999px;padding:4px 11px}
+  .plan-perks{color:var(--muted);font-size:13.5px;line-height:1.6;margin-top:14px;white-space:pre-line;flex:1}
+  .btn{display:block;width:100%;border:none;border-radius:11px;padding:14px;font-weight:700;font-size:15px;font-family:'Space Grotesk';cursor:pointer;transition:.15s;margin-top:18px;text-align:center;text-decoration:none}
+  .btn-primary{background:var(--orange);color:#fff}.btn-primary:hover{background:#ff6450}
+  .btn-primary:disabled{background:#2a2a2a;color:#666;cursor:not-allowed}
+  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:#fff;border-color:var(--dim)}
+  .card{max-width:460px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:30px}
+  .card h2{font-size:22px;margin-bottom:4px}
+  .card .sub{color:var(--dim);font-size:13.5px;margin-bottom:20px;line-height:1.5}
+  .fld{display:block;font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin:16px 0 7px}
+  .fld:first-of-type{margin-top:0}
+  .input{width:100%;background:var(--near-black);border:1px solid var(--border);border-radius:11px;padding:13px 14px;color:#fff;font-family:'Raleway';font-size:15px;outline:none;transition:.15s}
+  .input:focus{border-color:var(--orange)} .input.invalid{border-color:var(--danger)}
+  .summary{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .summary .s-name{font-family:'Space Grotesk';font-weight:700}
+  .summary .s-price{font-family:'Space Grotesk';font-weight:700;color:var(--orange)}
+  .err{color:var(--danger);font-size:13px;margin-top:12px;min-height:18px}
+  .fine{color:var(--dim);font-size:11.5px;line-height:1.5;margin-top:14px;text-align:center}
+  .center{text-align:center;max-width:460px;margin:0 auto}
+  .big{font-size:56px;line-height:1;margin:6px 0 14px} .big.ok{color:var(--ok)}
+  .note{border-radius:12px;padding:14px 16px;font-size:13.5px;line-height:1.5;margin-top:8px;background:rgba(240,82,61,.10);border:1px solid rgba(240,82,61,.4);color:#f0a093}
+  .spin{color:var(--dim);text-align:center;padding:50px 0}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <img src="https://images.squarespace-cdn.com/content/v1/66fb54c58833195056a5c6b1/f64e42aa-7dd9-4434-bade-a6342963fac0/JoyHouse+Golf+logo+dark+background+new+green.png"
+             alt="Joy House Golf" onerror="this.style.display='none';document.getElementById('bf').style.display='inline-block'" />
+        <span id="bf" class="brand-fallback" style="display:none"><span class="joy">JOY</span>HOUSE GOLF</span>
+      </div>
+      <a class="back" href="/">← Back to booking</a>
+    </header>
+    <div id="content"><div class="spin">Loading memberships…</div></div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const params = new URLSearchParams(location.search);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const validEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e||'').trim());
+const money = c => '$'+(c/100).toFixed(c%100?2:0);
+const perLabel = p => p==='year' ? '/year' : p==='month' ? '/month' : 'one-time';
+const termLabel = p => p==='year' ? 'Renews yearly' : p==='month' ? 'Renews monthly' : 'One-time';
+const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
+function render(html){ $('#content').innerHTML = html; }
+
+let PLANS = [];
+
+function plansView(){
+  if(!PLANS.length){ render('<div class="center"><h1>Memberships</h1><div class="note">No membership plans are available right now — please check back soon or call the shop.</div><a class="btn btn-ghost" href="/" style="max-width:300px;margin:22px auto 0">Back to booking</a></div>'); return; }
+  render(`
+    <div class="head-block">
+      <h1>Become a member</h1>
+      <div class="sub">Buy a membership online and it links to your account automatically — just use the same email when you book.</div>
+    </div>
+    <div class="plans">${PLANS.map(p=>`
+      <div class="plan" style="border-top-color:${esc(p.color||'#c4e538')}">
+        <div class="plan-name">${esc(p.name)}</div>
+        <div class="plan-price">${money(p.price_cents)}<span class="per">${perLabel(p.period)}</span></div>
+        ${p.discount_pct?`<div class="plan-disc">${p.discount_pct}% off sessions</div>`:''}
+        ${p.perks?`<div class="plan-perks">${esc(p.perks)}</div>`:'<div class="plan-perks"></div>'}
+        <button class="btn btn-primary buy" data-id="${p.id}">Get ${esc(p.name)}</button>
+      </div>`).join('')}</div>`);
+  document.querySelectorAll('.buy').forEach(b=>b.onclick=()=>buyView(PLANS.find(p=>p.id===b.dataset.id)));
+}
+
+function buyView(plan){
+  if(!plan) return;
+  render(`
+    <div class="card">
+      <h2>${esc(plan.name)} membership</h2>
+      <div class="sub">${esc(termLabel(plan.period))}. Enter your details, then pay securely — your membership links to this email.</div>
+      <div class="summary"><span class="s-name">${esc(plan.name)}</span><span class="s-price">${money(plan.price_cents)} <span style="color:var(--dim);font-weight:500;font-size:13px">${perLabel(plan.period)}</span></span></div>
+      <label class="fld" for="m-name">Full name</label>
+      <input class="input" id="m-name" placeholder="Your name" autocomplete="name" />
+      <label class="fld" for="m-email">Email</label>
+      <input class="input" id="m-email" type="email" placeholder="you@email.com" autocomplete="email" />
+      <label class="fld" for="m-phone">Phone <span style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">(optional)</span></label>
+      <input class="input" id="m-phone" type="tel" placeholder="(204) 000-0000" autocomplete="tel" />
+      <div class="err" id="m-err"></div>
+      <button class="btn btn-primary" id="m-go">Continue to secure payment</button>
+      <button class="btn btn-ghost" id="m-back">Back to plans</button>
+      <div class="fine">You'll finish on Stripe's secure checkout. This is a one-time payment — no auto-renewal.</div>
+    </div>`);
+  $('#m-back').onclick=plansView;
+  const nameEl=$('#m-name'), emailEl=$('#m-email'), phoneEl=$('#m-phone'), err=$('#m-err'), go=$('#m-go');
+  [nameEl,emailEl,phoneEl].forEach(el=>el.addEventListener('input',()=>el.classList.remove('invalid')));
+  go.onclick=async()=>{
+    const name=nameEl.value.trim(), email=emailEl.value.trim(), phone=phoneEl.value.trim();
+    if(name.length<2){ err.textContent='Please enter your name.'; nameEl.classList.add('invalid'); nameEl.focus(); return; }
+    if(!validEmail(email)){ err.textContent='Please enter a valid email — your membership links to it.'; emailEl.classList.add('invalid'); emailEl.focus(); return; }
+    err.textContent=''; go.disabled=true; go.textContent='Redirecting to payment…';
+    let r;
+    try{ r = await (await fetch('/api/create-membership-checkout',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ membershipId:plan.id, name, email, phone }) })).json(); }
+    catch(e){ r={ error:'Network error — please try again.' }; }
+    if(r && r.url){ window.location.href = r.url; return; }
+    go.disabled=false; go.textContent='Continue to secure payment';
+    err.textContent=(r && r.error) || 'Could not start checkout — please try again or call the shop.';
+  };
+}
+
+async function confirmView(sessionId){
+  render('<div class="spin">Confirming your membership…</div>');
+  let r;
+  try{ r = await (await fetch('/api/confirm-membership',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ sessionId }) })).json(); }
+  catch(e){ r={ ok:false, error:'Network error.' }; }
+  if(r && r.ok){
+    render(`<div class="center">
+      <div class="big ok">✓</div>
+      <h1>You're a ${esc(r.planName)} member!</h1>
+      <div class="sub" style="color:var(--muted);font-size:14.5px;line-height:1.6;margin:12px auto 0;max-width:420px">Your membership is active${r.expiresAt?` until <b>${esc(fmtDate(r.expiresAt))}</b>`:''} and linked to <b>${esc(r.email||'your account')}</b>. Use that email when you book and we'll recognize you.</div>
+      <a class="btn btn-primary" href="/" style="max-width:320px;margin:26px auto 0">Book a session</a>
+    </div>`);
+    history.replaceState({}, '', '/membership');
+  } else {
+    render(`<div class="center"><h1>Almost there</h1><div class="note">${esc((r&&r.error)||'We couldn’t confirm your membership.')} If you were charged, please contact the shop and we’ll sort it out right away.</div><a class="btn btn-ghost" href="/membership" style="max-width:300px;margin:22px auto 0">Back to memberships</a></div>`);
+  }
+}
+
+async function load(){
+  if(params.get('success')==='1' && params.get('session_id')){ confirmView(params.get('session_id')); return; }
+  let canceled = params.get('canceled')==='1';
+  try{ const d = await (await fetch('/api/memberships')).json(); PLANS = (d.plans||[]).filter(p=>p.price_cents>0); }catch(e){ PLANS=[]; }
+  plansView();
+  if(canceled){ history.replaceState({}, '', '/membership'); const n=document.createElement('div'); n.className='note'; n.style.maxWidth='520px'; n.style.margin='18px auto 0'; n.textContent='Payment canceled — you have not been charged. Pick a plan to try again.'; $('#content').prepend(n); }
+}
+load();
+</script>
+</body>
+</html>
