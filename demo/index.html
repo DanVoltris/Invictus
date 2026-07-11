@@ -1094,10 +1094,10 @@ let hoursCheckTimer=null;
 function scheduleHoursCheck(){ clearTimeout(hoursCheckTimer); hoursCheckTimer=setTimeout(checkHoursOption, 400); }
 async function checkHoursOption(){
   const host=$('#hours-pay'); if(!host) return;
-  const email=($('#sc-email')?.value||'').trim();
+  const email=($('#sc-email')?.value||'').trim(), phone=($('#sc-phone')?.value||'').trim();
   const dur=(state.endMin!=null && state.startMin!=null) ? (state.endMin-state.startMin) : 0;
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !(dur>0)){ host.style.display='none'; host.innerHTML=''; return; }
-  let r; try{ r=await (await fetch('/api/hour-cards?action=balance',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email }) })).json(); }catch(e){ r=null; }
+  if((!validPhone(phone) && !validEmail(email)) || !(dur>0)){ host.style.display='none'; host.innerHTML=''; return; }
+  let r; try{ r=await (await fetch('/api/hour-cards?action=balance',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email, phone }) })).json(); }catch(e){ r=null; }
   if(r && r.found && r.balanceMin>=dur){
     const bal=Math.round(r.balanceMin/6)/10, need=Math.round(dur/6)/10;
     host.style.display='block';
@@ -1118,9 +1118,10 @@ async function payWithHours(){
   if(r && r.ok){ $('#pay-overlay').classList.remove('show'); showConfirmation($('#sc-name').value.trim()||'Guest'); return; }
   btn.disabled=false; btn.textContent='Use my hours';
   $('#pay-error').textContent = (r&&r.error==='insufficient') ? 'Not enough hours for this session.'
-    : (r&&r.error==='no_account') ? 'No hours found for that email.' : ((r&&r.error)||'Could not book with hours — please try again.');
+    : (r&&r.error==='no_account') ? 'No hours found for that phone number.' : ((r&&r.error)||'Could not book with hours — please try again.');
 }
 if($('#sc-email')) $('#sc-email').addEventListener('input', scheduleHoursCheck);
+if($('#sc-phone')) $('#sc-phone').addEventListener('input', scheduleHoursCheck);
 
 /* Return from a redirect-based payment method (test cards don't redirect). */
 async function handleReturn(){

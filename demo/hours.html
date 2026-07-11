@@ -74,6 +74,7 @@ const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const validEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e||'').trim());
+const validPhone = p => { const d=(p||'').replace(/\D/g,''); return (d.length===11&&d[0]==='1'?d.slice(1):d).length===10; };
 const money = c => '$'+(c/100).toFixed(c%100?2:0);
 const hoursLabel = h => (Math.round(h*10)/10) + (h===1?' hour':' hours');
 function render(html){ $('#content').innerHTML = html; }
@@ -85,7 +86,7 @@ function cardsView(){
   render(`
     <div class="head-block">
       <h1>Hour cards</h1>
-      <div class="sub">Buy a block of range time at a discount. Your hours are saved to your account by email — use them any time you book, in person or online.</div>
+      <div class="sub">Buy a block of range time at a discount. Your hours are saved to your account by phone number — use them any time you book, in person or online.</div>
     </div>
     <div class="cards">${CARDS.map(c=>{
       const perHr = c.hours>0 ? c.price_cents/c.hours : 0;
@@ -110,14 +111,14 @@ function buyView(card){
       <div class="summary"><span class="s-name">${hoursLabel(card.hours)}</span><span class="s-price">${money(card.price_cents)}</span></div>
       <label class="fld" for="h-name">Full name</label>
       <input class="input" id="h-name" placeholder="Your name" autocomplete="name" />
-      <label class="fld" for="h-email">Email</label>
-      <input class="input" id="h-email" type="email" placeholder="you@email.com" autocomplete="email" />
-      <label class="fld" for="h-phone">Phone <span style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">(optional)</span></label>
+      <label class="fld" for="h-phone">Phone</label>
       <input class="input" id="h-phone" type="tel" placeholder="(204) 000-0000" autocomplete="tel" />
+      <label class="fld" for="h-email">Email <span style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">(for your receipt)</span></label>
+      <input class="input" id="h-email" type="email" placeholder="you@email.com" autocomplete="email" />
       <div class="err" id="h-err"></div>
       <button class="btn btn-primary" id="h-go">Continue to secure payment</button>
       <button class="btn btn-ghost" id="h-back">Back to cards</button>
-      <div class="fine">You'll finish on Stripe's secure checkout. Your hours link to this email — use the same one when you book.</div>
+      <div class="fine">You'll finish on Stripe's secure checkout. Your hours link to this phone number — use the same one when you book.</div>
     </div>`);
   $('#h-back').onclick=cardsView;
   const nameEl=$('#h-name'), emailEl=$('#h-email'), phoneEl=$('#h-phone'), err=$('#h-err'), go=$('#h-go');
@@ -125,7 +126,8 @@ function buyView(card){
   go.onclick=async()=>{
     const name=nameEl.value.trim(), email=emailEl.value.trim(), phone=phoneEl.value.trim();
     if(name.length<2){ err.textContent='Please enter your name.'; nameEl.classList.add('invalid'); nameEl.focus(); return; }
-    if(!validEmail(email)){ err.textContent='Please enter a valid email — your hours link to it.'; emailEl.classList.add('invalid'); emailEl.focus(); return; }
+    if(!validPhone(phone)){ err.textContent='Please enter a valid 10-digit phone number — your hours link to it.'; phoneEl.classList.add('invalid'); phoneEl.focus(); return; }
+    if(!validEmail(email)){ err.textContent='Please enter a valid email for your receipt.'; emailEl.classList.add('invalid'); emailEl.focus(); return; }
     err.textContent=''; go.disabled=true; go.textContent='Redirecting to payment…';
     let r;
     try{ r = await (await fetch('/api/hour-cards?action=checkout',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ cardId:card.id, name, email, phone }) })).json(); }
@@ -146,7 +148,7 @@ async function confirmView(sessionId){
     render(`<div class="center">
       <div class="big ok">✓</div>
       <h1>${esc(hoursLabel(r.hours))} added!</h1>
-      <div class="sub" style="color:var(--muted);font-size:14.5px;line-height:1.6;margin:12px auto 0;max-width:430px">Your ${esc(r.cardName)} is credited to <b>${esc(r.email||'your account')}</b>.${bal!=null?` You now have <b>${bal} hours</b> of range time.`:''} Use the same email when you book and we'll draw from your hours.</div>
+      <div class="sub" style="color:var(--muted);font-size:14.5px;line-height:1.6;margin:12px auto 0;max-width:430px">Your ${esc(r.cardName)} is credited to your account.${bal!=null?` You now have <b>${bal} hours</b> of range time.`:''} Use the same phone number when you book and we'll draw from your hours.</div>
       <a class="btn btn-primary" href="/" style="max-width:320px;margin:26px auto 0">Book a session</a>
     </div>`);
     history.replaceState({}, '', '/hours');

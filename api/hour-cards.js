@@ -4,12 +4,13 @@ import {
 } from '../lib/booking.js';
 import {
   getSettings, getOverridesForDate, getBookingsForDate, admin,
-  listHourCards, grantHours, customerHoursByEmail, bookWithHours,
+  listHourCards, grantHours, customerHoursByContact, bookWithHours,
 } from '../lib/db.js';
 
 // One function for the whole hour-card flow (kept single to stay within the Hobby function limit).
 // Dispatch on ?action= — list | checkout | confirm | balance | book.
 const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e || '').trim());
+const validPhone = (p) => { const d = (p || '').replace(/\D/g, ''); return (d.length === 11 && d[0] === '1' ? d.slice(1) : d).length === 10; };
 
 export default async function handler(req, res) {
   const action = (req.query && req.query.action) || '';
@@ -28,7 +29,8 @@ async function checkout(req, res) {
   if (!enabled) return res.status(503).json({ error: 'Online purchase isn’t available right now — please call the shop.' });
   const { cardId, name, email, phone } = req.body || {};
   if (!cardId) return res.status(400).json({ error: 'Please choose a card.' });
-  if (!validEmail(email)) return res.status(400).json({ error: 'A valid email is required so we can credit your hours.' });
+  if (!validPhone(phone)) return res.status(400).json({ error: 'A valid phone number is required — your hours link to it.' });
+  if (!validEmail(email)) return res.status(400).json({ error: 'A valid email is required for your receipt.' });
 
   const db = admin();
   if (!db) return res.status(503).json({ error: 'Not configured.' });
@@ -87,11 +89,11 @@ async function confirm(req, res) {
   res.status(200).json({ ok: true, cardName: (card && card.name) || 'Hour card', hours, balanceMin: r.balanceMin, email: email || null });
 }
 
-// POST ?action=balance — a customer's hours balance by email (drives the "pay with hours" option).
+// POST ?action=balance — a customer's hours balance by phone (primary) or email (fallback).
 async function balance(req, res) {
-  const { email } = req.body || {};
-  if (!validEmail(email)) return res.status(200).json({ found: false });
-  const cust = await customerHoursByEmail(email);
+  const { email, phone } = req.body || {};
+  if (!validPhone(phone) && !validEmail(email)) return res.status(200).json({ found: false });
+  const cust = await customerHoursByContact({ email, phone });
   if (!cust) return res.status(200).json({ found: false });
   res.status(200).json({ found: true, name: cust.name || null, balanceMin: cust.hours_balance_min || 0 });
 }
@@ -99,7 +101,7 @@ async function balance(req, res) {
 // POST ?action=book — book a slot by paying with prepaid hours (validates the slot, deducts, confirms).
 async function book(req, res) {
   const { dateISO, bayId, startMin, endMin, name, email, phone } = req.body || {};
-  if (!validEmail(email)) return res.status(400).json({ ok: false, error: 'Enter your email to use your hours.' });
+  if (!validPhone(phone) && !validEmail(email)) return res.status(400).json({ ok: false, error: 'Enter your phone number to use your hours.' });
 
   const settings = normalizeSettings(await getSettings());
   const overrides = await getOverridesForDate(dateISO);
