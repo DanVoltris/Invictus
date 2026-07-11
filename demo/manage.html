@@ -100,7 +100,7 @@ async function doCancel(b){
   const btn = $('#cancel-btn');
   btn.disabled = true; btn.textContent = 'Cancelling…';
   let r;
-  try { r = await (await fetch('/api/cancel-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:b.id }) })).json(); }
+  try { r = await (await fetch('/api/booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:b.id }) })).json(); }
   catch(e){ r = { ok:false, error:'Network error — please try again.' }; }
   if(r.ok){
     render(`<div class="center">

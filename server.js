@@ -15,6 +15,7 @@ import confirmBooking from './api/confirm-booking.js';
 import membership from './api/membership.js';
 import hourCards from './api/hour-cards.js';
 import points from './api/points.js';
+import bookingSelfService from './api/booking.js';
 
 // Local dev server. On Vercel the same logic runs as serverless functions in /api.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -102,43 +103,9 @@ app.all('/api/membership', (req, res) => membership(req, res));
 app.all('/api/hour-cards', (req, res) => hourCards(req, res));
 app.all('/api/points', (req, res) => points(req, res));
 
-// Customer booking lookup + self-service cancellation (24-hour policy enforced server-side).
-app.get('/api/booking', async (req, res) => {
-  const id = req.query.id || '';
-  if (!/^[0-9a-fA-F-]{10,}$/.test(id)) return res.status(400).json({ ok: false, error: 'Invalid link.' });
-  const db = admin();
-  if (!db) return res.status(503).json({ ok: false, error: 'Not configured.' });
-  const { data, error } = await db.from('bookings')
-    .select('id,bay_id,booking_date,start_min,end_min,status,customer_name').eq('id', id).maybeSingle();
-  if (error || !data) return res.status(404).json({ ok: false, error: 'Booking not found.' });
-  const settings = normalizeSettings(await getSettings());
-  const hoursUntil = hoursUntilBooking(data.booking_date, data.start_min);
-  res.json({ ok: true, booking: {
-    id: data.id, bay: bayName(settings, data.bay_id) || data.bay_id, booking_date: data.booking_date,
-    start: fmtMin(data.start_min), end: fmtMin(data.end_min), status: data.status,
-    customerName: data.customer_name || null, hoursUntil, canCancel: data.status === 'confirmed' && hoursUntil >= 24,
-  } });
-});
-
-app.post('/api/cancel-booking', async (req, res) => {
-  const id = (req.body && req.body.id) || '';
-  if (!/^[0-9a-fA-F-]{10,}$/.test(id)) return res.status(400).json({ ok: false, error: 'Invalid request.' });
-  const db = admin();
-  if (!db) return res.status(503).json({ ok: false, error: 'Not configured.' });
-  const { data, error } = await db.from('bookings').select('id,booking_date,start_min,status').eq('id', id).maybeSingle();
-  if (error || !data) return res.status(404).json({ ok: false, error: 'Booking not found.' });
-  if (data.status === 'cancelled') return res.json({ ok: true, already: true });
-  if (data.status !== 'confirmed') return res.status(400).json({ ok: false, error: "This booking can't be cancelled online." });
-  if (hoursUntilBooking(data.booking_date, data.start_min) < 24) {
-    return res.status(403).json({ ok: false, code: 'too_late', error: 'Cancellations must be made at least 24 hours before your tee time. Please call the shop to cancel.' });
-  }
-  let upd = await db.from('bookings').update({ status: 'cancelled', cancelled_at: new Date().toISOString() }).eq('id', id);
-  if (upd.error && /cancelled_at/.test(upd.error.message || '')) {
-    upd = await db.from('bookings').update({ status: 'cancelled' }).eq('id', id);
-  }
-  if (upd.error) return res.status(500).json({ ok: false, error: upd.error.message });
-  res.json({ ok: true });
-});
+// Customer booking lookup (GET) + self-service cancellation (POST) — shared module handler.
+app.all('/api/booking', (req, res) => bookingSelfService(req, res));
+app.post('/api/cancel-booking', (req, res) => bookingSelfService(req, res));   // legacy path
 
 app.get('/api/config', (_req, res) => {
   res.json({
