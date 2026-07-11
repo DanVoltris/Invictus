@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Joy House Golf — Hour Cards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{ --black:#000;--near-black:#0E0E0E;--surface:#181818;--surface-2:#222;--border:#333;
+    --white:#fff;--muted:#B5B5B5;--dim:#7A7A7A;--orange:#F0523D;--danger:#ff5b5b;--ok:#4ec06a;--radius:16px; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  *{scrollbar-width:none;-ms-overflow-style:none} *::-webkit-scrollbar{width:0;height:0;display:none}
+  body{background:radial-gradient(1200px 600px at 70% -10%,#1a1a1a 0%,var(--black) 55%),var(--black);
+    color:var(--white);font-family:'Raleway',system-ui,sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;padding:24px}
+  h1,h2,h3{font-family:'Space Grotesk',sans-serif;letter-spacing:-.01em}
+  .wrap{max-width:940px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 0 26px}
+  header img{height:46px;width:auto}
+  .brand-fallback{font-family:'Space Grotesk';font-weight:700;font-size:20px}
+  .brand-fallback .joy{color:var(--orange);margin-right:6px}
+  header a.back{color:var(--muted);text-decoration:none;font-size:13px}
+  header a.back:hover{color:#fff}
+  .head-block{text-align:center;margin-bottom:26px}
+  .head-block h1{font-size:30px;margin-bottom:8px}
+  .head-block .sub{color:var(--dim);font-size:14.5px;line-height:1.55;max-width:540px;margin:0 auto}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .hc{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 22px;display:flex;flex-direction:column;border-top-width:3px}
+  .hc-name{font-family:'Space Grotesk';font-weight:700;font-size:19px;margin-bottom:6px}
+  .hc-hours{font-family:'Space Grotesk';font-weight:700;font-size:34px;line-height:1}
+  .hc-hours .u{font-size:15px;font-weight:500;color:var(--dim);margin-left:5px}
+  .hc-price{font-size:15px;color:var(--muted);margin-top:10px}
+  .hc-price b{color:#fff;font-family:'Space Grotesk'}
+  .hc-rate{font-size:12px;color:var(--ok);margin-top:6px}
+  .flex1{flex:1}
+  .btn{display:block;width:100%;border:none;border-radius:11px;padding:14px;font-weight:700;font-size:15px;font-family:'Space Grotesk';cursor:pointer;transition:.15s;margin-top:18px;text-align:center;text-decoration:none}
+  .btn-primary{background:var(--orange);color:#fff}.btn-primary:hover{background:#ff6450}
+  .btn-primary:disabled{background:#2a2a2a;color:#666;cursor:not-allowed}
+  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:#fff;border-color:var(--dim)}
+  .card{max-width:460px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:30px}
+  .card h2{font-size:22px;margin-bottom:4px}
+  .card .sub{color:var(--dim);font-size:13.5px;margin-bottom:20px;line-height:1.5}
+  .fld{display:block;font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin:16px 0 7px}
+  .fld:first-of-type{margin-top:0}
+  .input{width:100%;background:var(--near-black);border:1px solid var(--border);border-radius:11px;padding:13px 14px;color:#fff;font-family:'Raleway';font-size:15px;outline:none;transition:.15s}
+  .input:focus{border-color:var(--orange)} .input.invalid{border-color:var(--danger)}
+  .summary{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .summary .s-name{font-family:'Space Grotesk';font-weight:700}
+  .summary .s-price{font-family:'Space Grotesk';font-weight:700;color:var(--orange)}
+  .err{color:var(--danger);font-size:13px;margin-top:12px;min-height:18px}
+  .fine{color:var(--dim);font-size:11.5px;line-height:1.5;margin-top:14px;text-align:center}
+  .center{text-align:center;max-width:460px;margin:0 auto}
+  .big{font-size:56px;line-height:1;margin:6px 0 14px} .big.ok{color:var(--ok)}
+  .note{border-radius:12px;padding:14px 16px;font-size:13.5px;line-height:1.5;margin-top:8px;background:rgba(240,82,61,.10);border:1px solid rgba(240,82,61,.4);color:#f0a093}
+  .spin{color:var(--dim);text-align:center;padding:50px 0}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <img src="https://images.squarespace-cdn.com/content/v1/66fb54c58833195056a5c6b1/f64e42aa-7dd9-4434-bade-a6342963fac0/JoyHouse+Golf+logo+dark+background+new+green.png"
+             alt="Joy House Golf" onerror="this.style.display='none';document.getElementById('bf').style.display='inline-block'" />
+        <span id="bf" class="brand-fallback" style="display:none"><span class="joy">JOY</span>HOUSE GOLF</span>
+      </div>
+      <a class="back" href="/">← Back to booking</a>
+    </header>
+    <div id="content"><div class="spin">Loading hour cards…</div></div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const params = new URLSearchParams(location.search);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const validEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e||'').trim());
+const money = c => '$'+(c/100).toFixed(c%100?2:0);
+const hoursLabel = h => (Math.round(h*10)/10) + (h===1?' hour':' hours');
+function render(html){ $('#content').innerHTML = html; }
+
+let CARDS = [];
+
+function cardsView(){
+  if(!CARDS.length){ render('<div class="center"><h1>Hour cards</h1><div class="note">No hour cards are available online right now — please check back soon or call the shop.</div><a class="btn btn-ghost" href="/" style="max-width:300px;margin:22px auto 0">Back to booking</a></div>'); return; }
+  render(`
+    <div class="head-block">
+      <h1>Hour cards</h1>
+      <div class="sub">Buy a block of range time at a discount. Your hours are saved to your account by email — use them any time you book, in person or online.</div>
+    </div>
+    <div class="cards">${CARDS.map(c=>{
+      const perHr = c.hours>0 ? c.price_cents/c.hours : 0;
+      return `<div class="hc" style="border-top-color:${esc(c.color||'#4aa3ff')}">
+        <div class="hc-name">${esc(c.name)}</div>
+        <div class="hc-hours">${Math.round(c.hours*10)/10}<span class="u">hrs</span></div>
+        <div class="hc-price"><b>${money(c.price_cents)}</b></div>
+        ${perHr?`<div class="hc-rate">${money(Math.round(perHr))}/hour effective</div>`:''}
+        <div class="flex1"></div>
+        <button class="btn btn-primary buy" data-id="${c.id}">Buy this card</button>
+      </div>`;
+    }).join('')}</div>`);
+  document.querySelectorAll('.buy').forEach(b=>b.onclick=()=>buyView(CARDS.find(c=>c.id===b.dataset.id)));
+}
+
+function buyView(card){
+  if(!card) return;
+  render(`
+    <div class="card">
+      <h2>${esc(card.name)}</h2>
+      <div class="sub">${hoursLabel(card.hours)} of range time, credited to your account. Enter your details, then pay securely.</div>
+      <div class="summary"><span class="s-name">${hoursLabel(card.hours)}</span><span class="s-price">${money(card.price_cents)}</span></div>
+      <label class="fld" for="h-name">Full name</label>
+      <input class="input" id="h-name" placeholder="Your name" autocomplete="name" />
+      <label class="fld" for="h-email">Email</label>
+      <input class="input" id="h-email" type="email" placeholder="you@email.com" autocomplete="email" />
+      <label class="fld" for="h-phone">Phone <span style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">(optional)</span></label>
+      <input class="input" id="h-phone" type="tel" placeholder="(204) 000-0000" autocomplete="tel" />
+      <div class="err" id="h-err"></div>
+      <button class="btn btn-primary" id="h-go">Continue to secure payment</button>
+      <button class="btn btn-ghost" id="h-back">Back to cards</button>
+      <div class="fine">You'll finish on Stripe's secure checkout. Your hours link to this email — use the same one when you book.</div>
+    </div>`);
+  $('#h-back').onclick=cardsView;
+  const nameEl=$('#h-name'), emailEl=$('#h-email'), phoneEl=$('#h-phone'), err=$('#h-err'), go=$('#h-go');
+  [nameEl,emailEl,phoneEl].forEach(el=>el.addEventListener('input',()=>el.classList.remove('invalid')));
+  go.onclick=async()=>{
+    const name=nameEl.value.trim(), email=emailEl.value.trim(), phone=phoneEl.value.trim();
+    if(name.length<2){ err.textContent='Please enter your name.'; nameEl.classList.add('invalid'); nameEl.focus(); return; }
+    if(!validEmail(email)){ err.textContent='Please enter a valid email — your hours link to it.'; emailEl.classList.add('invalid'); emailEl.focus(); return; }
+    err.textContent=''; go.disabled=true; go.textContent='Redirecting to payment…';
+    let r;
+    try{ r = await (await fetch('/api/hour-cards?action=checkout',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ cardId:card.id, name, email, phone }) })).json(); }
+    catch(e){ r={ error:'Network error — please try again.' }; }
+    if(r && r.url){ window.location.href = r.url; return; }
+    go.disabled=false; go.textContent='Continue to secure payment';
+    err.textContent=(r && r.error) || 'Could not start checkout — please try again or call the shop.';
+  };
+}
+
+async function confirmView(sessionId){
+  render('<div class="spin">Adding your hours…</div>');
+  let r;
+  try{ r = await (await fetch('/api/hour-cards?action=confirm',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ sessionId }) })).json(); }
+  catch(e){ r={ ok:false, error:'Network error.' }; }
+  if(r && r.ok){
+    const bal = r.balanceMin!=null ? (Math.round(r.balanceMin/6)/10) : null;   // minutes → hours (1 decimal)
+    render(`<div class="center">
+      <div class="big ok">✓</div>
+      <h1>${esc(hoursLabel(r.hours))} added!</h1>
+      <div class="sub" style="color:var(--muted);font-size:14.5px;line-height:1.6;margin:12px auto 0;max-width:430px">Your ${esc(r.cardName)} is credited to <b>${esc(r.email||'your account')}</b>.${bal!=null?` You now have <b>${bal} hours</b> of range time.`:''} Use the same email when you book and we'll draw from your hours.</div>
+      <a class="btn btn-primary" href="/" style="max-width:320px;margin:26px auto 0">Book a session</a>
+    </div>`);
+    history.replaceState({}, '', '/hours');
+  } else {
+    render(`<div class="center"><h1>Almost there</h1><div class="note">${esc((r&&r.error)||'We couldn’t add your hours.')} If you were charged, please contact the shop and we’ll sort it out right away.</div><a class="btn btn-ghost" href="/hours" style="max-width:300px;margin:22px auto 0">Back to hour cards</a></div>`);
+  }
+}
+
+async function load(){
+  if(params.get('success')==='1' && params.get('session_id')){ confirmView(params.get('session_id')); return; }
+  const canceled = params.get('canceled')==='1';
+  try{ const d = await (await fetch('/api/hour-cards?action=list')).json(); CARDS = (d.cards||[]).filter(c=>c.price_cents>0 && c.hours>0); }catch(e){ CARDS=[]; }
+  cardsView();
+  if(canceled){ history.replaceState({}, '', '/hours'); const n=document.createElement('div'); n.className='note'; n.style.maxWidth='520px'; n.style.margin='18px auto 0'; n.textContent='Payment canceled — you have not been charged. Pick a card to try again.'; $('#content').prepend(n); }
+}
+load();
+</script>
+</body>
+</html>

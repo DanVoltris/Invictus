@@ -55,6 +55,8 @@
   .nav-cta { font-size: 13px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
   .nav-mem { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 13px; color: var(--orange); text-decoration: none; border: 1px solid var(--orange); padding: 8px 16px; border-radius: 999px; transition: .15s; white-space: nowrap; }
   .nav-mem:hover { background: rgba(240,82,61,.12); }
+  .nav-links { display: flex; align-items: center; gap: 10px; }
+  @media (max-width: 520px){ .nav-mem { padding: 7px 12px; font-size: 12px; } .nav-links { gap: 7px; } }
 
   /* Hero / progress */
   .hero { padding: 34px 0 4px; }
@@ -275,6 +277,11 @@
   .sms-toggle input:checked + .sms-track .sms-thumb { transform: translateX(18px); }
   .sms-toggle input:focus-visible + .sms-track { outline: 2px solid var(--orange); outline-offset: 2px; }
   .sms-txt small { display: block; color: var(--dim); font-size: 11px; margin-top: 1px; }
+  /* "Pay with hours" option in checkout */
+  .hours-opt { margin-top: 14px; background: rgba(74,163,255,.08); border: 1px solid rgba(74,163,255,.4); border-radius: 12px; padding: 13px 14px; }
+  .hours-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
+  .hours-opt .ho-txt b { color: #fff; }
+  .hours-opt .btn { width: 100%; }
   .conf .recap { text-align: left; background: var(--near-black); border: 1px solid var(--border);
     border-radius: 12px; padding: 16px; margin: 20px 0; }
   .conf .recap .row { display:flex; justify-content: space-between; padding: 7px 0; font-size: 14px; }
@@ -357,7 +364,10 @@
            onerror="this.style.display='none';document.getElementById('bf').style.display='block'" />
       <span id="bf" class="brand-fallback" style="display:none"><span class="joy">JOY</span><span class="hg">HOUSE GOLF</span></span>
     </div>
-    <a class="nav-mem" href="/membership">Memberships</a>
+    <div class="nav-links">
+      <a class="nav-mem" href="/hours">Hour Cards</a>
+      <a class="nav-mem" href="/membership">Memberships</a>
+    </div>
   </div>
 </header>
 
@@ -450,6 +460,7 @@
             <span class="sms-track"><span class="sms-thumb"></span></span>
             <span class="sms-txt">Text me updates about this booking<small>Standard message rates may apply</small></span>
           </label>
+          <div id="hours-pay" style="display:none"></div>
         </div>
         <div class="col-pay">
           <div id="payment-element"><div class="loading">Loading secure checkout…</div></div>
@@ -998,6 +1009,7 @@ async function openPayment(){
     $('#sim-mode').style.display='none';
     $('#pay-note').innerHTML='<b>Test mode.</b> Pay with card <b>4242&nbsp;4242&nbsp;4242&nbsp;4242</b> — any future expiry date, any 3-digit CVC, any postal code.';
     await mountStripe();
+    checkHoursOption();   // show "use my hours" if the entered email has enough balance
   }else{
     modal.classList.remove('stripe');
     $('#stripe-mode').style.display='none';
@@ -1012,6 +1024,7 @@ function closePayment(){
   stopHoldTimer();
   piCache=null;
   elements=null;
+  const hp=$('#hours-pay'); if(hp){ hp.style.display='none'; hp.innerHTML=''; }
   $('#pay-overlay').classList.remove('show');
   setStep(2);
   loadAvailability().then(renderAll);   // reflect the released slot
@@ -1075,6 +1088,39 @@ $('#sc-pay').onclick=async ()=>{
     showConfirmation($('#sc-name').value.trim()||'Guest');
   }else{ btn.innerHTML=label; btn.disabled=false; }
 };
+
+/* Pay with prepaid hours instead of a card, when the customer's email has enough balance. */
+let hoursCheckTimer=null;
+function scheduleHoursCheck(){ clearTimeout(hoursCheckTimer); hoursCheckTimer=setTimeout(checkHoursOption, 400); }
+async function checkHoursOption(){
+  const host=$('#hours-pay'); if(!host) return;
+  const email=($('#sc-email')?.value||'').trim();
+  const dur=(state.endMin!=null && state.startMin!=null) ? (state.endMin-state.startMin) : 0;
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !(dur>0)){ host.style.display='none'; host.innerHTML=''; return; }
+  let r; try{ r=await (await fetch('/api/hour-cards?action=balance',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email }) })).json(); }catch(e){ r=null; }
+  if(r && r.found && r.balanceMin>=dur){
+    const bal=Math.round(r.balanceMin/6)/10, need=Math.round(dur/6)/10;
+    host.style.display='block';
+    host.innerHTML=`<div class="hours-opt"><div class="ho-txt">You have <b>${bal} hrs</b> on your account — use <b>${need} hrs</b> for this session instead of paying.</div><button type="button" class="btn btn-line" id="pay-hours">Use my hours</button></div>`;
+    $('#pay-hours').onclick=payWithHours;
+  }else{ host.style.display='none'; host.innerHTML=''; }
+}
+async function payWithHours(){
+  if(paying) return;
+  if(!checkContact($('#sc-email'), $('#sc-phone'), $('#pay-error'))) return;
+  const btn=$('#pay-hours'); paying=true; btn.disabled=true; btn.textContent='Booking…'; $('#pay-error').textContent='';
+  let r;
+  try{ r=await (await fetch('/api/hour-cards?action=book',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+    dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin,
+    name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim() }) })).json(); }
+  catch(e){ r={ ok:false, error:'Network error — please try again.' }; }
+  paying=false;
+  if(r && r.ok){ $('#pay-overlay').classList.remove('show'); showConfirmation($('#sc-name').value.trim()||'Guest'); return; }
+  btn.disabled=false; btn.textContent='Use my hours';
+  $('#pay-error').textContent = (r&&r.error==='insufficient') ? 'Not enough hours for this session.'
+    : (r&&r.error==='no_account') ? 'No hours found for that email.' : ((r&&r.error)||'Could not book with hours — please try again.');
+}
+if($('#sc-email')) $('#sc-email').addEventListener('input', scheduleHoursCheck);
 
 /* Return from a redirect-based payment method (test cards don't redirect). */
 async function handleReturn(){

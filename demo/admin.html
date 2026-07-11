@@ -462,6 +462,7 @@
         <div class="side-cap">Operations</div>
         <div class="tab active" data-tab="bookings">Tee Sheet</div>
         <div class="tab" data-tab="membership">Members</div>
+        <div class="tab" data-tab="hourcards">Hour Cards</div>
         <div class="tab" data-tab="logs">Booking Logs</div>
         <div class="tab" data-tab="customers">Search Customers</div>
         <div class="side-cap">Configuration</div>
@@ -770,6 +771,14 @@
       </div>
 
       <!-- TAGS -->
+      <div id="tab-hourcards" class="hidden">
+        <div class="toolbar">
+          <div><h2>Hour Cards</h2><div class="day-label">Prepaid range-time cards customers can buy online. Hours land on their account and draw down as they play.</div></div>
+          <div class="day-nav"><button class="btn btn-primary" id="add-card">+ Add card</button></div>
+        </div>
+        <div id="cards-list"></div>
+      </div>
+
       <div id="tab-tags" class="hidden">
         <div class="toolbar">
           <div><h2>Tags</h2><div class="day-label">Free-form labels you can attach to bookings.</div></div>
@@ -909,8 +918,8 @@ $('#login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#login-
 $('#logout-btn').onclick = async () => { await sb.auth.signOut(); showLogin(); };
 
 /* ---------- Tabs ---------- */
-const TAB_IDS = ['bookings','logs','customers','membership','bays','prices','overrides','templates','statuses','tags','paysettings'];
-const TAB_LOADERS = { logs:loadLogs, customers:loadCustomers, membership:loadMembership, bays:loadBaysTab, prices:loadPricesTab,
+const TAB_IDS = ['bookings','logs','customers','membership','hourcards','bays','prices','overrides','templates','statuses','tags','paysettings'];
+const TAB_LOADERS = { logs:loadLogs, customers:loadCustomers, membership:loadMembership, hourcards:loadHourCardsTab, bays:loadBaysTab, prices:loadPricesTab,
   overrides:loadOverridesTab, templates:loadTemplatesTab, statuses:loadStatuses, tags:loadTags, paysettings:loadPaySettings };
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
@@ -1737,6 +1746,12 @@ function openCustomer(c){
     ${c.membership_flag?`<div class="note-flag"><span class="fbadge" data-tip="${esc(c.membership_flag)}">!</span><span>${esc(c.membership_flag)}</span></div>`:''}
     ${c.waiver_code?`<div class="kv" style="margin-bottom:12px"><span class="k">Waiver on file</span><span class="wv-code">${esc(c.waiver_code)}${c.waiver_signed_at?` <span class="dim">· signed ${shortDate(c.waiver_signed_at.slice(0,10))}</span>`:''}</span></div>`:''}
     ${c.sms_opt_in!=null?`<div class="kv" style="margin-bottom:12px"><span class="k">SMS updates</span><span>${c.sms_opt_in?'<span class="pill confirmed">On</span>':'<span class="pill cancelled">Off</span>'}</span></div>`:''}
+    ${isNew?'':`<div class="kv" style="margin-bottom:10px"><span class="k">Hours balance</span><span><b id="c-hbal">${fmtHrs(c.hours_balance_min||0)}</b></span></div>
+    <div class="field"><label>Adjust hours</label><div class="row" style="gap:8px;align-items:center">
+      <input class="input" id="c-hadj" type="number" step="0.5" min="0" placeholder="e.g. 1.5" style="max-width:130px" />
+      <button class="btn btn-ghost btn-sm" id="c-hadd" type="button">+ Add</button>
+      <button class="btn btn-ghost btn-sm" id="c-hsub" type="button">− Use</button>
+    </div><div class="sub" style="margin:6px 0 0">Add hours (in-person card sale) or use hours (redeem in person).</div></div>`}
     <div class="field"><label>Notes</label><input class="input" id="c-notes" value="${esc(c.notes||'')}" placeholder="Optional" /></div>
     ${isNew?'':`<div class="field" style="margin-bottom:0"><label>Booking history</label><div class="cust-history" id="c-hist"><div class="dim" style="font-size:13px;padding:6px 0">Loading…</div></div></div>`}
     <button class="btn btn-primary" id="c-save" style="width:100%;margin-top:16px">${isNew?'Add customer':'Save changes'}</button>
@@ -1746,6 +1761,16 @@ function openCustomer(c){
   enhanceSelects(sheet);
   buildDatePicker($('#c-expires'));           // custom calendar, not the native control
   if(!isNew) loadCustHistory(c,'c-hist');
+  if(!isNew){
+    const doAdj=async(sign)=>{
+      const hrs=+$('#c-hadj').value; if(!(hrs>0)){ toast('Enter hours to adjust','err'); return; }
+      const { data, error } = await sb.rpc('adjust_hours',{ p_customer:c.id, p_delta_min:sign*Math.round(hrs*60), p_kind:'adjust', p_note:sign>0?'Manual add':'Manual use', p_booking:null });
+      if(error){ toast(/insufficient/i.test(error.message)?'Not enough hours on this account.':(/adjust_hours|function|does not exist/i.test(error.message)?'Run database migration 0015 first.':error.message),'err'); return; }
+      c.hours_balance_min=data; $('#c-hbal').textContent=fmtHrs(data); $('#c-hadj').value=''; toast('Hours updated','ok'); fetchCustomers();
+    };
+    if($('#c-hadd')) $('#c-hadd').onclick=()=>doAdj(1);
+    if($('#c-hsub')) $('#c-hsub').onclick=()=>doAdj(-1);
+  }
   $('#c-save').onclick=async()=>{
     const patch={ name:$('#c-name').value.trim()||null, email:$('#c-email').value.trim()||null,
       phone:$('#c-phone').value.trim()||null, membership_id:$('#c-plan').value||null, notes:$('#c-notes').value.trim()||null,
@@ -1905,6 +1930,39 @@ async function openAddMember(){
 }
 $('#add-member').onclick=openAddMember;
 $('#add-plan').onclick=async()=>{ if(await dbInsert('memberships',{name:'New plan',price_cents:0,period:'month',discount_pct:0,color:'#c4e538',sort:MEMBERSHIPS.length})){ await loadVocab(); loadMembership(); } };
+
+/* ---------- Hour Cards ---------- */
+// minutes → a friendly hours label, e.g. 90 → "1.5 hrs"
+const fmtHrs = min => (Math.round((min||0)/6)/10) + ' hr' + (Math.abs(min)===60?'':'s');
+async function loadHourCardsTab(){
+  const { data, error } = await sb.from('hour_cards').select('*').order('sort');
+  if(error){ if(!isAuthError(error)) $('#cards-list').innerHTML='<div class="empty">Run database migration 0015 (supabase/migrations) to enable hour cards.</div>'; return; }
+  const cards=data||[];
+  $('#cards-list').innerHTML = `<div class="plans-grid">${cards.map(c=>{
+    const perHr = c.hours>0 ? Math.round((c.price_cents||0)/100/c.hours) : 0;
+    return `<div class="plan-card" data-id="${c.id}" style="border-left-color:${esc(c.color||'#4aa3ff')}">
+      <div class="plan-top"><input class="input hc-name" value="${esc(c.name)}" /></div>
+      <div class="mini">
+        <div><label>Hours</label><input class="input hc-hours" type="number" min="0" step="0.5" value="${c.hours||0}" /></div>
+        <div><label>Price ($)</label><input class="input hc-price" type="number" min="0" step="1" value="${(c.price_cents||0)/100}" /></div>
+      </div>
+      <div class="mini">
+        <div><label>Accent</label><input class="color-in hc-color" type="color" value="${esc(c.color||'#4aa3ff')}" style="width:100%" /></div>
+        <div style="display:flex;align-items:flex-end;padding-bottom:11px"><span class="dim" style="font-size:12px">${perHr?'$'+perHr+'/hr effective':''}</span></div>
+      </div>
+      <div class="save-bar"><button class="btn btn-danger btn-sm hc-del">Delete card</button></div>
+    </div>`; }).join('')||'<div class="empty">No hour cards yet — add one.</div>'}</div>`;
+  document.querySelectorAll('#cards-list .plan-card').forEach(card=>{
+    const id=card.dataset.id;
+    const save=async()=>{ const patch={ name:card.querySelector('.hc-name').value.trim()||'Card',
+      hours:+card.querySelector('.hc-hours').value||0, price_cents:Math.round((+card.querySelector('.hc-price').value||0)*100),
+      color:card.querySelector('.hc-color').value };
+      card.style.borderLeftColor=patch.color; if(await dbUpdate('hour_cards',id,patch)) loadHourCardsTab(); };
+    card.querySelectorAll('input').forEach(el=>el.addEventListener('change',save));
+    card.querySelector('.hc-del').onclick=async()=>{ if(await dbDelete('hour_cards',id)){ toast('Card deleted','ok'); loadHourCardsTab(); } };
+  });
+}
+$('#add-card').onclick=async()=>{ if(await dbInsert('hour_cards',{name:'New card',hours:10,price_cents:20000,color:'#4aa3ff',sort:0})){ toast('Card added','ok'); loadHourCardsTab(); } };
 
 /* ---------- Schedule (Day grid + side list · Week overview) ---------- */
 let BK = [];          // bookings for the current range (day or week)
@@ -2661,6 +2719,8 @@ function openManage(id){
       <button class="btn btn-ghost btn-sm" id="m-wv-copy" style="flex:1">Copy waiver link</button>
       ${cust.waiver_signed_at?'':`<button class="btn btn-ghost btn-sm" id="m-wv-mark" style="flex:1">Mark signed in person</button>`}
     </div>`:''}
+    ${cust?`<div class="kv"><span class="k">Hours balance</span><span id="m-hbal">${fmtHrs(cust.hours_balance_min||0)}</span></div>
+    <div class="row" style="margin:8px 0 2px" id="m-hours-row"></div>`:''}
     ${(cust&&cust.notes)?`<div class="kv" style="border:none"><span class="k">Latest note</span><span style="text-align:right;max-width:220px">${esc(cust.notes)}</span></div>`:''}
 
     <div class="field" style="margin-top:16px"><label>Tags</label>
@@ -2691,6 +2751,22 @@ function openManage(id){
     const { count } = await sb.from('bookings').select('id',{count:'exact',head:true}).or(keys.join(',')).neq('status','cancelled');
     const el=document.getElementById('m-rep'); if(el && count>1){ el.textContent='Repeat ('+count+')'; el.classList.remove('hidden'); }
   })();
+  // Staff redemption: deduct this booking's length from the customer's prepaid hours (once).
+  if(cust){ (async()=>{
+    const host=$('#m-hours-row'); if(!host) return;
+    const dur=b.end_min-b.start_min;
+    let redeemed=false;
+    try{ const { data }=await sb.from('hour_transactions').select('id').eq('booking_id',b.id).eq('kind','redeem').limit(1); redeemed=!!(data&&data[0]); }catch(e){}
+    if(redeemed){ host.innerHTML='<span class="pill confirmed">Paid with hours</span>'; return; }
+    host.innerHTML=`<button class="btn btn-ghost btn-sm" id="m-usehrs" style="flex:1">Use ${fmtHrs(dur)} from balance</button>`;
+    $('#m-usehrs').onclick=async()=>{
+      if((cust.hours_balance_min||0)<dur){ toast('Not enough hours — balance '+fmtHrs(cust.hours_balance_min||0),'err'); return; }
+      const btn=$('#m-usehrs'); btn.disabled=true; btn.textContent='Deducting…';
+      const { data, error }=await sb.rpc('adjust_hours',{ p_customer:cust.id, p_delta_min:-dur, p_kind:'redeem', p_note:'Booking '+b.booking_date, p_booking:b.id });
+      if(error){ btn.disabled=false; btn.textContent=`Use ${fmtHrs(dur)} from balance`; toast(/insufficient/i.test(error.message)?'Not enough hours on this account.':(/adjust_hours|function|does not exist/i.test(error.message)?'Run database migration 0015 first.':error.message),'err'); return; }
+      cust.hours_balance_min=data; if($('#m-hbal')) $('#m-hbal').textContent=fmtHrs(data); host.innerHTML='<span class="pill confirmed">Paid with hours</span>'; toast('Deducted '+fmtHrs(dur),'ok'); fetchCustomers();
+    };
+  })(); }
   {
     if(showHoldBtns){
       $('#cap-hold').onclick=()=>toast('Demo only — no real funds are captured','ok');

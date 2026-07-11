@@ -12,6 +12,7 @@ import { getSettings, getBookingsForDate, getOverridesForDate, insertBooking, db
 import signWaiver from './api/sign-waiver.js';
 import confirmBooking from './api/confirm-booking.js';
 import membership from './api/membership.js';
+import hourCards from './api/hour-cards.js';
 
 // Local dev server. On Vercel the same logic runs as serverless functions in /api.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -82,12 +83,14 @@ app.get('/admin', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'admi
 app.get('/manage', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'manage.html')));
 app.get('/waiver', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'waiver.html')));
 app.get('/membership', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'membership.html')));
+app.get('/hours', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'hours.html')));
 app.use(express.static(path.join(__dirname, 'demo')));
 
 // Waiver signing + booking confirmation + membership purchase (same handlers the Vercel functions use).
 app.all('/api/sign-waiver', (req, res) => signWaiver(req, res));
 app.all('/api/confirm-booking', (req, res) => confirmBooking(req, res));
 app.all('/api/membership', (req, res) => membership(req, res));
+app.all('/api/hour-cards', (req, res) => hourCards(req, res));
 
 // Customer booking lookup + self-service cancellation (24-hour policy enforced server-side).
 app.get('/api/booking', async (req, res) => {
