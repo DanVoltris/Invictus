@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
-import { stripeStatus, normalizeSettings } from '../lib/booking.js';
-import { insertBooking, getSettings, confirmHold, upsertCustomer } from '../lib/db.js';
+import { stripeStatus, normalizeSettings, pointsEarned } from '../lib/booking.js';
+import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingExistsForPI, adjustPoints, awardBookingPoints } from '../lib/db.js';
 
 function readRaw(req) {
   return new Promise((resolve, reject) => {
@@ -48,10 +48,13 @@ export default async function handler(req, res) {
         }
       } catch (_) { /* best-effort */ }
 
-      const onlineLabel = normalizeSettings(await getSettings()).onlineStatusLabel;   // manager-chosen default
+      // The client-side confirm usually saved this already — the webhook is the backup path.
+      if (await bookingExistsForPI(pi.id)) { res.status(200).json({ received: true }); return; }
+
+      const settings = normalizeSettings(await getSettings());
       const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
       const patch = {
-        status_label: onlineLabel || null,   // workflow label for a self-booked online reservation
+        status_label: settings.onlineStatusLabel || null,   // workflow label for a self-booked online reservation
         customer_name: name,
         customer_email: email,
         customer_phone: phone,
@@ -62,15 +65,25 @@ export default async function handler(req, res) {
       // Prefer flipping the customer's live cart hold → confirmed; fall back to a fresh insert if it lapsed.
       const flip = await confirmHold({ ...slot, patch });
       let error = flip.error || null;
+      let bookingId = flip.id;
       if (!flip.updated) {
         const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
         error = ins.error;
+        bookingId = ins.id;
       }
       console.log(error
         ? `⚠ Booking save failed (${md.summary}): ${error}`
         : `✅ Booking PAID & saved — ${md.bayName} · ${md.summary}`);
-      // Save the booker into the customer database (contact only; the SMS toggle is set by /api/save-customer).
-      await upsertCustomer({ name, email, phone });
+      // Save the booker into the customer database (contact only; the SMS toggle is set at pay time).
+      const up = await upsertCustomer({ name, email, phone });
+      // Loyalty: spend applied points (idempotent by PI id) + earn for time played (once per booking).
+      const spent = Number(md.pointsUsed) || 0;
+      if (!error && spent > 0 && md.pointsCustomerId) {
+        await adjustPoints({ customerId: md.pointsCustomerId, delta: -spent, kind: 'redeem', note: `Booking ${slot.dateISO}`, bookingId, ref: pi.id });
+      }
+      if (!error && up.id && bookingId) {
+        await awardBookingPoints({ customerId: up.id, bookingId, points: pointsEarned(settings, slot.endMin - slot.startMin) });
+      }
     }
   }
   res.status(200).json({ received: true });

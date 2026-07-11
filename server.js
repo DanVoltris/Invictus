@@ -5,14 +5,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   priceForBooking, summaryFor, stripeStatus, normalizeSettings, bayName, fmtMin, hoursUntilBooking,
-  overrideEffects, overrideConflicts, weeklyStatusBlocked, weeklyStatusConflicts,
+  overrideEffects, overrideConflicts, weeklyStatusBlocked, weeklyStatusConflicts, pointsRedemption, pointsEarned,
 } from './lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, insertBooking, dbEnabled, admin,
-  createHold, releaseHold, confirmHold, cleanupExpiredHolds, upsertCustomer } from './lib/db.js';
+  createHold, releaseHold, confirmHold, cleanupExpiredHolds, upsertCustomer,
+  customerHoursByContact, bookingExistsForPI, adjustPoints, awardBookingPoints } from './lib/db.js';
 import signWaiver from './api/sign-waiver.js';
 import confirmBooking from './api/confirm-booking.js';
 import membership from './api/membership.js';
 import hourCards from './api/hour-cards.js';
+import points from './api/points.js';
 
 // Local dev server. On Vercel the same logic runs as serverless functions in /api.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -57,19 +59,26 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
           name = bd.name || null; email = email || bd.email || null; phone = bd.phone || null;
         }
       } catch (_) {}
-      const onlineLabel = normalizeSettings(await getSettings()).onlineStatusLabel;
+      if (await bookingExistsForPI(pi.id)) { res.json({ received: true }); return; }   // client confirm beat us
+      const settings = normalizeSettings(await getSettings());
       const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
-      const patch = { status_label: onlineLabel || null, customer_name: name, customer_email: email, customer_phone: phone,
+      const patch = { status_label: settings.onlineStatusLabel || null, customer_name: name, customer_email: email, customer_phone: phone,
         amount_cents: pi.amount, stripe_payment_intent: pi.id, source: 'online' };
       // Prefer flipping the customer's live cart hold → confirmed; fall back to a fresh insert if it lapsed.
       const flip = await confirmHold({ ...slot, patch });
       let error = flip.error || null;
+      let bookingId = flip.id;
       if (!flip.updated) {
         const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
         error = ins.error;
+        bookingId = ins.id;
       }
       console.log(error ? `⚠ Booking save failed: ${error}` : `✅ Booking PAID & saved — ${md.summary}`);
-      await upsertCustomer({ name, email, phone });   // save the booker into the customer database
+      const up = await upsertCustomer({ name, email, phone });   // save the booker into the customer database
+      // Loyalty: spend applied points (idempotent by PI id) + earn for time played (once per booking).
+      const spent = Number(md.pointsUsed) || 0;
+      if (!error && spent > 0 && md.pointsCustomerId) await adjustPoints({ customerId: md.pointsCustomerId, delta: -spent, kind: 'redeem', note: `Booking ${slot.dateISO}`, bookingId, ref: pi.id });
+      if (!error && up.id && bookingId) await awardBookingPoints({ customerId: up.id, bookingId, points: pointsEarned(settings, slot.endMin - slot.startMin) });
     }
   }
   res.json({ received: true });
@@ -91,6 +100,7 @@ app.all('/api/sign-waiver', (req, res) => signWaiver(req, res));
 app.all('/api/confirm-booking', (req, res) => confirmBooking(req, res));
 app.all('/api/membership', (req, res) => membership(req, res));
 app.all('/api/hour-cards', (req, res) => hourCards(req, res));
+app.all('/api/points', (req, res) => points(req, res));
 
 // Customer booking lookup + self-service cancellation (24-hour policy enforced server-side).
 app.get('/api/booking', async (req, res) => {
@@ -198,16 +208,24 @@ app.post('/api/create-payment-intent', async (req, res) => {
       if (h.error) return res.status(500).json({ error: h.error });
       expiresAt = h.expiresAt;
     }
+    // Loyalty points as dollars off (deducted for real on payment success — see the webhook/confirm).
+    let charge = amount, pointsUsed = 0, pointsCustomerId = '';
+    if (req.body.applyPoints) {
+      const cust = await customerHoursByContact({ email: req.body.email, phone: req.body.phone });
+      const r = pointsRedemption(settings, (cust && cust.points_balance) || 0, amount);
+      if (cust && r.pointsUsed > 0 && !r.fullCover) { charge = amount - r.discountCents; pointsUsed = r.pointsUsed; pointsCustomerId = cust.id; }
+    }
     const pi = await stripe.paymentIntents.create({
-      amount, currency: settings.currency,
+      amount: charge, currency: settings.currency,
       automatic_payment_methods: { enabled: true },
       description: `${bayName(settings, bayId)} — simulator session`,
       metadata: {
         bayId, bayName: bayName(settings, bayId), dateISO, startMin: String(startMin), endMin: String(endMin),
         players: String(players), summary: summaryFor({ dateISO, startMin, endMin, players }),
+        pointsUsed: String(pointsUsed), pointsCustomerId,
       },
     });
-    res.json({ clientSecret: pi.client_secret, amount, expiresAt });
+    res.json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed, expiresAt });
   } catch (err) {
     console.error('create-payment-intent:', err.message);
     res.status(400).json({ error: err.message });

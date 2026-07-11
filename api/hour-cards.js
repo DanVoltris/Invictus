@@ -1,10 +1,10 @@
 import Stripe from 'stripe';
 import {
-  stripeStatus, normalizeSettings, priceForBooking, overrideEffects, overrideConflicts, weeklyStatusConflicts,
+  stripeStatus, normalizeSettings, priceForBooking, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsEarned,
 } from '../lib/booking.js';
 import {
   getSettings, getOverridesForDate, getBookingsForDate, admin,
-  listHourCards, grantHours, customerHoursByContact, bookWithHours,
+  listHourCards, grantHours, customerHoursByContact, bookWithHours, awardBookingPoints,
 } from '../lib/db.js';
 
 // One function for the whole hour-card flow (kept single to stay within the Hobby function limit).
@@ -119,11 +119,13 @@ async function book(req, res) {
     .some((b) => b.bay_id === bayId && Number(startMin) < b.end_min && Number(endMin) > b.start_min);
   if (clash) return res.status(409).json({ ok: false, error: 'That time was just taken — pick another slot.' });
 
-  const onlineLabel = normalizeSettings(await getSettings()).onlineStatusLabel;
-  const r = await bookWithHours({ dateISO, bayId, startMin, endMin, name, email, phone, statusLabel: onlineLabel || 'Booked' });
+  const stg = normalizeSettings(await getSettings());
+  const r = await bookWithHours({ dateISO, bayId, startMin, endMin, name, email, phone, statusLabel: stg.onlineStatusLabel || 'Booked' });
   if (r.error === 'no_account') return res.status(400).json({ ok: false, error: 'no_account' });
   if (r.error === 'insufficient') return res.status(400).json({ ok: false, error: 'insufficient', balanceMin: r.balanceMin, neededMin: r.neededMin });
   if (r.error === 'taken') return res.status(409).json({ ok: false, error: 'That time was just taken — pick another slot.' });
   if (r.error) return res.status(500).json({ ok: false, error: r.error });
+  // Time played on an hours-paid session still earns loyalty points (once per booking).
+  await awardBookingPoints({ customerId: r.customerId, bookingId: r.bookingId, points: pointsEarned(stg, Number(endMin) - Number(startMin)) });
   res.status(200).json({ ok: true, balanceMin: r.balanceMin });
 }

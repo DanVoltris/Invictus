@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
-import { priceForBooking, summaryFor, stripeStatus, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts } from '../lib/booking.js';
-import { getSettings, getBookingsForDate, getOverridesForDate, createHold } from '../lib/db.js';
+import { priceForBooking, summaryFor, stripeStatus, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsRedemption } from '../lib/booking.js';
+import { getSettings, getBookingsForDate, getOverridesForDate, createHold, customerHoursByContact } from '../lib/db.js';
 
 // Creates a PaymentIntent for a booking. Price + availability are validated server-side.
 export default async function handler(req, res) {
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
 
   try {
     const stripe = new Stripe(secretKey);
-    const { dateISO, bayId, startMin, endMin, party, hold } = req.body || {};
+    const { dateISO, bayId, startMin, endMin, party, hold, applyPoints, email, phone } = req.body || {};
 
     const settings = normalizeSettings(await getSettings());
     const overrides = await getOverridesForDate(dateISO);
@@ -41,8 +41,19 @@ export default async function handler(req, res) {
       expiresAt = h.expiresAt;
     }
 
+    // Loyalty points as dollars off: discount the charge now; the points are actually deducted
+    // when the payment succeeds (confirm-booking/webhook, idempotent by PaymentIntent id).
+    let charge = amount, pointsUsed = 0, pointsCustomerId = '';
+    if (applyPoints) {
+      const cust = await customerHoursByContact({ email, phone });
+      const r = pointsRedemption(settings, (cust && cust.points_balance) || 0, amount);
+      if (cust && r.pointsUsed > 0 && !r.fullCover) {   // full cover books via /api/points instead
+        charge = amount - r.discountCents; pointsUsed = r.pointsUsed; pointsCustomerId = cust.id;
+      }
+    }
+
     const pi = await stripe.paymentIntents.create({
-      amount,
+      amount: charge,
       currency: settings.currency,
       automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
       description: `${bayName(settings, bayId)} — simulator session`,
@@ -54,10 +65,12 @@ export default async function handler(req, res) {
         endMin: String(endMin),
         players: String(players),
         summary: summaryFor({ dateISO, startMin, endMin, players }),
+        pointsUsed: String(pointsUsed),
+        pointsCustomerId,
       },
     });
 
-    res.status(200).json({ clientSecret: pi.client_secret, amount, expiresAt });
+    res.status(200).json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed, expiresAt });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

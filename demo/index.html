@@ -282,6 +282,13 @@
   .hours-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
   .hours-opt .ho-txt b { color: #fff; }
   .hours-opt .btn { width: 100%; }
+  /* Loyalty points option in checkout (green accent to read as a reward) */
+  .points-opt { margin-top: 14px; background: rgba(78,192,106,.08); border: 1px solid rgba(78,192,106,.4); border-radius: 12px; padding: 13px 14px; }
+  .points-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
+  .points-opt .ho-txt b { color: #fff; }
+  .points-opt .btn { width: 100%; }
+  .points-opt .applied { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: #7ad492; }
+  .points-opt .applied a { color: var(--dim); cursor: pointer; text-decoration: underline; font-size: 12px; }
   .conf .recap { text-align: left; background: var(--near-black); border: 1px solid var(--border);
     border-radius: 12px; padding: 16px; margin: 20px 0; }
   .conf .recap .row { display:flex; justify-content: space-between; padding: 7px 0; font-size: 14px; }
@@ -461,6 +468,7 @@
             <span class="sms-txt">Text me updates about this booking<small>Standard message rates may apply</small></span>
           </label>
           <div id="hours-pay" style="display:none"></div>
+          <div id="points-pay" style="display:none"></div>
         </div>
         <div class="col-pay">
           <div id="payment-element"><div class="loading">Loading secure checkout…</div></div>
@@ -930,6 +938,7 @@ async function createPI(){
   const key=bookingKey();
   // hold:true locks the slot for ~5 min while the customer checks out (Ticketmaster-style cart hold).
   const body={ dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin, party:state.party, hold:true };
+  if(POINTS_APPLY){ body.applyPoints=true; body.email=($('#sc-email')?.value||'').trim(); body.phone=($('#sc-phone')?.value||'').trim(); }
   const r=await fetch('/api/create-payment-intent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await r.json();
   if(r.status===409){ const e=new Error(data.error||'That time was just taken — pick another slot.'); e.taken=true; throw e; }
@@ -1009,7 +1018,8 @@ async function openPayment(){
     $('#sim-mode').style.display='none';
     $('#pay-note').innerHTML='<b>Test mode.</b> Pay with card <b>4242&nbsp;4242&nbsp;4242&nbsp;4242</b> — any future expiry date, any 3-digit CVC, any postal code.';
     await mountStripe();
-    checkHoursOption();   // show "use my hours" if the entered email has enough balance
+    checkHoursOption();   // show "use my hours" if the entered contact has enough balance
+    checkPointsOption();  // and the loyalty-points offer
   }else{
     modal.classList.remove('stripe');
     $('#stripe-mode').style.display='none';
@@ -1025,6 +1035,8 @@ function closePayment(){
   piCache=null;
   elements=null;
   const hp=$('#hours-pay'); if(hp){ hp.style.display='none'; hp.innerHTML=''; }
+  POINTS_APPLY=false; POINTS_QUOTE=null;
+  const pp=$('#points-pay'); if(pp){ pp.style.display='none'; pp.innerHTML=''; }
   $('#pay-overlay').classList.remove('show');
   setStep(2);
   loadAvailability().then(renderAll);   // reflect the released slot
@@ -1122,6 +1134,59 @@ async function payWithHours(){
 }
 if($('#sc-email')) $('#sc-email').addEventListener('input', scheduleHoursCheck);
 if($('#sc-phone')) $('#sc-phone').addEventListener('input', scheduleHoursCheck);
+
+/* Loyalty points at checkout: dollars off (partial) or book the whole session with points. */
+let POINTS_APPLY=false, POINTS_QUOTE=null;
+async function checkPointsOption(){
+  const host=$('#points-pay'); if(!host) return;
+  if(POINTS_APPLY) return;   // applied state is managed by applyPointsNow/removePoints
+  const email=($('#sc-email')?.value||'').trim(), phone=($('#sc-phone')?.value||'').trim();
+  if((!validPhone(phone) && !validEmail(email)) || state.startMin==null){ host.style.display='none'; host.innerHTML=''; return; }
+  let r; try{ r=await (await fetch('/api/points?action=quote',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+    dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin, email, phone }) })).json(); }catch(e){ r=null; }
+  if(!(r && r.found && r.pointsUsed>0)){ host.style.display='none'; host.innerHTML=''; return; }
+  POINTS_QUOTE=r; host.style.display='block';
+  if(r.fullCover){
+    host.innerHTML=`<div class="points-opt"><div class="ho-txt">You have <b>${r.balance} pts</b> — this session is fully covered (<b>${r.pointsUsed} pts</b>).</div><button type="button" class="btn btn-line" id="points-book">Book with my points</button></div>`;
+    $('#points-book').onclick=bookWithPointsNow;
+  }else{
+    host.innerHTML=`<div class="points-opt"><div class="ho-txt">You have <b>${r.balance} pts</b> — apply <b>${r.pointsUsed} pts</b> for <b>−${money(r.discountCents/100)}</b> off.</div><button type="button" class="btn btn-line" id="points-apply">Apply my points</button></div>`;
+    $('#points-apply').onclick=applyPointsNow;
+  }
+}
+async function applyPointsNow(){
+  const host=$('#points-pay'); POINTS_APPLY=true; piCache=null;
+  host.innerHTML='<div class="points-opt"><div class="ho-txt">Applying your points…</div></div>';
+  await mountStripe();   // recreate the PaymentIntent with the discount; updates the Pay amount
+  const q=POINTS_QUOTE||{};
+  host.innerHTML=`<div class="points-opt"><div class="applied"><span>✓ ${q.pointsUsed||''} pts applied — you save ${money((q.discountCents||0)/100)}</span><a id="points-remove">remove</a></div></div>`;
+  $('#points-remove').onclick=removePoints;
+}
+async function removePoints(){
+  POINTS_APPLY=false; piCache=null;
+  const host=$('#points-pay'); host.style.display='none'; host.innerHTML='';
+  await mountStripe();
+  checkPointsOption();
+}
+async function bookWithPointsNow(){
+  if(paying) return;
+  if(!checkContact($('#sc-email'), $('#sc-phone'), $('#pay-error'))) return;
+  const btn=$('#points-book'); paying=true; btn.disabled=true; btn.textContent='Booking…'; $('#pay-error').textContent='';
+  let r;
+  try{ r=await (await fetch('/api/points?action=book',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+    dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin,
+    name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim() }) })).json(); }
+  catch(e){ r={ ok:false, error:'Network error — please try again.' }; }
+  paying=false;
+  if(r && r.ok){ $('#pay-overlay').classList.remove('show'); showConfirmation($('#sc-name').value.trim()||'Guest'); return; }
+  btn.disabled=false; btn.textContent='Book with my points';
+  $('#pay-error').textContent = (r&&r.error==='insufficient') ? 'Not enough points for this session.'
+    : (r&&r.error==='no_account') ? 'No points found for that phone number.' : ((r&&r.error)||'Could not book with points — please try again.');
+}
+let pointsCheckTimer=null;
+function schedulePointsCheck(){ clearTimeout(pointsCheckTimer); pointsCheckTimer=setTimeout(checkPointsOption, 450); }
+if($('#sc-email')) $('#sc-email').addEventListener('input', schedulePointsCheck);
+if($('#sc-phone')) $('#sc-phone').addEventListener('input', schedulePointsCheck);
 
 /* Return from a redirect-based payment method (test cards don't redirect). */
 async function handleReturn(){
