@@ -135,9 +135,10 @@ function formView(){
 }
 
 async function load(){
-  // If we can identify the signer, check whether the waiver is already on file.
+  // If we can identify the signer, check whether the waiver is already on file (phone first).
   const q = ctx.customerId ? ('c='+encodeURIComponent(ctx.customerId))
           : ctx.bookingId  ? ('b='+encodeURIComponent(ctx.bookingId))
+          : ctx.phone      ? ('p='+encodeURIComponent(ctx.phone))
           : validEmail(ctx.email) ? ('e='+encodeURIComponent(ctx.email)) : '';
   if(q){
     try{

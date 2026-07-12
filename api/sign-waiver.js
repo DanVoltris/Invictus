@@ -1,4 +1,4 @@
-import { admin } from '../lib/db.js';
+import { admin, customerHoursByContact } from '../lib/db.js';
 
 // Find the customer this waiver belongs to: an explicit customer id, the contact on a booking,
 // or an email/phone match. Only creates a new customer row when `create` is true (i.e. on submit,
@@ -25,8 +25,9 @@ async function resolveCustomer(db, { customerId, bookingId, email, phone, name }
       .select('customer_email,customer_phone,customer_name').eq('id', bookingId).maybeSingle();
     if (bk) { e = e || (bk.customer_email || '').trim().toLowerCase(); p = p || (bk.customer_phone || '').trim(); n = n || (bk.customer_name || '').trim(); }
   }
-  if (e) { const { data } = await db.from('customers').select('*').ilike('email', e).limit(1); if (data && data[0]) return create ? backfill(db, data[0], { e, p, n }) : data[0]; }
-  if (p) { const { data } = await db.from('customers').select('*').eq('phone', p).limit(1); if (data && data[0]) return create ? backfill(db, data[0], { e, p, n }) : data[0]; }
+  // Phone-first, digits-insensitive match (email fallback) — same matcher as everything else.
+  const hit = await customerHoursByContact({ email: e, phone: p });
+  if (hit) return create ? backfill(db, hit, { e, p, n }) : hit;
   // Only create when there's a real identifier (an email) — never a name-only duplicate.
   if (create && e) {
     const { data, error } = await db.from('customers')
@@ -43,7 +44,7 @@ export default async function handler(req, res) {
   // Status check — does this person already have a waiver on file?
   if (req.method === 'GET') {
     const q = req.query || {};
-    const cust = await resolveCustomer(db, { customerId: q.c, bookingId: q.b, email: q.e }, false);
+    const cust = await resolveCustomer(db, { customerId: q.c, bookingId: q.b, email: q.e, phone: q.p }, false);
     if (!cust) return res.status(200).json({ ok: true, signed: false });
     return res.status(200).json({
       ok: true,
