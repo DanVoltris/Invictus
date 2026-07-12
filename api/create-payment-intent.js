@@ -43,11 +43,13 @@ export default async function handler(req, res) {
 
     // Loyalty points as dollars off: discount the charge now; the points are actually deducted
     // when the payment succeeds (confirm-booking/webhook, idempotent by PaymentIntent id).
+    // partialOnly: on this card path a charge must remain — a balance big enough to fully cover
+    // still gets the max discount (50¢ minimum charge) instead of being silently ignored.
     let charge = amount, pointsUsed = 0, pointsCustomerId = '';
     if (applyPoints) {
       const cust = await customerHoursByContact({ email, phone });
-      const r = pointsRedemption(settings, (cust && cust.points_balance) || 0, amount);
-      if (cust && r.pointsUsed > 0 && !r.fullCover) {   // full cover books via /api/points instead
+      const r = pointsRedemption(settings, (cust && cust.points_balance) || 0, amount, { partialOnly: true });
+      if (cust && r.pointsUsed > 0) {
         charge = amount - r.discountCents; pointsUsed = r.pointsUsed; pointsCustomerId = cust.id;
       }
     }

@@ -177,11 +177,13 @@ app.post('/api/create-payment-intent', async (req, res) => {
       expiresAt = h.expiresAt;
     }
     // Loyalty points as dollars off (deducted for real on payment success — see the webhook/confirm).
+    // partialOnly: a charge must remain on this card path — full-cover balances get the max
+    // discount (50¢ minimum charge) instead of being silently ignored.
     let charge = amount, pointsUsed = 0, pointsCustomerId = '';
     if (req.body.applyPoints) {
       const cust = await customerHoursByContact({ email: req.body.email, phone: req.body.phone });
-      const r = pointsRedemption(settings, (cust && cust.points_balance) || 0, amount);
-      if (cust && r.pointsUsed > 0 && !r.fullCover) { charge = amount - r.discountCents; pointsUsed = r.pointsUsed; pointsCustomerId = cust.id; }
+      const r = pointsRedemption(settings, (cust && cust.points_balance) || 0, amount, { partialOnly: true });
+      if (cust && r.pointsUsed > 0) { charge = amount - r.discountCents; pointsUsed = r.pointsUsed; pointsCustomerId = cust.id; }
     }
     const pi = await stripe.paymentIntents.create({
       amount: charge, currency: settings.currency,
