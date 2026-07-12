@@ -33,6 +33,8 @@
   .btn-primary:disabled{background:#2a2a2a;color:#666;cursor:not-allowed}
   .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:#fff;border-color:var(--dim)}
   .err{color:var(--danger);font-size:13px;margin-top:10px;min-height:16px}
+  .ph-hint{font-size:12px;color:var(--dim);margin:5px 0 0 2px;min-height:15px;letter-spacing:.01em}
+  .ph-hint.on{color:#7ad492}
   .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:4px 0 4px}
   .tile{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:16px}
   .tile .t-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;font-family:'Space Grotesk'}
@@ -75,6 +77,23 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // NANP (10 digits, optional leading 1) or international with country code (+44…, 0044…).
 const validPhone = p => { const raw=String(p||'').trim(); let d=raw.replace(/\D/g,''); const intl=raw.startsWith('+')||(d.startsWith('00')&&d.length>=12); if(intl&&d.startsWith('00')) d=d.slice(2); return (d.length===10&&!intl)||(d.length===11&&d[0]==='1')||(d.length>=11&&d.length<=15)||(intl&&d.length>=8&&d.length<=15); };
+/* Live country hint while typing a phone number (dial-code prefix match, longest first). */
+const DIAL_CODES={'1':'Canada / United States','7':'Russia / Kazakhstan','20':'Egypt','27':'South Africa','30':'Greece','31':'Netherlands','32':'Belgium','33':'France','34':'Spain','36':'Hungary','39':'Italy','40':'Romania','41':'Switzerland','43':'Austria','44':'United Kingdom','45':'Denmark','46':'Sweden','47':'Norway','48':'Poland','49':'Germany','51':'Peru','52':'Mexico','53':'Cuba','54':'Argentina','55':'Brazil','56':'Chile','57':'Colombia','58':'Venezuela','60':'Malaysia','61':'Australia','62':'Indonesia','63':'Philippines','64':'New Zealand','65':'Singapore','66':'Thailand','81':'Japan','82':'South Korea','84':'Vietnam','86':'China','90':'Turkey','91':'India','92':'Pakistan','93':'Afghanistan','94':'Sri Lanka','95':'Myanmar','98':'Iran','212':'Morocco','213':'Algeria','216':'Tunisia','218':'Libya','221':'Senegal','233':'Ghana','234':'Nigeria','250':'Rwanda','251':'Ethiopia','254':'Kenya','255':'Tanzania','256':'Uganda','260':'Zambia','263':'Zimbabwe','351':'Portugal','352':'Luxembourg','353':'Ireland','354':'Iceland','358':'Finland','359':'Bulgaria','370':'Lithuania','371':'Latvia','372':'Estonia','380':'Ukraine','381':'Serbia','385':'Croatia','386':'Slovenia','420':'Czechia','421':'Slovakia','852':'Hong Kong','853':'Macau','880':'Bangladesh','886':'Taiwan','961':'Lebanon','962':'Jordan','964':'Iraq','965':'Kuwait','966':'Saudi Arabia','971':'United Arab Emirates','972':'Israel','973':'Bahrain','974':'Qatar','977':'Nepal','994':'Azerbaijan','995':'Georgia','998':'Uzbekistan'};
+function phoneCountryHint(v){
+  const raw=String(v||'').trim(); if(!raw) return '';
+  let d=raw.replace(/\D/g,'');
+  const intl=raw.startsWith('+')||d.startsWith('00');
+  if(intl){
+    if(d.startsWith('00')) d=d.slice(2);
+    if(!d) return 'Start with your country code';
+    for(const len of [3,2,1]){ const c=d.slice(0,len); if(DIAL_CODES[c]) return DIAL_CODES[c]+' (+'+c+')'; }
+    return d.length>=4 ? 'Unrecognized country code' : 'Keep typing your country code';
+  }
+  if(d.length>=11&&d.length<=15){ for(const len of [3,2,1]){ const c=d.slice(0,len); if(DIAL_CODES[c]) return DIAL_CODES[c]+' (+'+c+')'; } }
+  if(d.length>=3) return 'Canada / United States (+1)';
+  return '';
+}
+function wirePhoneHint(inp,host){ if(!inp||!host) return; const upd=()=>{ const h=phoneCountryHint(inp.value); host.textContent=h; host.classList.toggle('on',/\(\+/.test(h)); }; inp.addEventListener('input',upd); upd(); }
 const fmtHrs = min => (Math.round((min||0)/6)/10)+' hrs';
 const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
 function render(html){ $('#content').innerHTML = html; }
@@ -86,11 +105,13 @@ function askView(msg){
     <div class="sub">Enter the phone number you book with to see your bookings, points, hours and membership.</div>
     <label class="fld" for="a-c">Phone number</label>
     <input class="input" id="a-c" type="tel" placeholder="(204) 000-0000" value="${esc(saved)}" autocomplete="tel" />
+    <div class="ph-hint" id="a-ph-hint"></div>
     <div class="err" id="a-err">${esc(msg||'')}</div>
     <button class="btn btn-primary" id="a-go">View my account</button>
   </div>`);
   const inp=$('#a-c'), go=$('#a-go');
   inp.addEventListener('input',()=>{ inp.classList.remove('invalid'); $('#a-err').textContent=''; });
+  wirePhoneHint(inp, $('#a-ph-hint'));
   inp.addEventListener('keydown',e=>{ if(e.key==='Enter') go.click(); });
   go.onclick=()=>{
     const v=inp.value.trim();
