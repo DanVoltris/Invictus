@@ -73,7 +73,8 @@
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const validPhone = p => { const d=(p||'').replace(/\D/g,''); return (d.length===11&&d[0]==='1'?d.slice(1):d).length===10; };
+// NANP (10 digits, optional leading 1) or international with country code (+44…, 0044…).
+const validPhone = p => { const raw=String(p||'').trim(); let d=raw.replace(/\D/g,''); const intl=raw.startsWith('+')||(d.startsWith('00')&&d.length>=12); if(intl&&d.startsWith('00')) d=d.slice(2); return (d.length===10&&!intl)||(d.length===11&&d[0]==='1')||(d.length>=11&&d.length<=15)||(intl&&d.length>=8&&d.length<=15); };
 const fmtHrs = min => (Math.round((min||0)/6)/10)+' hrs';
 const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
 function render(html){ $('#content').innerHTML = html; }
@@ -93,7 +94,7 @@ function askView(msg){
   inp.addEventListener('keydown',e=>{ if(e.key==='Enter') go.click(); });
   go.onclick=()=>{
     const v=inp.value.trim();
-    if(!validPhone(v)){ $('#a-err').textContent='Enter a valid 10-digit phone number.'; inp.classList.add('invalid'); inp.focus(); return; }
+    if(!validPhone(v)){ $('#a-err').textContent='Enter a valid phone number (international: include your country code, e.g. +44…).'; inp.classList.add('invalid'); inp.focus(); return; }
     localStorage.setItem('jhg-contact', v);
     load(v);
   };

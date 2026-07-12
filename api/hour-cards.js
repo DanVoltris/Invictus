@@ -10,7 +10,8 @@ import {
 // One function for the whole hour-card flow (kept single to stay within the Hobby function limit).
 // Dispatch on ?action= — list | checkout | confirm | balance | book.
 const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e || '').trim());
-const validPhone = (p) => { const d = (p || '').replace(/\D/g, ''); return (d.length === 11 && d[0] === '1' ? d.slice(1) : d).length === 10; };
+// Accepts NANP (10 digits, optional leading 1) and international numbers (+ or 00 + country code).
+const validPhone = (p) => { const raw = String(p || '').trim(); let d = raw.replace(/\D/g, ''); const intl = raw.startsWith('+') || (d.startsWith('00') && d.length >= 12); if (intl && d.startsWith('00')) d = d.slice(2); return (d.length === 10 && !intl) || (d.length === 11 && d[0] === '1') || (d.length >= 11 && d.length <= 15) || (intl && d.length >= 8 && d.length <= 15); };
 
 export default async function handler(req, res) {
   const action = (req.query && req.query.action) || '';

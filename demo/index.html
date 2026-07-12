@@ -1053,12 +1053,13 @@ window.addEventListener('pagehide', releaseCurrentHold);   // free the slot if t
 /* Simulated fallback Pay button */
 // Basic "is this real" checks so bookings carry a usable email + phone.
 const validEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e||'').trim());
-function validPhone(p){ let d=(p||'').replace(/\D/g,''); if(d.length===11&&d[0]==='1') d=d.slice(1); return /^[2-9]\d{2}[2-9]\d{6}$/.test(d); }
+// NANP (10 digits, optional leading 1) or international with country code (+44…, 0044…).
+function validPhone(p){ const raw=String(p||'').trim(); let d=raw.replace(/\D/g,''); const intl=raw.startsWith('+')||(d.startsWith('00')&&d.length>=12); if(intl&&d.startsWith('00')) d=d.slice(2); if(d.length===10&&!intl) return /^[2-9]\d{2}[2-9]\d{6}$/.test(d); if(d.length===11&&d[0]==='1') return /^[2-9]\d{2}[2-9]\d{6}$/.test(d.slice(1)); return (d.length>=11&&d.length<=15)||(intl&&d.length>=8&&d.length<=15); }
 function checkContact(emailEl, phoneEl, errEl){
   errEl.textContent='';
   [emailEl,phoneEl].forEach(el=>el.classList.remove('invalid'));
   if(!validEmail(emailEl.value)){ errEl.textContent='Please enter a valid email address.'; emailEl.classList.add('invalid'); emailEl.focus(); return false; }
-  if(!validPhone(phoneEl.value)){ errEl.textContent='Please enter a valid 10-digit phone number.'; phoneEl.classList.add('invalid'); phoneEl.focus(); return false; }
+  if(!validPhone(phoneEl.value)){ errEl.textContent='Please enter a valid phone number (international: include your country code, e.g. +44…).'; phoneEl.classList.add('invalid'); phoneEl.focus(); return false; }
   return true;
 }
 ['#sc-email','#sc-phone','#cust-email','#cust-phone'].forEach(s=>{ const el=$(s); if(el) el.addEventListener('input',()=>el.classList.remove('invalid')); });
