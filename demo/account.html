@@ -73,7 +73,6 @@
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const validEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e||'').trim());
 const validPhone = p => { const d=(p||'').replace(/\D/g,''); return (d.length===11&&d[0]==='1'?d.slice(1):d).length===10; };
 const fmtHrs = min => (Math.round((min||0)/6)/10)+' hrs';
 const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
@@ -83,9 +82,9 @@ function askView(msg){
   const saved=localStorage.getItem('jhg-contact')||'';
   render(`<div class="card">
     <h1>My account</h1>
-    <div class="sub">Enter the phone number (or email) you book with to see your bookings, points, hours and membership.</div>
-    <label class="fld" for="a-c">Phone or email</label>
-    <input class="input" id="a-c" placeholder="(204) 000-0000 or you@email.com" value="${esc(saved)}" autocomplete="tel" />
+    <div class="sub">Enter the phone number you book with to see your bookings, points, hours and membership.</div>
+    <label class="fld" for="a-c">Phone number</label>
+    <input class="input" id="a-c" type="tel" placeholder="(204) 000-0000" value="${esc(saved)}" autocomplete="tel" />
     <div class="err" id="a-err">${esc(msg||'')}</div>
     <button class="btn btn-primary" id="a-go">View my account</button>
   </div>`);
@@ -94,7 +93,7 @@ function askView(msg){
   inp.addEventListener('keydown',e=>{ if(e.key==='Enter') go.click(); });
   go.onclick=()=>{
     const v=inp.value.trim();
-    if(!validPhone(v) && !validEmail(v)){ $('#a-err').textContent='Enter a valid 10-digit phone number or email.'; inp.classList.add('invalid'); inp.focus(); return; }
+    if(!validPhone(v)){ $('#a-err').textContent='Enter a valid 10-digit phone number.'; inp.classList.add('invalid'); inp.focus(); return; }
     localStorage.setItem('jhg-contact', v);
     load(v);
   };
@@ -103,10 +102,9 @@ function askView(msg){
 
 async function load(contact){
   render('<div class="card"><div class="spin">Loading your account…</div></div>');
-  const q = validPhone(contact) ? 'phone='+encodeURIComponent(contact) : 'email='+encodeURIComponent(contact);
   let r;
-  try{ r = await (await fetch('/api/booking?'+q)).json(); }catch(e){ r=null; }
-  if(!(r && r.ok)){ askView("We couldn't find an account for that — use the same phone/email you book with, or make a booking first."); return; }
+  try{ r = await (await fetch('/api/booking?phone='+encodeURIComponent(contact))).json(); }catch(e){ r=null; }
+  if(!(r && r.ok)){ askView("We couldn't find an account for that number — use the same phone you book with, or make a booking first."); return; }
   accountView(r, contact);
 }
 
@@ -129,7 +127,7 @@ function accountView(r, contact){
       <div class="tile"><div class="t-k">Hours bank</div><div class="t-v">${fmtHrs(a.hoursBalanceMin)}</div></div>
       <div class="tile"><div class="t-k">Membership</div>${mem}</div>
     </div>
-    ${a.waiverSigned?'':`<a class="btn btn-ghost" href="/waiver?${validPhone(contact)?'p':'e'}=${encodeURIComponent(contact)}" style="margin-top:12px">Sign the waiver before your visit</a>`}
+    ${a.waiverSigned?'':`<a class="btn btn-ghost" href="/waiver?p=${encodeURIComponent(contact)}" style="margin-top:12px">Sign the waiver before your visit</a>`}
     <div class="sec-title">Upcoming bookings</div>
     ${upcoming.length?upcoming.map(bkRow).join(''):'<div class="empty">Nothing booked — treat yourself to a session.</div>'}
     ${past.length?`<div class="sec-title">Past bookings</div>${past.slice(0,8).map(bkRow).join('')}`:''}
@@ -137,13 +135,13 @@ function accountView(r, contact){
       <a class="btn btn-primary" href="/">Book a session</a>
       <a class="btn btn-ghost" href="/hours">Buy an hour card</a>
     </div>
-    <div class="switch">Not you? <a id="a-switch">Use a different phone/email</a></div>
+    <div class="switch">Not you? <a id="a-switch">Use a different phone number</a></div>
   </div>`);
   $('#a-switch').onclick=()=>{ localStorage.removeItem('jhg-contact'); askView(); };
 }
 
 const saved=localStorage.getItem('jhg-contact');
-if(saved && (validPhone(saved)||validEmail(saved))) load(saved); else askView();
+if(saved && validPhone(saved)) load(saved); else askView();
 </script>
 </body>
 </html>
