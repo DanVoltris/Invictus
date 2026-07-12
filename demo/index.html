@@ -56,6 +56,8 @@
   .nav-mem { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 13px; color: var(--orange); text-decoration: none; border: 1px solid var(--orange); padding: 8px 16px; border-radius: 999px; transition: .15s; white-space: nowrap; }
   .nav-mem:hover { background: rgba(240,82,61,.12); }
   .nav-links { display: flex; align-items: center; gap: 10px; }
+  .nav-acct { background: var(--orange); color: #fff; }
+  .nav-acct:hover { background: #ff6450; }
   @media (max-width: 520px){ .nav-mem { padding: 7px 12px; font-size: 12px; } .nav-links { gap: 7px; } }
 
   /* Hero / progress */
@@ -374,6 +376,7 @@
     <div class="nav-links">
       <a class="nav-mem" href="/hours">Hour Cards</a>
       <a class="nav-mem" href="/membership">Memberships</a>
+      <a class="nav-mem nav-acct" href="/account">My Account</a>
     </div>
   </div>
 </header>

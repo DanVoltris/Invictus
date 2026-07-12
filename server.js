@@ -94,6 +94,7 @@ app.get('/manage', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'man
 app.get('/waiver', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'waiver.html')));
 app.get('/membership', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'membership.html')));
 app.get('/hours', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'hours.html')));
+app.get('/account', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'account.html')));
 app.use(express.static(path.join(__dirname, 'demo')));
 
 // Waiver signing + booking confirmation + membership purchase (same handlers the Vercel functions use).

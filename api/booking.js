@@ -1,12 +1,43 @@
-import { admin, getSettings } from '../lib/db.js';
-import { normalizeSettings, bayName, fmtMin, hoursUntilBooking } from '../lib/booking.js';
+import { admin, getSettings, accountSummary } from '../lib/db.js';
+import { normalizeSettings, bayName, fmtMin, hoursUntilBooking, winnipegTodayISO } from '../lib/booking.js';
 
 // Customer self-service, one function (keeps the deployment under Vercel's function cap):
-//   GET  ?id=…  → read-only lookup of a booking (customer-safe fields only)
-//   POST {id}   → cancel the booking (24-hour policy enforced server-side)
+//   GET  ?id=…            → read-only lookup of a booking (customer-safe fields only)
+//   GET  ?phone=… / ?email=… → account summary: profile, balances, membership, bookings
+//   POST {id}             → cancel the booking (24-hour policy enforced server-side)
 export default async function handler(req, res) {
   if (req.method === 'POST') return cancel(req, res);
+  if (req.query && (req.query.phone || req.query.email) && !req.query.id) return account(req, res);
   return lookup(req, res);
+}
+
+async function account(req, res) {
+  const { phone, email } = req.query || {};
+  const sum = await accountSummary({ email, phone });
+  if (!sum) return res.status(404).json({ ok: false, error: 'not_found' });
+  const settings = normalizeSettings(await getSettings());
+  const c = sum.customer, today = winnipegTodayISO();
+  res.status(200).json({
+    ok: true,
+    account: {
+      name: c.name || null,
+      pointsBalance: c.points_balance || 0,
+      hoursBalanceMin: c.hours_balance_min || 0,
+      membership: sum.membership,
+      waiverSigned: !!c.waiver_signed_at,
+      smsOptIn: c.sms_opt_in !== false,
+    },
+    bookings: sum.bookings.map((b) => ({
+      id: b.id,
+      date: b.booking_date,
+      start: fmtMin(b.start_min),
+      end: fmtMin(b.end_min),
+      bay: bayName(settings, b.bay_id) || b.bay_id,
+      status: b.status,
+      source: b.source || null,
+      upcoming: b.status === 'confirmed' && b.booking_date >= today,
+    })),
+  });
 }
 
 async function lookup(req, res) {
