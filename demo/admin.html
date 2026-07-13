@@ -331,6 +331,15 @@
   .gcard .stl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:999px;line-height:1.6;white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis}
   .gcard .bnote{display:block;font-size:11px;color:var(--muted);font-style:italic;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ovr-banner{background:rgba(240,82,61,.10);border:1px solid rgba(240,82,61,.4);color:#e0796f;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px}
+  /* Search Customers — grid view */
+  .cu-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+  .cu-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 17px;cursor:pointer;transition:.12s}
+  .cu-card:hover{border-color:var(--dim)}
+  .cu-card .cuc-name{font-family:'Space Grotesk';font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .cu-card .cuc-contact{color:var(--muted);font-size:12.5px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cu-card .cuc-meta{color:var(--dim);font-size:12px;margin-top:8px}
+  .cu-card .cuc-badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+  .cu-card .cuc-badges .pill{font-size:10px}
   /* Weekly status editor */
   .wk-row{display:grid;grid-template-columns:88px 210px 1fr;gap:14px;align-items:start;padding:13px 0;border-top:1px solid var(--border)}
   .wk-row:first-child{border-top:none}
@@ -558,6 +567,7 @@
           <div><h2>Search Customers</h2><div class="day-label">Everyone who's booked or joined — search, edit, assign a membership.</div></div>
           <div class="day-nav">
             <input class="input" id="cu-q" placeholder="Search name / email / phone" style="width:220px" />
+            <div class="seg seg-sm" id="cu-view"><button data-v="list" class="on">List</button><button data-v="grid">Grid</button></div>
             <button class="btn btn-ghost btn-sm" id="cu-import" title="Create customer records from existing bookings">Import from bookings</button>
             <button class="btn btn-primary" id="cu-add">+ Add customer</button>
           </div>
@@ -567,7 +577,8 @@
           <div class="stat"><div class="stat-n" id="cu-members">0</div><div class="stat-l">Members</div></div>
           <div class="stat"><div class="stat-n" id="cu-visits">0</div><div class="stat-l">Total bookings</div></div>
         </div>
-        <div class="card"><div class="tbl-scroll"><table id="cu-table"></table></div></div>
+        <div class="card" id="cu-list-wrap"><div class="tbl-scroll"><table id="cu-table"></table></div></div>
+        <div id="cu-grid" class="cu-grid" style="display:none"></div>
       </div>
 
       <!-- MEMBERSHIP -->
@@ -1778,15 +1789,20 @@ async function loadCustomers(){
   await loadVocab(); await fetchCustomers(); await fetchCustStats();
   renderCustomers();
 }
+let CU_VIEW = localStorage.getItem('jhg-cu-view')==='grid' ? 'grid' : 'list';
 function renderCustomers(){
   const term=($('#cu-q').value||'').trim().toLowerCase();
   const rows=CUSTOMERS.filter(c=>!term || [c.name,c.email,c.phone,c.waiver_code].some(x=>(x||'').toLowerCase().includes(term)));
   const members=CUSTOMERS.filter(c=>c.membership_id).length;
   const visits=CUSTOMERS.reduce((s,c)=>s+statsFor(c).count,0);   // live bookings only (imported history stays per-row)
   $('#cu-total').textContent=CUSTOMERS.length; $('#cu-members').textContent=members; $('#cu-visits').textContent=visits;
+  $('#cu-list-wrap').style.display = CU_VIEW==='list' ? '' : 'none';
+  $('#cu-grid').style.display = CU_VIEW==='grid' ? '' : 'none';
+  const empty='<div class="empty">'+(CUSTOMERS.length?'No customers match your search.':'No customers yet — add one or import from bookings.')+'</div>';
+  if(CU_VIEW==='grid'){ renderCustGrid(rows, empty); return; }
   const tbl=$('#cu-table');
   if(!rows.length){ tbl.innerHTML='<tbody><tr><td class="empty">'+(CUSTOMERS.length?'No customers match your search.':'No customers yet — add one or import from bookings.')+'</td></tr></tbody>'; return; }
-  tbl.innerHTML=`<thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Membership</th><th>Bookings</th><th>Cancelled</th><th>Waiver</th><th>Last visit</th><th></th></tr></thead><tbody>${
+  tbl.innerHTML=`<thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Membership</th><th>Bookings</th><th>Cancelled</th><th>Points</th><th>Waiver</th><th>Last visit</th><th></th></tr></thead><tbody>${
     rows.map(c=>{ const st=statsFor(c); return `<tr data-id="${c.id}">
       <td><span class="name-link cu-edit">${esc(c.name||'—')}</span></td>
       <td class="muted">${esc(c.email||'')}</td>
@@ -1794,6 +1810,7 @@ function renderCustomers(){
       <td>${c.membership_id?`<span class="pill manager">${esc(planName(c.membership_id))}</span>`:'<span class="dim">—</span>'}${expiryBits(c)}</td>
       <td>${st.count+(c.legacy_bookings||0)}</td>
       <td class="${(c.legacy_cancelled||0)>0?'':'dim'}">${c.legacy_cancelled||0}</td>
+      <td class="${(c.points_balance||0)>0?'':'dim'}" style="${(c.points_balance||0)>0?'font-weight:700':''}">${(c.points_balance||0).toLocaleString()}</td>
       <td>${c.waiver_code?`<span class="wv-code">${esc(c.waiver_code)}</span>`:'<span class="dim">—</span>'}</td>
       <td class="muted">${st.last?shortDate(st.last):'—'}</td>
       <td style="text-align:right;white-space:nowrap">
@@ -1808,6 +1825,31 @@ function renderCustomers(){
     tr.querySelector('.cu-del').onclick=async()=>{ if(await dbDelete('customers',id)){ toast('Customer deleted','ok'); loadCustomers(); } };
   });
 }
+// Grid view: one card per customer — click to open their profile (edit/delete/adjust live there).
+function renderCustGrid(rows, empty){
+  const host=$('#cu-grid');
+  if(!rows.length){ host.innerHTML=empty; return; }
+  host.innerHTML=rows.map(c=>{ const st=statsFor(c); const pts=c.points_balance||0, hrs=c.hours_balance_min||0;
+    return `<div class="cu-card" data-id="${c.id}">
+      <div class="cuc-name"><span>${esc(c.name||'(no name)')}</span>${c.membership_id?`<span class="pill manager">${esc(planName(c.membership_id))}</span>`:''}</div>
+      <div class="cuc-contact">${esc(fmtPhone(c.phone)||c.email||'—')}${c.phone&&c.email?` · ${esc(c.email)}`:''}</div>
+      <div class="cuc-meta">${st.count+(c.legacy_bookings||0)} booking${(st.count+(c.legacy_bookings||0))===1?'':'s'}${st.last?` · last ${shortDate(st.last)}`:''}</div>
+      <div class="cuc-badges">
+        ${pts>0?`<span class="pill confirmed">${pts.toLocaleString()} pts</span>`:''}
+        ${hrs>0?`<span class="pill" style="background:rgba(74,163,255,.12);color:#7ab8ff;border:1px solid rgba(74,163,255,.4)">${fmtHrs(hrs)}</span>`:''}
+        ${c.waiver_code?'<span class="pill confirmed">Waiver</span>':'<span class="pill cancelled">No waiver</span>'}
+      </div>
+    </div>`; }).join('');
+  host.querySelectorAll('.cu-card').forEach(el=>el.onclick=()=>{ const c=CUSTOMERS.find(x=>x.id===el.dataset.id); if(c) openCustomer(c); });
+}
+$('#cu-view').querySelectorAll('button').forEach(b=>{
+  b.classList.toggle('on', b.dataset.v===CU_VIEW);   // reflect the remembered view on load
+  b.onclick=()=>{
+    CU_VIEW=b.dataset.v; localStorage.setItem('jhg-cu-view',CU_VIEW);
+    $('#cu-view').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    renderCustomers();
+  };
+});
 $('#cu-q').addEventListener('input', ()=>renderCustomers());
 $('#cu-add').onclick=()=>openCustomer(null);
 $('#cu-import').onclick=async()=>{
