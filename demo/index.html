@@ -276,10 +276,13 @@
   .ph-hint.on { color: #7ad492; }
   .sms-toggle { display: flex; align-items: center; gap: 11px; margin-top: 14px; cursor: pointer; font-size: 13px; color: var(--muted); line-height: 1.3; }
   .sms-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-  .sms-track { flex: none; width: 42px; height: 24px; border-radius: 999px; background: #333; position: relative; transition: .18s; }
-  .sms-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: .18s; }
-  .sms-toggle input:checked + .sms-track { background: var(--orange); }
-  .sms-toggle input:checked + .sms-track .sms-thumb { transform: translateX(18px); }
+  .sms-track { flex: none; width: 54px; height: 26px; border-radius: 999px; background: #262626; border: 1px solid #4a4a4a; position: relative; transition: .18s; }
+  .sms-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #8a8a8a; transition: .18s; }
+  /* The state is written on the track so on/off is unmistakable */
+  .sms-track:after { content: 'OFF'; position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-family: 'Space Grotesk'; font-size: 9px; font-weight: 700; letter-spacing: .05em; color: #9a9a9a; }
+  .sms-toggle input:checked + .sms-track { background: var(--orange); border-color: var(--orange); }
+  .sms-toggle input:checked + .sms-track .sms-thumb { transform: translateX(28px); background: #fff; }
+  .sms-toggle input:checked + .sms-track:after { content: 'ON'; right: auto; left: 9px; color: #fff; }
   .sms-toggle input:focus-visible + .sms-track { outline: 2px solid var(--orange); outline-offset: 2px; }
   .sms-txt small { display: block; color: var(--dim); font-size: 11px; margin-top: 1px; }
   /* "Pay with hours" option in checkout */
@@ -377,7 +380,7 @@
       <span id="bf" class="brand-fallback" style="display:none"><span class="joy">JOY</span><span class="hg">HOUSE GOLF</span></span>
     </div>
     <div class="nav-links">
-      <a class="nav-mem" href="/hours">Hour Cards</a>
+      <a class="nav-mem" href="/hours">Hours Cards</a>
       <a class="nav-mem" href="/membership">Memberships</a>
       <a class="nav-mem nav-acct" href="/account">My Account</a>
     </div>

@@ -472,7 +472,7 @@
         <div class="side-cap">Operations</div>
         <div class="tab active" data-tab="bookings">Tee Sheet</div>
         <div class="tab" data-tab="membership">Members</div>
-        <div class="tab" data-tab="hourcards">Hour Cards</div>
+        <div class="tab" data-tab="hourcards">Hours Cards</div>
         <div class="tab" data-tab="points">Points</div>
         <div class="tab" data-tab="logs">Booking Logs</div>
         <div class="tab" data-tab="customers">Search Customers</div>
@@ -786,7 +786,7 @@
       <!-- TAGS -->
       <div id="tab-hourcards" class="hidden">
         <div class="toolbar">
-          <div><h2>Hour Cards</h2><div class="day-label">Prepaid range-time cards customers can buy online. Hours land on their account and draw down as they play.</div></div>
+          <div><h2>Hours Cards</h2><div class="day-label">Prepaid range-time cards customers can buy online. Hours land on their account and draw down as they play.</div></div>
           <div class="day-nav"><button class="btn btn-primary" id="add-card">+ Add card</button></div>
         </div>
         <div id="cards-list"></div>
@@ -2086,7 +2086,7 @@ $('#add-plan').onclick=async()=>{ if(await dbInsert('memberships',{name:'New pla
 const fmtHrs = min => (Math.round((min||0)/6)/10) + ' hr' + (Math.abs(min)===60?'':'s');
 async function loadHourCardsTab(){
   const { data, error } = await sb.from('hour_cards').select('*').order('sort');
-  if(error){ if(!isAuthError(error)) $('#cards-list').innerHTML='<div class="empty">Run database migration 0015 (supabase/migrations) to enable hour cards.</div>'; return; }
+  if(error){ if(!isAuthError(error)) $('#cards-list').innerHTML='<div class="empty">Run database migration 0015 (supabase/migrations) to enable hours cards.</div>'; return; }
   const cards=data||[];
   $('#cards-list').innerHTML = `<div class="plans-grid">${cards.map(c=>{
     const perHr = c.hours>0 ? Math.round((c.price_cents||0)/100/c.hours) : 0;
@@ -2101,7 +2101,7 @@ async function loadHourCardsTab(){
         <div style="display:flex;align-items:flex-end;padding-bottom:11px"><span class="dim" style="font-size:12px">${perHr?'$'+perHr+'/hr effective':''}</span></div>
       </div>
       <div class="save-bar"><button class="btn btn-danger btn-sm hc-del">Delete card</button></div>
-    </div>`; }).join('')||'<div class="empty">No hour cards yet — add one.</div>'}</div>`;
+    </div>`; }).join('')||'<div class="empty">No hours cards yet — add one.</div>'}</div>`;
   document.querySelectorAll('#cards-list .plan-card').forEach(card=>{
     const id=card.dataset.id;
     const save=async()=>{ const patch={ name:card.querySelector('.hc-name').value.trim()||'Card',
