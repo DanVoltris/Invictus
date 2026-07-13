@@ -3029,21 +3029,20 @@ function buildDatePicker(inp){
     pop.querySelector('[data-clear]').onclick=()=>{ setVal(''); close(); };
   }
   function place(){
-    // Hard-clamp to the viewport on both axes: prefer opening below the field, flip above
-    // when there's more room there, and never let any edge leave the screen.
-    const r=trig.getBoundingClientRect(), W=window.innerWidth, H=window.innerHeight;
-    const PW=266, PH=pop.offsetHeight||330, gap=6, m=8;
+    // An ancestor with backdrop-filter/transform (the sticky toolbar) becomes the containing
+    // block for position:fixed, so style coordinates aren't viewport coordinates there.
+    // Measure where (0,0) actually lands and subtract that origin — correct everywhere.
+    const r=trig.getBoundingClientRect(), W=window.innerWidth, H=window.innerHeight, gap=6, m=8;
     pop.style.position='fixed'; pop.style.right='auto'; pop.style.bottom='auto';
-    pop.style.left=Math.max(m, Math.min(r.left, W-PW-m))+'px';
+    pop.style.left='0px'; pop.style.top='0px';
+    const base=pop.getBoundingClientRect();          // containing-block origin, in viewport coords
+    const PW=base.width||266, PH=base.height||330;
+    const left=Math.max(m, Math.min(r.left, W-PW-m));
     const below=H-r.bottom-gap-m, above=r.top-gap-m;
-    const top = (below>=PH || below>=above) ? Math.min(r.bottom+gap, H-PH-m) : Math.max(m, r.top-gap-PH);
-    pop.style.top=Math.max(m, top)+'px';
-    // Self-correct with the popup's REAL rendered box — covers any width/zoom/style surprise.
-    const pr=pop.getBoundingClientRect();
-    if(pr.right>W-m) pop.style.left=Math.max(m, W-m-pr.width)+'px';
-    if(pr.bottom>H-m) pop.style.top=Math.max(m, H-m-pr.height)+'px';
-    if(pr.left<m) pop.style.left=m+'px';
-    if(pr.top<m) pop.style.top=m+'px';
+    let top=(below>=PH || below>=above) ? Math.min(r.bottom+gap, H-PH-m) : Math.max(m, r.top-gap-PH);
+    top=Math.max(m, top);
+    pop.style.left=(left-base.left)+'px';
+    pop.style.top=(top-base.top)+'px';
   }
   function open(){
     const v=dpParse(inp.value)||todayLocal(); vy=v.y; vm=v.m; render();
@@ -3087,17 +3086,20 @@ function enhanceSelect(sel){
   }
   // Float the list with fixed positioning so a scrollable sheet can't clip it or grow to fit it.
   function place(){
-    const r=trig.getBoundingClientRect(), gap=6, margin=12;
-    const below=window.innerHeight-r.bottom-margin, above=r.top-margin;
+    // Same containing-block trap as the date picker (see its place()): measure the origin of
+    // (0,0) for this popup and offset from it, so fixed coordinates mean viewport coordinates.
+    const r=trig.getBoundingClientRect(), W=window.innerWidth, H=window.innerHeight, gap=6, margin=12, m=8;
+    const below=H-r.bottom-margin, above=r.top-margin;
     const up = below<220 && above>below;                 // flip up only when cramped below and roomier above
-    pop.style.position='fixed'; pop.style.left=r.left+'px'; pop.style.width=r.width+'px'; pop.style.right='auto';
+    pop.style.position='fixed'; pop.style.right='auto'; pop.style.bottom='auto';
+    pop.style.width=r.width+'px';
     pop.style.maxHeight=Math.max(160,Math.min(320,(up?above:below)))+'px';   // always fits inside the viewport
-    if(up){ pop.style.top='auto'; pop.style.bottom=(window.innerHeight-r.top+gap)+'px'; }
-    else { pop.style.bottom='auto'; pop.style.top=(r.bottom+gap)+'px'; }
-    // Self-correct horizontally with the real rendered box (long option lists, small windows).
-    const pr=pop.getBoundingClientRect();
-    if(pr.right>window.innerWidth-8) pop.style.left=Math.max(8, window.innerWidth-8-pr.width)+'px';
-    if(pr.left<8) pop.style.left='8px';
+    pop.style.left='0px'; pop.style.top='0px';
+    const base=pop.getBoundingClientRect();          // containing-block origin + real size
+    const left=Math.max(m, Math.min(r.left, W-m-base.width));
+    const top = up ? Math.max(m, r.top-gap-base.height) : Math.min(r.bottom+gap, H-m-base.height);
+    pop.style.left=(left-base.left)+'px';
+    pop.style.top=(Math.max(m,top)-base.top)+'px';
   }
   function open(){ build(); pop.classList.remove('hidden'); place(); OPEN_POP={pop,trig,place}; }
   trig.onclick=e=>{ e.stopPropagation(); if(sel.disabled) return; const wasOpen=!pop.classList.contains('hidden'); closeAllPops(); if(!wasOpen) open(); };
