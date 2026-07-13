@@ -25,9 +25,11 @@
   .head-block{text-align:center;margin-bottom:26px}
   .head-block h1{font-size:30px;margin-bottom:8px}
   .head-block .sub{color:var(--dim);font-size:14.5px;line-height:1.55;max-width:520px;margin:0 auto}
-  .plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
-  .plan{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 22px;display:flex;flex-direction:column;border-top-width:3px}
-  .plan-name{font-family:'Space Grotesk';font-weight:700;font-size:19px;margin-bottom:8px}
+  /* Fixed-width cards on centered wrap lines — partial rows stay symmetric. */
+  .plans{display:flex;flex-wrap:wrap;justify-content:center;gap:16px}
+  .plan{width:296px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 22px;display:flex;flex-direction:column;border-top-width:3px}
+  @media(max-width:680px){ .plan{width:100%} }
+  .plan-name{font-family:'Space Grotesk';font-weight:700;font-size:19px;margin-bottom:8px;min-height:50px;line-height:1.3}
   .plan-price{font-family:'Space Grotesk';font-weight:700;font-size:32px;line-height:1}
   .plan-price .per{font-size:14px;font-weight:500;color:var(--dim);margin-left:4px}
   .plan-disc{display:inline-block;align-self:flex-start;margin-top:12px;font-size:12px;font-weight:700;color:var(--ok);background:rgba(78,192,106,.12);border:1px solid rgba(78,192,106,.4);border-radius:999px;padding:4px 11px}
@@ -93,7 +95,7 @@ function plansView(){
         <div class="plan-price">${money(p.price_cents)}<span class="per">${perLabel(p.period)}</span></div>
         ${p.discount_pct?`<div class="plan-disc">${p.discount_pct}% off sessions</div>`:''}
         ${p.perks?`<div class="plan-perks">${esc(p.perks)}</div>`:'<div class="plan-perks"></div>'}
-        <button class="btn btn-primary buy" data-id="${p.id}">Get ${esc(p.name)}</button>
+        <button class="btn btn-primary buy" data-id="${p.id}">Get this membership</button>
       </div>`).join('')}</div>`);
   document.querySelectorAll('.buy').forEach(b=>b.onclick=()=>buyView(PLANS.find(p=>p.id===b.dataset.id)));
 }
