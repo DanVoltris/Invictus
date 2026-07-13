@@ -299,7 +299,7 @@
   .li .bnote{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;font-style:italic}
   .closed-note{color:var(--dim);text-align:center;padding:26px 0;font-size:14px}
   .cell.closed{opacity:.16;cursor:default;background:transparent;border-style:dashed}
-  .cell.pastcell{opacity:.18;cursor:default;background:transparent;border-style:dashed}
+  .cell.pastcell{opacity:.38;filter:grayscale(.65);cursor:default;pointer-events:none}
   .cell.closed:hover{border-color:var(--border)}
   .cell[draggable="true"]{cursor:grab}
   .cell[draggable="true"]:active{cursor:grabbing}
@@ -2097,27 +2097,29 @@ function nowMinWpg(){ const p=new Intl.DateTimeFormat('en-CA',{timeZone:'America
 // A slot is past once it has fully elapsed (the in-progress slot stays editable for walk-ins).
 function pastSlot(iso, m){ const t=todayISO(); if(iso<t) return true; if(iso>t) return false; return m+(SETTINGS.slot_step||30)<=nowMinWpg(); }
 
-// The <td> for a non-booked cell. Open + Closed status cells carry data-bay/data-min so they're paintable.
+// The <td> for a non-booked cell. Open + Closed status cells carry data-bay/data-min so they're
+// paintable. Elapsed slots keep their normal look but render faded + inert (no data attributes,
+// no pointer events) — readable history, clearly not editable.
 function openCellTD(b, iso, m){
-  const dd=iso?` data-date="${iso}"`:'';
   const blk=findOvBlock(b.id, iso, m);   // manual block/closure — not paintable, managed in the Overrides tab
   if(blk) return `<td class="cell ovr" data-ovid="${blk.id}"><span class="nm">${esc(blk.note||'Closed')}</span></td>`;
-  // Elapsed slots are inert — no adding, painting, or dropping bookings into the past.
-  if(pastSlot(iso, m)) return `<td class="cell pastcell"></td>`;
+  const past=pastSlot(iso, m);
+  const p=past?' pastcell':'';
+  const act=past?'':` data-bay="${b.id}" data-min="${m}"`+(iso?` data-date="${iso}"`:'');
   const st=cellStatus(b.id, iso, m);
-  if(st.holding) return `<td class="cell open holdcell" data-bay="${b.id}" data-min="${m}"${dd}>+</td>`;
+  if(st.holding) return `<td class="cell open holdcell${p}"${act}>${past?'':'+'}</td>`;
   const col=norm6(st.color||STATUS_GREEN);
   // Closed + painted statuses wear their exact colour (full-strength border, like the palette swatch);
   // an unpainted "Open" slot stays a quiet green so painted statuses stand out against it.
   if(st.kind==='closed'){
-    return `<td class="cell shut" data-bay="${b.id}" data-min="${m}"${dd} style="--sc:${col};background:${col}2b;border-color:${col};color:${readableOn(col)}"><span class="nm">${esc(st.label||'Closed')}</span></td>`;
+    return `<td class="cell shut${p}"${act} style="--sc:${col};background:${col}2b;border-color:${col};color:${readableOn(col)}"><span class="nm">${esc(st.label||'Closed')}</span></td>`;
   }
   const priceHtml = st.price!=null ? `<span class="price">$${st.price}</span><span class="per">/hr</span>` : '+';
   if(st.painted){
     const lbl = st.label ? `<span class="slbl">${esc(st.label)}</span>` : '';
-    return `<td class="cell open sprice painted" data-bay="${b.id}" data-min="${m}"${dd} style="--sc:${col};background:${col}22;border-color:${col};color:${readableOn(col)}">${priceHtml}${lbl}</td>`;
+    return `<td class="cell open sprice painted${p}"${act} style="--sc:${col};background:${col}22;border-color:${col};color:${readableOn(col)}">${priceHtml}${lbl}</td>`;
   }
-  return `<td class="cell open sprice" data-bay="${b.id}" data-min="${m}"${dd} style="--sc:${col};background:${col}10;border-color:${col}30;color:${readableOn(col)}">${priceHtml}</td>`;
+  return `<td class="cell open sprice${p}"${act} style="--sc:${col};background:${col}10;border-color:${col}30;color:${readableOn(col)}">${priceHtml}</td>`;
 }
 
 // ---- Paint palette + drag interaction ----
