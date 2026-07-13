@@ -299,6 +299,7 @@
   .li .bnote{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;font-style:italic}
   .closed-note{color:var(--dim);text-align:center;padding:26px 0;font-size:14px}
   .cell.closed{opacity:.16;cursor:default;background:transparent;border-style:dashed}
+  .cell.pastcell{opacity:.18;cursor:default;background:transparent;border-style:dashed}
   .cell.closed:hover{border-color:var(--border)}
   .cell[draggable="true"]{cursor:grab}
   .cell[draggable="true"]:active{cursor:grabbing}
@@ -1539,12 +1540,12 @@ function ovBstartSync(){
   $('#ov-bstart').innerHTML=o; $('#ov-bstart')._csSync&&$('#ov-bstart')._csSync();
   ovBendSync();
 }
-// "To" list: single-day = after "From" up to that day's close; multi-day = the end day's operating hours.
+// "To" list: after "From" up to the start day's close. Multi-day blocks apply this same
+// window on each day of the range, so the times always read as one within-day window.
 function ovBendSync(){
-  const s=+$('#ov-bstart').value; const endDate=$('#ov-end').value; const cur=+$('#ov-bend').value;
-  let lo, hi;
-  if(endDate){ const eh=ovDayHours(endDate); lo=eh?eh[0]:0; hi=eh?eh[1]:24*60; }
-  else { const sh=ovDayHours($('#ov-date').value); lo=s+30; hi=sh?sh[1]:24*60; }
+  const s=+$('#ov-bstart').value; const cur=+$('#ov-bend').value;
+  const sh=ovDayHours($('#ov-date').value);
+  let lo=s+30, hi=sh?sh[1]:24*60;
   if(hi<lo) hi=lo;
   const keep = (cur>=lo && cur<=hi) ? cur : lo;
   let o=''; for(let m=lo;m<=hi;m+=30){ o+=`<option value="${m}" ${m===keep?'selected':''}>${m>=1440?'Midnight':fmtMin(m)}</option>`; }
@@ -1555,7 +1556,7 @@ $('#ov-end').addEventListener('change', ovBendSync);
 $('#ov-date').addEventListener('change', ()=>{ if($('#ov-type').value==='block') ovBstartSync(); });
 
 function ovEffect(o){
-  if(o.start_min!=null) return `<span class="pill blocked">${fmtMin(o.start_min)} – ${fmtMin(o.end_min)}</span>`;
+  if(o.start_min!=null) return `<span class="pill blocked">${fmtMin(o.start_min)} – ${fmtMin(o.end_min)}${(o.end_date&&o.end_date!==o.override_date)?' daily':''}</span>`;
   return o.is_closed ? '<span class="pill blocked">Closed all day</span>'
     : `<span class="pill confirmed">${fmtMin((o.open_hour||0)*60)} – ${fmtMin((o.close_hour||0)*60)}</span>`;
 }
@@ -1607,9 +1608,9 @@ $('#ov-add').onclick=async()=>{
     row.open_hour=o; row.close_hour=c; row.bay_ids=[];
   } else {
     const s=+$('#ov-bstart').value, e=+$('#ov-bend').value;
-    if(!end && !(e>s)){ toast('End time must be after the start time','err'); return; }
+    if(!(e>s)){ toast('End time must be after the start time','err'); return; }
     if(!note){ toast('Give the block a reason — it shows on the tee sheet','err'); return; }
-    row.start_min=s; row.end_min=e;
+    row.start_min=s; row.end_min=e;   // multi-day: this window applies on each day in the range
   }
   const { error } = await sb.from('schedule_overrides').insert(row);
   if(error){ if(!isAuthError(error)) toast(/column|bay_ids|is_active|start_min|end_date|duplicate/i.test(error.message)?'Run database migration 0007 first (supabase/migrations).':error.message,'err'); return; }
@@ -2027,9 +2028,8 @@ function findOvBlock(bayId, iso, m){
     const bays=(o.bay_ids&&o.bay_ids.length)?o.bay_ids:null;
     if(bays && !bays.includes(bayId)) return false;
     if(o.start_min!=null){
-      const s = iso===o.override_date ? o.start_min : 0;                 // multi-day block runs continuously
-      const e = iso===(o.end_date||o.override_date) ? o.end_min : 24*60;
-      return m>=s && m<e;
+      // A timed block applies to its window on EVERY day in the range (11–7 each day, not continuous).
+      return m>=o.start_min && m<o.end_min;
     }
     return !!bays && o.is_closed;      // bay-specific all-day closure
   }) || null;
@@ -2066,8 +2066,7 @@ function findOvStatus(bayId, iso, m){
     const bays=(o.bay_ids&&o.bay_ids.length)?o.bay_ids:null;
     if(bays && !bays.includes(bayId)) return false;
     if(o.start_min==null) return true;
-    const s=iso===o.override_date?o.start_min:0, e=iso===(o.end_date||o.override_date)?o.end_min:1440;
-    return m>=s && m<e;
+    return m>=o.start_min && m<o.end_min;   // its window applies on every day in the range
   });
   return o ? { open:!!o.status_open, color:o.status_color, label:o.note||'' } : null;
 }
@@ -2093,11 +2092,18 @@ function cellStatus(bayId, iso, m){
   return { kind:'open', color:STATUS_GREEN, label:'', price, painted:false };   // default Open
 }
 
+// Winnipeg wall-clock minutes since midnight — pairs with todayISO() for past-slot checks.
+function nowMinWpg(){ const p=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Winnipeg',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date()); const g=t=>+(p.find(x=>x.type===t)||{}).value||0; return (g('hour')%24)*60+g('minute'); }
+// A slot is past once it has fully elapsed (the in-progress slot stays editable for walk-ins).
+function pastSlot(iso, m){ const t=todayISO(); if(iso<t) return true; if(iso>t) return false; return m+(SETTINGS.slot_step||30)<=nowMinWpg(); }
+
 // The <td> for a non-booked cell. Open + Closed status cells carry data-bay/data-min so they're paintable.
 function openCellTD(b, iso, m){
   const dd=iso?` data-date="${iso}"`:'';
   const blk=findOvBlock(b.id, iso, m);   // manual block/closure — not paintable, managed in the Overrides tab
   if(blk) return `<td class="cell ovr" data-ovid="${blk.id}"><span class="nm">${esc(blk.note||'Closed')}</span></td>`;
+  // Elapsed slots are inert — no adding, painting, or dropping bookings into the past.
+  if(pastSlot(iso, m)) return `<td class="cell pastcell"></td>`;
   const st=cellStatus(b.id, iso, m);
   if(st.holding) return `<td class="cell open holdcell" data-bay="${b.id}" data-min="${m}"${dd}>+</td>`;
   const col=norm6(st.color||STATUS_GREEN);
@@ -2135,8 +2141,10 @@ function togglePaint(){
 }
 function renderPalette(){
   const bar=$('#paint-bar'), tog=$('#paint-toggle'); if(!bar) return;
-  if(tog){ tog.style.display = VIEW==='day' ? '' : 'none'; tog.classList.toggle('on', PAINT_OPEN && VIEW==='day'); tog.textContent = (PAINT_OPEN&&VIEW==='day') ? 'Done painting' : 'Paint status'; }
-  if(!(VIEW==='day' && PAINT_OPEN)){ bar.style.display='none'; bar.innerHTML=''; document.body.classList.remove('painting'); return; }
+  const paintable = VIEW==='day' && $('#bk-date').value>=todayISO();   // no painting in the past
+  if(!paintable && PAINT_OPEN){ PAINT_OPEN=false; setBrush(null); }
+  if(tog){ tog.style.display = paintable ? '' : 'none'; tog.classList.toggle('on', PAINT_OPEN && paintable); tog.textContent = (PAINT_OPEN&&paintable) ? 'Done painting' : 'Paint status'; }
+  if(!(paintable && PAINT_OPEN)){ bar.style.display='none'; bar.innerHTML=''; document.body.classList.remove('painting'); return; }
   bar.style.display='';
   const ss=scheduleStatuses();
   if(!ss.length){ bar.innerHTML='<span class="paint-lead dim">Add a schedule status to start painting — see the Statuses tab.</span>'; return; }
@@ -2389,6 +2397,7 @@ function wireGridDnD(){
 function gridDrop(id, bayId, dateISO, newStart){
   const b=BK.find(x=>x.id===id); if(!b) return;
   if(b.bay_id===bayId && b.booking_date===dateISO && b.start_min===newStart) return;   // dropped where it already is
+  if(pastSlot(dateISO,newStart)){ toast('Can’t move a booking into the past.','err'); return; }
   const dur=b.end_min-b.start_min, newEnd=newStart+dur;
   const targetBay=(SETTINGS.bays||[]).find(x=>x.id===bayId);
   const holding=targetBay&&targetBay.holding;
@@ -2557,6 +2566,7 @@ function openOverrideSheet(id){
 }
 
 function openAdd(bayId,startMin,dateISO){
+  if(pastSlot(dateISO,startMin)){ toast('That time has passed — pick a current or future slot.','err'); return; }
   const ends=endChoices(bayId,startMin,dateISO);
   if(!ends.length){ toast('No free time right after this slot','err'); return; }
   const def = ends.includes(startMin+60)?startMin+60:ends[ends.length-1];
@@ -2687,9 +2697,11 @@ function openManage(id){
       <div class="kv"><span class="k">Date</span><span>${dateLabel(b.booking_date)}</span></div>
       <div class="kv" style="border:none"><span class="k">Time</span><span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}</span></div>
       ${b.note?`<div class="kv" style="border:none"><span class="k">Note</span><span style="text-align:right;max-width:220px">${esc(b.note)}</span></div>`:''}
-      <button class="btn btn-danger" id="s-cancel" style="width:100%;margin-top:18px">Remove block</button>`;
+      ${pastSlot(b.booking_date, b.end_min-(SETTINGS.slot_step||30))
+        ? `<div class="dim" style="font-size:12px;text-align:center;margin-top:18px">This block is in the past — nothing to remove.</div>`
+        : `<button class="btn btn-danger" id="s-cancel" style="width:100%;margin-top:18px">Remove block</button>`}`;
     overlay.classList.add('show'); $('#x').onclick=closeSheet;
-    $('#s-cancel').onclick=async()=>{
+    if($('#s-cancel')) $('#s-cancel').onclick=async()=>{
       let r=await sb.from('bookings').update({status:'cancelled',cancelled_at:new Date().toISOString()}).eq('id',id);
       if(r.error && /cancelled_at/.test(r.error.message||'')) r=await sb.from('bookings').update({status:'cancelled'}).eq('id',id);
       if(r.error){ toast('Failed: '+r.error.message,'err'); return; }
@@ -2765,7 +2777,9 @@ function openManage(id){
     ${b.status==='confirmed'?`<div class="field" style="margin-bottom:0"><label>Customer self-service link (texted via SMS)</label>
       <div class="row" style="flex-wrap:nowrap;gap:8px"><input class="input" id="m-link" readonly value="${location.origin}/manage?b=${b.id}" style="font-size:12.5px" /><button class="btn btn-ghost btn-sm" id="m-copy" style="white-space:nowrap">Copy</button></div></div>`:''}
     <button class="btn btn-primary" id="m-save" style="width:100%;margin-top:14px">Save changes</button>
-    <button class="btn btn-danger" id="s-cancel" style="width:100%;margin-top:12px">Cancel booking</button>
+    ${pastSlot(b.booking_date, b.end_min-(SETTINGS.slot_step||30))
+      ? `<div class="dim" style="font-size:12px;text-align:center;margin-top:12px">This booking is in the past — it can no longer be cancelled.</div>`
+      : `<button class="btn btn-danger" id="s-cancel" style="width:100%;margin-top:12px">Cancel booking</button>`}
      </div>
     </div>`;
   overlay.classList.add('show');
@@ -2844,7 +2858,7 @@ function openManage(id){
       Object.assign(b,patch); closeSheet(); toast('Booking updated','ok'); loadSchedule();
     };
   }
-  $('#s-cancel').onclick=async()=>{
+  if($('#s-cancel')) $('#s-cancel').onclick=async()=>{
     let r = await sb.from('bookings').update({status:'cancelled', cancelled_at:new Date().toISOString()}).eq('id',id);
     if(r.error && /cancelled_at/.test(r.error.message||'')) r = await sb.from('bookings').update({status:'cancelled'}).eq('id',id);
     if(r.error){ toast('Failed: '+r.error.message,'err'); return; }
