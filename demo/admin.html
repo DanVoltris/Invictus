@@ -3029,11 +3029,15 @@ function buildDatePicker(inp){
     pop.querySelector('[data-clear]').onclick=()=>{ setVal(''); close(); };
   }
   function place(){
-    const r=trig.getBoundingClientRect(), up=r.bottom > window.innerHeight*0.60;
-    pop.style.position='fixed'; pop.style.right='auto';
-    pop.style.left=Math.min(r.left, window.innerWidth-266-12)+'px';
-    if(up){ pop.style.top='auto'; pop.style.bottom=(window.innerHeight-r.top+6)+'px'; }
-    else { pop.style.bottom='auto'; pop.style.top=(r.bottom+6)+'px'; }
+    // Hard-clamp to the viewport on both axes: prefer opening below the field, flip above
+    // when there's more room there, and never let any edge leave the screen.
+    const r=trig.getBoundingClientRect(), W=window.innerWidth, H=window.innerHeight;
+    const PW=266, PH=pop.offsetHeight||330, gap=6, m=8;
+    pop.style.position='fixed'; pop.style.right='auto'; pop.style.bottom='auto';
+    pop.style.left=Math.max(m, Math.min(r.left, W-PW-m))+'px';
+    const below=H-r.bottom-gap-m, above=r.top-gap-m;
+    const top = (below>=PH || below>=above) ? Math.min(r.bottom+gap, H-PH-m) : Math.max(m, r.top-gap-PH);
+    pop.style.top=Math.max(m, top)+'px';
   }
   function open(){
     const v=dpParse(inp.value)||todayLocal(); vy=v.y; vm=v.m; render();

@@ -285,6 +285,13 @@
   .sms-toggle input:checked + .sms-track:after { content: 'ON'; right: auto; left: 9px; color: #fff; }
   .sms-toggle input:focus-visible + .sms-track { outline: 2px solid var(--orange); outline-offset: 2px; }
   .sms-txt small { display: block; color: var(--dim); font-size: 11px; margin-top: 1px; }
+  /* Fills the left checkout column so it balances the taller payment side */
+  .good-to-know { margin-top: 18px; background: var(--near-black); border: 1px solid var(--border); border-radius: 12px; padding: 15px 17px; }
+  .good-to-know .gtk-title { font-family: 'Space Grotesk'; font-weight: 700; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  .good-to-know ul { list-style: none; margin: 0; padding: 0; }
+  .good-to-know li { position: relative; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.55; margin-bottom: 9px; }
+  .good-to-know li:last-child { margin-bottom: 0; }
+  .good-to-know li:before { content: ''; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; border-radius: 2px; background: var(--orange); }
   /* "Pay with hours" option in checkout */
   .hours-opt { margin-top: 14px; background: rgba(74,163,255,.08); border: 1px solid rgba(74,163,255,.4); border-radius: 12px; padding: 13px 14px; }
   .hours-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
@@ -479,6 +486,15 @@
           </label>
           <div id="hours-pay" style="display:none"></div>
           <div id="points-pay" style="display:none"></div>
+          <div class="good-to-know">
+            <div class="gtk-title">Good to know</div>
+            <ul>
+              <li>Free cancellation up to 24 hours before your tee time — a self-service link comes with your confirmation.</li>
+              <li>You earn loyalty points for time played. Check your balance any time under My Account.</li>
+              <li>Have an hours card? Enter the phone number it's linked to and we'll offer it as payment here.</li>
+              <li>First visit? Sign the participant waiver online before you arrive and skip the front desk.</li>
+            </ul>
+          </div>
         </div>
         <div class="col-pay">
           <div id="payment-element"><div class="loading">Loading secure checkout…</div></div>
