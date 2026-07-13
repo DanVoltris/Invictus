@@ -464,6 +464,7 @@
         <div class="tab active" data-tab="bookings">Tee Sheet</div>
         <div class="tab" data-tab="membership">Members</div>
         <div class="tab" data-tab="hourcards">Hour Cards</div>
+        <div class="tab" data-tab="points">Points</div>
         <div class="tab" data-tab="logs">Booking Logs</div>
         <div class="tab" data-tab="customers">Search Customers</div>
         <div class="side-cap">Configuration</div>
@@ -780,6 +781,39 @@
         <div id="cards-list"></div>
       </div>
 
+      <!-- POINTS -->
+      <div id="tab-points" class="hidden">
+        <div class="toolbar">
+          <div><h2>Points</h2><div class="day-label">Loyalty points — earned for time played, redeemed as dollars off. Balances and every change, in one place.</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:16px">
+          <div class="card" style="margin:0"><div class="dim" style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-family:'Space Grotesk'">Outstanding</div><div style="font-family:'Space Grotesk';font-weight:700;font-size:26px;margin-top:6px" id="pts-outstanding">—</div><div class="dim" style="font-size:12px;margin-top:2px" id="pts-outstanding-val"></div></div>
+          <div class="card" style="margin:0"><div class="dim" style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-family:'Space Grotesk'">Earned · 30 days</div><div style="font-family:'Space Grotesk';font-weight:700;font-size:26px;margin-top:6px;color:#7ad492" id="pts-earned">—</div></div>
+          <div class="card" style="margin:0"><div class="dim" style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-family:'Space Grotesk'">Redeemed · 30 days</div><div style="font-family:'Space Grotesk';font-weight:700;font-size:26px;margin-top:6px;color:#e0796f" id="pts-redeemed">—</div></div>
+        </div>
+        <div class="grid2" style="align-items:start">
+          <div class="card">
+            <h3 class="card-h">Rates</h3>
+            <div class="sub">Customers earn points for time played and redeem them as dollars off a booking — online at checkout or in person.</div>
+            <div class="grid2">
+              <div class="field"><label>Points earned per hour played</label><input class="input" id="pt-earn" type="number" min="0" step="1" /></div>
+              <div class="field"><label>Value of 100 points ($ off)</label><input class="input" id="pt-redeem" type="number" min="0" step="1" /></div>
+            </div>
+            <div class="save-bar"><button class="btn btn-primary" id="pt-save">Save points settings</button></div>
+          </div>
+          <div class="card">
+            <h3 class="card-h">Top balances</h3>
+            <div class="sub">Customers holding points — click one to adjust from their profile.</div>
+            <div class="tbl-scroll"><table id="pts-balances"></table></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 class="card-h">Recent activity</h3>
+          <div class="sub">Every change — earns, redemptions and manual adjustments, newest first.</div>
+          <div class="tbl-scroll"><table id="pts-activity"></table></div>
+        </div>
+      </div>
+
       <div id="tab-tags" class="hidden">
         <div class="toolbar">
           <div><h2>Tags</h2><div class="day-label">Free-form labels you can attach to bookings.</div></div>
@@ -822,15 +856,6 @@
             <div class="sub">Shown above the card form at checkout.</div>
             <div class="field"><label>Hold disclaimer</label><textarea class="input" id="p-hold" rows="3"></textarea></div>
             <div class="field"><label>Payment disclaimer</label><textarea class="input" id="p-pay" rows="3"></textarea></div>
-          </div>
-          <div class="card">
-            <h3 class="card-h">Loyalty points</h3>
-            <div class="sub">Customers earn points for time played and redeem them as dollars off a booking — online at checkout or in person.</div>
-            <div class="grid2">
-              <div class="field"><label>Points earned per hour played</label><input class="input" id="pt-earn" type="number" min="0" step="1" /></div>
-              <div class="field"><label>Value of 100 points ($ off)</label><input class="input" id="pt-redeem" type="number" min="0" step="1" /></div>
-            </div>
-            <div class="save-bar"><button class="btn btn-primary" id="pt-save">Save points settings</button></div>
           </div>
         </div>
       </div>
@@ -928,8 +953,8 @@ $('#login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#login-
 $('#logout-btn').onclick = async () => { await sb.auth.signOut(); showLogin(); };
 
 /* ---------- Tabs ---------- */
-const TAB_IDS = ['bookings','logs','customers','membership','hourcards','bays','prices','overrides','templates','statuses','tags','paysettings'];
-const TAB_LOADERS = { logs:loadLogs, customers:loadCustomers, membership:loadMembership, hourcards:loadHourCardsTab, bays:loadBaysTab, prices:loadPricesTab,
+const TAB_IDS = ['bookings','logs','customers','membership','hourcards','points','bays','prices','overrides','templates','statuses','tags','paysettings'];
+const TAB_LOADERS = { logs:loadLogs, customers:loadCustomers, membership:loadMembership, hourcards:loadHourCardsTab, points:loadPointsTab, bays:loadBaysTab, prices:loadPricesTab,
   overrides:loadOverridesTab, templates:loadTemplatesTab, statuses:loadStatuses, tags:loadTags, paysettings:loadPaySettings };
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
@@ -1472,9 +1497,6 @@ function loadPaySettings(){
   $('#p-hold').value = p.holdDisclaimer||'';
   $('#p-pay').value = p.paymentDisclaimer||'';
   $('#pay-proc-pill').textContent = (p.processor||'Stripe')+' · test mode';
-  const pts=(SETTINGS&&SETTINGS.points)||{};
-  $('#pt-earn').value = isFinite(+pts.earnPerHour)&&pts.earnPerHour!==''&&pts.earnPerHour!=null ? +pts.earnPerHour : 5;
-  $('#pt-redeem').value = isFinite(+pts.redeemPer100)&&pts.redeemPer100!==''&&pts.redeemPer100!=null ? +pts.redeemPer100 : 10;
   syncSelects();
 }
 $('#pt-save').onclick = async () => {
@@ -1483,8 +1505,59 @@ $('#pt-save').onclick = async () => {
   const ok=await dbUpdate('settings',1,{points,updated_at:new Date().toISOString()});
   $('#pt-save').disabled=false;
   if(!ok){ toast('Save failed — run database migration 0016 first.','err'); return; }
-  SETTINGS.points=points; toast('Points settings saved','ok');
+  SETTINGS.points=points; toast('Points settings saved','ok'); loadPointsTab();
 };
+
+/* ---------- Points tab: rates + balances + full activity ledger ---------- */
+async function loadPointsTab(){
+  // Rates (defaults: 5 pts/hr earned, 100 pts = $10 off)
+  const pts=(SETTINGS&&SETTINGS.points)||{};
+  const earn = isFinite(+pts.earnPerHour)&&pts.earnPerHour!=null&&pts.earnPerHour!=='' ? +pts.earnPerHour : 5;
+  const per100 = isFinite(+pts.redeemPer100)&&pts.redeemPer100!=null&&pts.redeemPer100!=='' ? +pts.redeemPer100 : 10;
+  $('#pt-earn').value=earn; $('#pt-redeem').value=per100;
+  const ptsVal = p => '$'+(p*per100/100).toFixed(2).replace(/\.00$/,'');
+
+  // Balances — everyone holding points, biggest first.
+  const { data: holders, error } = await sb.from('customers').select('*').gt('points_balance',0).order('points_balance',{ascending:false}).limit(200);
+  const bTbl=$('#pts-balances');
+  if(error){
+    if(!isAuthError(error)) bTbl.innerHTML='<tbody><tr><td class="empty">Run database migration 0016 (supabase/migrations) to enable points.</td></tr></tbody>';
+    $('#pts-activity').innerHTML=''; return;
+  }
+  const hs=holders||[];
+  const outstanding=hs.reduce((s,c)=>s+(c.points_balance||0),0);
+  $('#pts-outstanding').textContent=outstanding.toLocaleString()+' pts';
+  $('#pts-outstanding-val').textContent=outstanding?('worth '+ptsVal(outstanding)+' off'):'';
+  bTbl.innerHTML = hs.length ? `<thead><tr><th>Customer</th><th>Contact</th><th style="text-align:right">Points</th><th style="text-align:right">Value</th></tr></thead><tbody>${
+    hs.slice(0,12).map(c=>`<tr data-id="${c.id}" style="cursor:pointer">
+      <td>${esc(c.name||'(no name)')}</td>
+      <td class="muted">${esc(c.phone||c.email||'—')}</td>
+      <td style="text-align:right;font-family:'Space Grotesk';font-weight:700">${(c.points_balance||0).toLocaleString()}</td>
+      <td style="text-align:right" class="muted">${ptsVal(c.points_balance||0)}</td>
+    </tr>`).join('')}</tbody>` : '<tbody><tr><td class="empty">No customers hold points yet.</td></tr></tbody>';
+  bTbl.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>{ const c=hs.find(x=>x.id===tr.dataset.id); if(c) openCustomer(c); });
+
+  // 30-day earned / redeemed totals + recent activity (customer name embedded via the FK).
+  const cut=new Date(Date.now()-30*86400000).toISOString();
+  const [eq, rq, tq] = await Promise.all([
+    sb.from('point_transactions').select('points').eq('kind','earn').gte('created_at',cut).limit(1000),
+    sb.from('point_transactions').select('points').eq('kind','redeem').gte('created_at',cut).limit(1000),
+    sb.from('point_transactions').select('points,kind,note,created_at,customers(name)').order('created_at',{ascending:false}).limit(60),
+  ]);
+  $('#pts-earned').textContent='+'+((eq.data||[]).reduce((s,t)=>s+t.points,0)).toLocaleString();
+  $('#pts-redeemed').textContent=((rq.data||[]).reduce((s,t)=>s+t.points,0)).toLocaleString();
+  const kindPill = k => k==='earn' ? '<span class="pill confirmed">Earned</span>'
+    : k==='redeem' ? '<span class="pill cancelled">Redeemed</span>' : '<span class="pill manager">Adjusted</span>';
+  const tx=tq.data||[];
+  $('#pts-activity').innerHTML = tx.length ? `<thead><tr><th>When</th><th>Customer</th><th></th><th style="text-align:right">Points</th><th>Note</th></tr></thead><tbody>${
+    tx.map(t=>`<tr>
+      <td class="muted" style="white-space:nowrap">${fmtTs(t.created_at)}</td>
+      <td>${esc((t.customers&&t.customers.name)||'—')}</td>
+      <td>${kindPill(t.kind)}</td>
+      <td style="text-align:right;font-family:'Space Grotesk';font-weight:700;color:${t.points>=0?'#7ad492':'#e0796f'}">${t.points>=0?'+':''}${t.points.toLocaleString()}</td>
+      <td class="muted">${esc(t.note||'')}</td>
+    </tr>`).join('')}</tbody>` : '<tbody><tr><td class="empty">No points activity yet.</td></tr></tbody>';
+}
 $('#save-pay').onclick = async () => {
   const pay={ ...(SETTINGS.pay||{}), acceptPayments:$('#p-accept').checked, taxPct:+$('#p-tax').value||0, currency:$('#p-currency').value,
     captureMethod:$('#p-capture').value, priorityCapture:$('#p-priority').value, processor:(SETTINGS.pay&&SETTINGS.pay.processor)||'Stripe',
