@@ -95,15 +95,20 @@ function phoneCountryHint(v){
   if(!d) return '';
   if(d[0]==='0') return 'Starts with 0 — include your country code instead (e.g. +44…)';
   if(d.length>=11&&d.length<=15){ const m=dialCountry(d); if(m) return m.name+' (+'+m.code+')'; }
-  if(d.length>=3){
-    // Valid North American shape: area code starts 2–9 with second digit 0–8. Caribbean +1
-    // countries (Jamaica 876, Bahamas 242, …) are named via the 1+area entries in the table.
-    if(/^[2-9][0-8]/.test(d)){ const m=dialCountry('1'+d); return (m&&m.code.length===4 ? m.name : 'Canada / United States')+' (+1)'; }
-    const m=dialCountry(d);
-    if(m&&m.code!=='1') return m.name+' (+'+m.code+') — add + so we read it as international';
-    return 'Not a Canada/US number — include your country code (e.g. +44…)';
+  if(d[0]==='1'){ const m=dialCountry(d); return (m&&m.code.length===4 ? m.name : 'Canada / United States')+' (+1)'; }
+  // Possible North American shape: area codes are [2-9][0-8]X. Caribbean +1 countries
+  // (Jamaica 876, Bahamas 242, …) are named via the 1+area entries in the table.
+  const nanpPossible = d.length===1 ? /^[2-9]/.test(d) : /^[2-9][0-8]/.test(d);
+  if(nanpPossible){
+    const m=dialCountry('1'+d);
+    let out=(m&&m.code.length===4 ? m.name : 'Canada / United States')+' (+1)';
+    if(DIAL_CODES[d]&&d!=='1') out+=' · +'+d+' is '+DIAL_CODES[d]+' — start with + for international';
+    return out;
   }
-  return '';
+  // Can't be a Canada/US number — name the country code it matches, or nudge for one.
+  const m=dialCountry(d);
+  if(m&&m.code!=='1') return m.name+' (+'+m.code+') — add + so we read it as international';
+  return 'Not a Canada/US number — include your country code (e.g. +44…)';
 }
 function wirePhoneHint(inp,host){ if(!inp||!host) return; const upd=()=>{ const h=phoneCountryHint(inp.value); host.textContent=h; host.classList.toggle('on',/\(\+/.test(h)); }; inp.addEventListener('input',upd); upd(); }
 const money = c => '$'+(c/100).toFixed(c%100?2:0);
