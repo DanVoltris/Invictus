@@ -141,6 +141,7 @@
     color: var(--white); vertical-align: bottom; }
   .grid th .bmeta { display: block; font-family: 'Raleway'; font-weight: 500; font-size: 11px; color: var(--dim); margin-top: 3px; letter-spacing: .02em; }
   .grid th .bmeta.promo { color: #f0a093; font-weight: 600; margin-top: 5px; white-space: normal; line-height: 1.25; }
+  .grid th .bmeta.desc { color: var(--muted); font-weight: 600; margin-top: 4px; white-space: normal; line-height: 1.25; }
   .grid th.timehead { width: 70px; }
   .grid td.time { font-family: 'Space Grotesk'; font-weight: 700; font-size: 12.5px; color: var(--muted); text-align: right;
     padding-right: 10px; white-space: nowrap; width: 70px; }
@@ -813,7 +814,7 @@ function buildGrid(){
   let html='<table class="grid"><thead><tr><th class="timehead"></th>';
   CONFIG.bays.forEach(b=>{
     const bnote=(CONFIG.bayRates&&CONFIG.bayRates[b.id]&&CONFIG.bayRates[b.id].note);
-    html+=`<th>${b.name}<span class="bmeta">${b.sim}</span>${bnote?`<span class="bmeta promo">${escHtml(bnote)}</span>`:''}</th>`;
+    html+=`<th>${b.name}<span class="bmeta">${b.sim}</span>${b.description?`<span class="bmeta desc">${escHtml(b.description)}</span>`:''}${bnote?`<span class="bmeta promo">${escHtml(bnote)}</span>`:''}</th>`;
   });
   html+='</tr></thead><tbody>'+bodyRows+'</tbody></table>';
   const note=CONFIG.rates&&CONFIG.rates.note;   // standard note applies to all bays
