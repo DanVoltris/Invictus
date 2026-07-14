@@ -22,16 +22,20 @@
   .brand-fallback .joy{color:var(--orange);margin-right:6px}
   header a.back{color:var(--muted);text-decoration:none;font-size:13px}
   header a.back:hover{color:#fff}
-  .head-block{text-align:center;margin-bottom:26px}
-  .head-block h1{font-size:30px;margin-bottom:8px}
-  .head-block .sub{color:var(--dim);font-size:14.5px;line-height:1.55;max-width:520px;margin:0 auto}
+  .head-block{max-width:640px;margin:6px auto 30px;text-align:center}
+  .eyebrow{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange);margin-bottom:10px}
+  .head-block h1{font-size:32px;margin-bottom:10px}
+  .head-block .sub{color:#cfcfcf;font-size:15.5px;font-weight:500;line-height:1.65}
   /* Fixed-width cards on centered wrap lines — partial rows stay symmetric. */
   .plans{display:flex;flex-wrap:wrap;justify-content:center;gap:16px}
-  .plan{width:296px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 22px;display:flex;flex-direction:column;border-top-width:3px}
+  .plan{width:296px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:26px 24px 22px;display:flex;flex-direction:column}
   @media(max-width:680px){ .plan{width:100%} }
-  .plan-name{font-family:'Space Grotesk';font-weight:700;font-size:19px;margin-bottom:8px;min-height:50px;line-height:1.3}
-  .plan-price{font-family:'Space Grotesk';font-weight:700;font-size:32px;line-height:1}
-  .plan-price .per{font-size:14px;font-weight:500;color:var(--dim);margin-left:4px}
+  .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:2px}
+  .plan-name{font-family:'Space Grotesk';font-weight:700;font-size:16px;color:var(--muted);margin-bottom:14px;min-height:42px;line-height:1.3}
+  .plan-price{font-family:'Space Grotesk';font-weight:700;font-size:38px;line-height:1;color:#fff}
+  .plan-price .per{font-size:14px;font-weight:500;color:var(--dim);margin-left:5px}
+  .btn-line{background:transparent;border:1px solid var(--orange);color:var(--orange)}
+  .btn-line:hover{background:rgba(240,82,61,.12)}
   .plan-disc{display:inline-block;align-self:flex-start;margin-top:12px;font-size:12px;font-weight:700;color:var(--ok);background:rgba(78,192,106,.12);border:1px solid rgba(78,192,106,.4);border-radius:999px;padding:4px 11px}
   .plan-perks{color:var(--muted);font-size:13.5px;line-height:1.6;margin-top:14px;white-space:pre-line;flex:1}
   .btn{display:block;width:100%;border:none;border-radius:11px;padding:14px;font-weight:700;font-size:15px;font-family:'Space Grotesk';cursor:pointer;transition:.15s;margin-top:18px;text-align:center;text-decoration:none}
@@ -86,16 +90,17 @@ function plansView(){
   if(!PLANS.length){ render('<div class="center"><h1>Memberships</h1><div class="note">No membership plans are available right now — please check back soon or call the shop.</div><a class="btn btn-ghost" href="/" style="max-width:300px;margin:22px auto 0">Back to booking</a></div>'); return; }
   render(`
     <div class="head-block">
+      <div class="eyebrow">Joy House members</div>
       <h1>Become a member</h1>
-      <div class="sub">Buy a membership online and it links to your account automatically — just use the same email when you book.</div>
+      <div class="sub">Buy online and it's on your account right away — we recognize you by the phone number or email you book with.</div>
     </div>
     <div class="plans">${PLANS.map(p=>`
-      <div class="plan" style="border-top-color:${esc(p.color||'#c4e538')}">
-        <div class="plan-name">${esc(p.name)}</div>
+      <div class="plan">
+        <div class="plan-name"><span class="cdot" style="background:${esc(p.color||'#c4e538')}"></span>${esc(p.name)}</div>
         <div class="plan-price">${money(p.price_cents)}<span class="per">${perLabel(p.period)}</span></div>
         ${p.discount_pct?`<div class="plan-disc">${p.discount_pct}% off sessions</div>`:''}
         ${p.perks?`<div class="plan-perks">${esc(p.perks)}</div>`:'<div class="plan-perks"></div>'}
-        <button class="btn btn-primary buy" data-id="${p.id}">Get this membership</button>
+        <button class="btn btn-line buy" data-id="${p.id}">Join</button>
       </div>`).join('')}</div>`);
   document.querySelectorAll('.buy').forEach(b=>b.onclick=()=>buyView(PLANS.find(p=>p.id===b.dataset.id)));
 }
