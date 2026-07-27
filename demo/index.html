@@ -557,8 +557,7 @@
 
 <script>
 /* ---------- Fallback configuration ----------
-   Invictus Golf's real bays and CA$20/hour rate, taken from their GolfBook sheet.
-   Opening hours are ASSUMED (see `hours` below) and want confirming.
+   Invictus Golf's real bays, CA$20/hour rate and 24-hour opening.
    Keep this in step with DEFAULT_SETTINGS in lib/booking.js. */
 // Defaults — used until live settings load (and as fallback if the DB isn't configured).
 const CONFIG = {
@@ -570,8 +569,8 @@ const CONFIG = {
     { id: 'B5', name: 'McNaught Private Room #1',        sim: 'Golfzon TwoVision', description: 'Private room' },
     { id: 'B6', name: 'Private Room #2',                 sim: 'Golfzon TwoVision', description: 'Private room' },
   ],
-  // ASSUMED: the GolfBook sheet's day starts at 4:00 AM, so this runs 4:00 AM–midnight daily.
-  hours: { 0:[4,24], 1:[4,24], 2:[4,24], 3:[4,24], 4:[4,24], 5:[4,24], 6:[4,24] },
+  // Open 24 hours, every day.
+  hours: { 0:[0,24], 1:[0,24], 2:[0,24], 3:[0,24], 4:[0,24], 5:[0,24], 6:[0,24] },
   maxParty: 4,
   peakStartHour: 17,
   slotStep: 30,
@@ -581,10 +580,9 @@ const CONFIG = {
 };
 
 // Shown on short "call to book" slots, and dialled directly on mobile.
-// TODO: replace with Invictus Golf's real number — this is a reserved placeholder
-// so the demo never rings a real business. Keep in step with demo/manage.html.
-const SHOP_PHONE = '+12045550100';
-const SHOP_PHONE_DISPLAY = '(204) 555-0100';
+// Keep in step with demo/manage.html.
+const SHOP_PHONE = '+12044886177';
+const SHOP_PHONE_DISPLAY = '(204) 488-6177';
 
 // Live-data state: when the DB is on, settings + real bookings come from /api/availability.
 let DB = false;

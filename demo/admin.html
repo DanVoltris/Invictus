@@ -74,7 +74,7 @@
   .content{flex:1;min-width:0;padding:0 30px 60px}
 
   /* Toolbar (sticky header per view) */
-  .toolbar{position:sticky;top:0;z-index:10;background:rgba(14,14,14,.92);backdrop-filter:blur(10px);
+  .toolbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
     display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
     padding:20px 0 16px;border-bottom:1px solid var(--border);margin-bottom:20px}
   .toolbar h2{font-size:21px}
@@ -904,7 +904,20 @@ async function boot(){
   let cfg;
   try{ cfg = await (await fetch('/api/config')).json(); }catch(e){ cfg = {}; }
   if(!cfg.supabase){
-    $('#app-loading').innerHTML='<div class="login"><h1>Not configured</h1><div class="sub">Supabase isn\'t set up on the server yet.</div></div>';
+    // No database configured. Rather than dead-end, fall back to the in-memory
+    // demo backend so the manager view is fully browsable. Nothing persists.
+    // See demo/assets/demo-mode.js — delete both once Supabase is connected.
+    const loaded = await new Promise(res=>{
+      const s=document.createElement('script'); s.src='/assets/demo-mode.js';
+      s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s);
+    });
+    if(!loaded || !window.createDemoSupabase){
+      $('#app-loading').innerHTML='<div class="login"><h1>Not configured</h1><div class="sub">Supabase isn\'t set up on the server yet.</div></div>';
+      return;
+    }
+    sb = window.createDemoSupabase();
+    document.body.classList.add('demo-mode');
+    await showApp({ user:{ email:'Demo data — nothing is saved' } });
     return;
   }
   sb = supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey,

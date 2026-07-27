@@ -39,23 +39,23 @@ function parseCSV(file) {
 
 // ---------- Email cleaning ----------
 const EMAIL_FIXES = {
-  'antonlulic77@gmai.com': 'antonlulic77@gmail.com',
-  'a.dhingra97@gmqil.com': 'a.dhingra97@gmail.com',
-  'edfinchfield@gmail.com': 'bdfinchfield@gmail.com',
-  'josephboule1@gmail.com': 'josephboulet1@gmail.com',
-  'josephboulet@gmail.com': 'josephboulet1@gmail.com',
-  'danhodgwrt@hotmail.com': 'danhodgert@hotmail.com',
-  'donoso.rodriguez@rydel': 'donoso.rodriguez@rydel.ca',
-  '2018@gmail.com': '2018dunc2u@gmail.com',
-  'abc0710@gmail.com': 'acb0710@gmail.com',
-  'mbtran798@gmail.com': 'mbtran789@gmail.com',
-  'kevinbae@gmail.com': 'kevinbae15@gmail.com',
-  'frankoalbarran11@gmail.com': 'francoalbarran11@gmail.com',
-  'thappych@mts.net': 'thappych@mymts.net',
-  'jaclaf8878@gmail.com': 'jaclaf878@gmail.com',
-  'antonlulic77@gmail.coom': 'antonlulic77@gmail.com',
-  'jaykpod@gmail.coom': 'jaykpod@gmail.com',
-  'praiaselchima13@gmail.com': 'praisaselchima13@gmail.com',
+  'finley.frost@exmaple.com': 'finley.frost@example.com',
+  'casey.calder@exmaple.com': 'casey.calder@example.com',
+  'harper.halex@example.com': 'harper.hale@example.com',
+  'zane.ashbyx@example.com': 'zane.ashby@example.com',
+  'zane.ashbyx2@example.com': 'zane.ashby@example.com',
+  'oakley.oakesx@example.com': 'oakley.oakes@example.com',
+  'reese.ridley@exmaple.com': 'reese.ridley@example.com',
+  'bailey.brooksx@example.com': 'bailey.brooks@example.com',
+  'devon.dunnex@example.com': 'devon.dunne@example.com',
+  'eden.fennx@example.com': 'eden.fenn@example.com',
+  'brook.carrowx@example.com': 'brook.carrow@example.com',
+  'tatum.thornex@example.com': 'tatum.thorne@example.com',
+  'orion.pell@exmaple.com': 'orion.pell@example.com',
+  'wren.whitbyx@example.com': 'wren.whitby@example.com',
+  'finley.frost2@exmaple.com': 'finley.frost@example.com',
+  'xen.yarrow@exmaple.com': 'xen.yarrow@example.com',
+  'kit.lindenx@example.com': 'kit.linden@example.com',
 };
 let emailFixCount = 0;
 function cleanEmail(e) {
@@ -124,7 +124,7 @@ let waiverRows = parseCSV(path.join(DIR, 'waivers.csv'));
 // Requested deletions
 const beforeDel = waiverRows.length;
 waiverRows = waiverRows.filter(w => !(w['First Name'] === '222' && w['Last Name'] === '222'))
-                       .filter(w => !((w['Email Address'] || '').toLowerCase() === 'scotthutton@shaw.ca'));
+                       .filter(w => !((w['Email Address'] || '').toLowerCase() === 'marlow.norwood@example.com'));
 const deletedRows = beforeDel - waiverRows.length;
 
 // Normalize the three datasets
@@ -155,9 +155,9 @@ for (const p of [...customers, ...waivers, ...members]) {
     keyFirsts.get(k).add(f);
   }
 }
-const PLACEHOLDER = new Set(['e:new@gmail.com', 'e:new@email.com', 'e:noname@gmail.com', 'e:unknown@gmail.com',
-  'e:askcustomer@gmail.com', 'e:chrisnew@gmail.com', 'e:mattnew@gmail.com', 'e:carsonnew@gmail.com',
-  'e:t1@gmail.com', 'e:1@gmsol.com', 'p:+12048154142']);
+const PLACEHOLDER = new Set(['e:gale.harlow@example.com', 'e:fern.grange@example.com', 'e:haven.ives@example.com', 'e:pace.quarry@example.com',
+  'e:gray.garland@example.com', 'e:logan.lark@example.com', 'e:dale.everly@example.com', 'e:jamie.joyner@example.com',
+  'e:nova.orrin@example.com', 'e:alex.archer@example.com', 'p:+12048154142']);
 for (const [k, firsts] of keyFirsts) if (firsts.size >= 3) PLACEHOLDER.add(k);
 const emailKey = p => (p.email && !PLACEHOLDER.has('e:' + p.email)) ? 'e:' + p.email : null;
 const phoneKey = p => (p.phone && !PLACEHOLDER.has('p:' + p.phone)) ? 'p:' + p.phone : null;
@@ -262,25 +262,25 @@ const PLANS = [
 ];
 const FLAG_2027 = y => `Imported note said "${y}" — the year may be a typo for 2026. Confirm and save the expiry date to clear this flag.`;
 const EXPIRY = {
-  'kevinbae15@gmail.com': ['2026-07-12', null],
-  'danielbarrows36@outlook.com': ['2026-07-17', null],
-  '+12044304212': ['2026-07-13', null],                       // Kevin Boudreau (placeholder email — matched by phone)
-  'marcdaudet@gmail.com': ['2027-10-31', FLAG_2027('until October 2027')],
-  'rmdoyle75@gmail.com': ['2026-10-31', 'Imported note had no expiry date — defaulted to Oct 31, 2026 (end of summer season). Confirm and save to clear this flag.'],
-  'galang.wendell@gmail.com': ['2026-02-15', null],
-  'daniel@carlosandmurphys.ca': ['2026-02-28', null],
-  'billyhong01@gmail.com': ['2026-07-07', null],
-  'angelika.kotvitska@gmail.com': ['2026-02-13', null],
-  'crismontecillo@hotmail.com': ['2027-10-31', FLAG_2027('until oct 2027')],
-  'owen.mushaluk@gmail.com': ['2026-07-20', null],
-  'immartens@gmail.com': ['2026-04-15', null],
-  'joycan2024@gmail.com': ['2026-02-13', null],
-  'd.reyes1@live.com': ['2026-07-05', null],
-  'charliesalkeld@gmail.com': ['2026-07-17', null],
-  'olliessalkeldsk8@icloud.com': ['2026-07-17', null],
-  'felixottosalkeld@icloud.com': ['2026-07-20', null],
-  'jimmiesayavong@gmail.com': ['2026-07-23', null],
-  'mbtran789@gmail.com': ['2027-07-13', FLAG_2027('until July 13th 2027')],
+  'brook.carrow@example.com': ['2026-07-12', null],
+  'quinn.quill@example.com': ['2026-07-17', null],
+  '+12045550199': ['2026-07-13', null],                       // Jordan Vega (placeholder email — matched by phone)
+  'cedar.dane@example.com': ['2027-10-31', FLAG_2027('until October 2027')],
+  'lane.mabry@example.com': ['2026-10-31', 'Imported note had no expiry date — defaulted to Oct 31, 2026 (end of summer season). Confirm and save to clear this flag.'],
+  'urban.upton@example.com': ['2026-02-15', null],
+  'parker.pryor@example.com': ['2026-02-28', null],
+  'indigo.ingram@example.com': ['2026-07-07', null],
+  'emery.ellery@example.com': ['2026-02-13', null],
+  'morgan.mercer@example.com': ['2027-10-31', FLAG_2027('until oct 2027')],
+  'juno.kelso@example.com': ['2026-07-20', null],
+  'vale.vance@example.com': ['2026-04-15', null],
+  'ari.blythe@example.com': ['2026-02-13', null],
+  'noel.nash@example.com': ['2026-07-05', null],
+  'kai.keane@example.com': ['2026-07-17', null],
+  'iris.jarrow@example.com': ['2026-07-17', null],
+  'sage.sable@example.com': ['2026-07-20', null],
+  'yuki.zeller@example.com': ['2026-07-23', null],
+  'eden.fenn@example.com': ['2027-07-13', FLAG_2027('until July 13th 2027')],
 };
 let membersAssigned = 0; const memberMisses = [];
 for (const m of members) {
