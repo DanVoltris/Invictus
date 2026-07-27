@@ -1,4 +1,4 @@
--- Joy House Golf — membership plans + customer database
+-- Invictus Golf — membership plans + customer database
 -- Paste this whole file into Supabase → SQL Editor → New query → Run.
 -- Safe to run more than once.
 

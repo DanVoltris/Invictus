@@ -1,4 +1,4 @@
--- Joy House Golf — loyalty points
+-- Invictus Golf — loyalty points
 -- Customers earn points for time played (rate configurable, e.g. 5 pts per hour) and redeem them
 -- as dollars off a booking (e.g. 100 pts = $10) — online at checkout or by staff in person.
 -- Mirrors the hour-cards design: balance on the customer + an append-only ledger + one atomic fn.

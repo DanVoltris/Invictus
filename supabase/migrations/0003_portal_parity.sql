@@ -1,4 +1,4 @@
--- Joy House Golf — portal parity (payment settings + status type)
+-- Invictus Golf — portal parity (payment settings + status type)
 -- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
 
 -- Payment settings live in a jsonb column on the single settings row.

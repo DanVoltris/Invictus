@@ -1,8 +1,8 @@
 {
-  "name": "joyhouse-golf-booking",
+  "name": "invictus-golf-booking",
   "version": "0.1.0",
   "private": true,
-  "description": "Joy House Golf — branded simulator booking demo with embedded Stripe Checkout",
+  "description": "Invictus Golf — branded simulator booking demo with embedded Stripe Checkout",
   "type": "module",
   "scripts": {
     "start": "node server.js"

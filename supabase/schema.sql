@@ -1,4 +1,4 @@
--- Joy House Golf — manager portal schema
+-- Invictus Golf — manager portal schema
 -- Paste this whole file into Supabase → SQL Editor → New query → Run.
 
 create extension if not exists btree_gist;

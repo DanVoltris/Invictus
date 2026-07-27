@@ -1,4 +1,4 @@
--- Joy House Golf — customer-signed waiver
+-- Invictus Golf — customer-signed waiver
 -- Lets a customer sign the participant waiver online (clickwrap: typed name + "I agree").
 -- Reuses the existing waiver_code + waiver_signed_at columns (migration 0008) and adds the
 -- signer's typed name and the waiver version they agreed to. Per the waiver's clause 12 the

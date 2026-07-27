@@ -1,4 +1,4 @@
-# Joy House Golf — Booking Demo
+# Invictus Golf — Booking Demo
 
 A branded simulator-bay booking prototype with **embedded Stripe Checkout** (test mode).
 

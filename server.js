@@ -210,6 +210,6 @@ app.post('/api/release-hold', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n🏌  Joy House Golf booking demo running at  http://localhost:${PORT}`);
+  console.log(`\n🏌  Invictus Golf booking demo running at  http://localhost:${PORT}`);
   console.log(`    Manager portal:  http://localhost:${PORT}/admin\n`);
 });

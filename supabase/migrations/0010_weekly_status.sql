@@ -1,4 +1,4 @@
--- Joy House Golf — recurring weekly tee-sheet status pattern
+-- Invictus Golf — recurring weekly tee-sheet status pattern
 -- Lets a manager set the default status for each weekday (e.g. Open every day, Closed on
 -- Mondays, a Happy-Hour band 5–7pm) that auto-applies to every future matching day. One-off
 -- exceptions still live in schedule_overrides and sit on top of this weekly base.

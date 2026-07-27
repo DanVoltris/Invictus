@@ -1,4 +1,4 @@
--- Joy House Golf — seasonal price templates + per-bay pricing
+-- Invictus Golf — seasonal price templates + per-bay pricing
 -- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
 
 -- Saved price presets (Summer, Winter, Holiday…). bay_ids empty = applies to all bays.

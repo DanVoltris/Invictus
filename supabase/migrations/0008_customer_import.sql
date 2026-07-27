@@ -1,4 +1,4 @@
--- Joy House Golf — GolfBooking customer import support
+-- Invictus Golf — GolfBooking customer import support
 -- Adds membership expiry + review flag, waiver on file, and legacy booking counts,
 -- and allows family members to share one email address.
 -- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.

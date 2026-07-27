@@ -1,4 +1,4 @@
--- Joy House Golf — apply Schedule statuses to the tee sheet
+-- Invictus Golf — apply Schedule statuses to the tee sheet
 -- Lets a manager "paint" a status (Maintenance, Break, Happy Hour…) across slots on the tee sheet.
 -- Each painted region is a schedule_override that carries the status's colour + open/closed behaviour.
 -- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.

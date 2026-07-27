@@ -1,4 +1,4 @@
--- Joy House Golf — GolfBooking-style schedule overrides
+-- Invictus Golf — GolfBooking-style schedule overrides
 -- Adds: per-bay targeting, partial-day time blocks with a reason, multi-day ranges,
 -- enable/disable, and allows multiple overrides on the same date.
 -- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.

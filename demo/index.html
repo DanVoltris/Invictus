@@ -3,25 +3,28 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Joy House Golf — Book a Bay</title>
+<title>Invictus Golf — Book a Bay</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,400;0,500;0,700;1,500&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
 <script src="https://js.stripe.com/v3/"></script>
 <style>
   :root {
-    --black: #000000;
-    --near-black: #0E0E0E;
-    --surface: #181818;
-    --surface-2: #222222;
-    --border: #333333;
-    --white: #FFFFFF;
-    --muted: #B5B5B5;
-    --dim: #7A7A7A;
+    /* Light theme. Token names are historical — they denote role, not literal colour:
+       --black is the page background, --white is primary text. */
+    --black: #F6F7F9;      /* page background */
+    --near-black: #F5F7FA; /* inset areas: inputs, cells, recaps */
+    --surface: #FFFFFF;    /* cards — pure white, lifts off the grey page */
+    --surface-2: #EDEFF3;  /* subtle fill */
+    --border: #D7DCE3;
+    --white: #14161A;      /* primary text */
+    --muted: #555C68;      /* secondary text */
+    --dim: #858C99;        /* tertiary text */
     --green: #F0523D;      /* brand orange accent (var name kept for simplicity) */
     --green-dim: #c7402e;
+    --orange: #F0523D;     /* same accent; referenced by .nav-mem, .btn-line, toggles */
     --red: #F0523D;
-    --danger: #ff5b5b;     /* error red, distinct from the orange accent */
+    --danger: #D92D20;     /* error red, darkened for contrast on light */
     --radius: 14px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,7 +32,7 @@
   *::-webkit-scrollbar { width: 0; height: 0; display: none; }
   html, body { height: 100%; }
   body {
-    background: radial-gradient(1200px 600px at 70% -10%, #1a1a1a 0%, var(--black) 55%) , var(--black);
+    background: radial-gradient(1200px 600px at 70% -10%, #FFFFFF 0%, var(--black) 55%) , var(--black);
     color: var(--white);
     font-family: 'Raleway', system-ui, sans-serif;
     min-height: 100vh;
@@ -42,13 +45,13 @@
   /* Header */
   header {
     border-bottom: 1px solid var(--border);
-    background: rgba(0,0,0,0.6);
+    background: rgba(255,255,255,0.82);
     backdrop-filter: blur(8px);
     position: sticky; top: 0; z-index: 20;
   }
   .nav { display: flex; align-items: center; justify-content: space-between; height: 76px; }
   .brand { display: flex; align-items: center; gap: 14px; }
-  .brand img { height: 62px; width: auto; display: block; }
+  .brand img { height: 66px; width: auto; display: block; }
   .brand-fallback { font-family: 'Space Grotesk'; font-weight: 700; font-size: 22px; }
   .brand-fallback .joy { color: var(--white); }
   .brand-fallback .hg { color: var(--green); }
@@ -71,7 +74,7 @@
   .step .dot { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border);
     display: grid; place-items: center; font-size: 12px; font-weight: 700; color: var(--dim); }
   .step.active { color: var(--white); }
-  .step.active .dot { background: var(--green); color: #000; border-color: var(--green); }
+  .step.active .dot { background: var(--green); color: #fff; border-color: var(--green); }
   .step.done .dot { background: var(--surface-2); color: var(--green); border-color: var(--green); }
   .step .sep { color: var(--border); margin: 0 4px; }
 
@@ -106,9 +109,9 @@
     background: var(--near-black); cursor: pointer; font-family: 'Space Grotesk'; font-weight: 700; font-size: 15px;
     transition: border-color .12s, box-shadow .12s, background .12s, color .12s, height .45s cubic-bezier(.4,0,.2,1), font-size .45s; }
   .cal-day.empty { background: transparent; border: none; cursor: default; }
-  .cal-day.past { opacity: .25; cursor: not-allowed; }
+  .cal-day.past { opacity: .45; cursor: not-allowed; }
   .cal-day.today:not(.sel) { border-color: var(--dim); color: var(--green); }
-  .cal-day.sel { background: var(--green); border-color: var(--green); color: #000; }
+  .cal-day.sel { background: var(--green); border-color: var(--green); color: #fff; }
   .cal-day:hover:not(.sel):not(.past):not(.empty) { border-color: var(--green); }
 
   .day-summary { border-left: 1px solid var(--border); padding-left: 44px; display: flex; flex-direction: column; justify-content: center;
@@ -130,17 +133,17 @@
   .legend span { display: inline-flex; align-items: center; gap: 7px; }
   .swatch { width: 12px; height: 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-block; }
   .swatch.avail { background: var(--near-black); border-color: var(--green-dim); }
-  .swatch.buf { background: repeating-linear-gradient(45deg,#1c1c1c,#1c1c1c 3px,#0e0e0e 3px,#0e0e0e 6px); border-color: var(--border); }
-  .swatch.bk { background: rgba(229,57,53,.16); border-color: #E53935; border-style: dashed; }
+  .swatch.buf { background: repeating-linear-gradient(45deg,#E4E7EC,#E4E7EC 3px,#F5F7FA 3px,#F5F7FA 6px); border-color: var(--border); }
+  .swatch.bk { background: rgba(229,57,53,.12); border-color: #E53935; border-style: dashed; }
 
   .grid-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px; -webkit-overflow-scrolling: touch; }
-  .promo-note { background: rgba(240,82,61,.12); border: 1px solid rgba(240,82,61,.4); color: #f0a093;
+  .promo-note { background: rgba(240,82,61,.09); border: 1px solid rgba(240,82,61,.38); color: #A8321F;
     border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 14.5px; font-weight: 500; }
   .grid { width: 100%; min-width: 680px; border-collapse: separate; border-spacing: 6px; }
   .grid th { font-family: 'Space Grotesk'; font-weight: 700; font-size: 13.5px; text-align: center; padding: 4px 6px 10px;
     color: var(--white); vertical-align: bottom; }
   .grid th .bmeta { display: block; font-family: 'Raleway'; font-weight: 500; font-size: 11px; color: var(--dim); margin-top: 3px; letter-spacing: .02em; }
-  .grid th .bmeta.promo { color: #f0a093; font-weight: 600; margin-top: 5px; white-space: normal; line-height: 1.25; }
+  .grid th .bmeta.promo { color: #A8321F; font-weight: 600; margin-top: 5px; white-space: normal; line-height: 1.25; }
   .grid th .bmeta.desc { color: var(--muted); font-weight: 600; margin-top: 4px; white-space: normal; line-height: 1.25; }
   .grid th.timehead { width: 70px; }
   .grid td.time { font-family: 'Space Grotesk'; font-weight: 700; font-size: 12.5px; color: var(--muted); text-align: right;
@@ -159,27 +162,28 @@
   .cell.callbook a { display: block; font-family: 'Space Grotesk', sans-serif; font-size: 9.5px; font-weight: 700; line-height: 1.35;
     letter-spacing: .01em; color: var(--muted); text-decoration: none; text-transform: uppercase; }
   .cell.callbook a:hover { color: var(--green); }
-  .cell.booked { color: #e0796f; background: rgba(229,57,53,.10); cursor: not-allowed; border-style: dashed; border-color: rgba(229,57,53,.5); }
+  .cell.booked { color: #B3261E; background: rgba(229,57,53,.08); cursor: not-allowed; border-style: dashed; border-color: rgba(229,57,53,.45); }
   .cell.booked .price { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
   .cell.booked .per { display: none; }
-  .cell.booked.shut { color: var(--muted); background: repeating-linear-gradient(45deg,#1a1a1a,#1a1a1a 6px,#111 6px,#111 12px); border-color: var(--border); border-style: solid; }
-  .cell.booked.held { color: #e8c876; background: rgba(214,180,90,.10); border-color: rgba(214,180,90,.5); }
-  .hold-timer { display:flex; align-items:center; justify-content:center; gap:7px; margin-bottom:14px; padding:9px 12px; border-radius:10px; background:rgba(214,180,90,.12); border:1px solid rgba(214,180,90,.4); color:#e8c876; font-size:13px; font-weight:600; letter-spacing:.01em; }
-  .hold-timer.warn { background:rgba(229,57,53,.14); border-color:rgba(229,57,53,.5); color:#f0897f; }
-  .toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(12px); background:#1b1b1b; border:1px solid rgba(255,255,255,.14); color:#fff; padding:11px 18px; border-radius:10px; font-size:14px; z-index:200; opacity:0; pointer-events:none; transition:.2s; max-width:90vw; text-align:center; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  .cell.booked.shut { color: var(--muted); background: repeating-linear-gradient(45deg,#EDEFF3,#EDEFF3 6px,#E2E5EA 6px,#E2E5EA 12px); border-color: var(--border); border-style: solid; }
+  .cell.booked.held { color: #8A6A14; background: rgba(214,180,90,.16); border-color: rgba(180,145,45,.55); }
+  .hold-timer { display:flex; align-items:center; justify-content:center; gap:7px; margin-bottom:14px; padding:9px 12px; border-radius:10px; background:rgba(214,180,90,.16); border:1px solid rgba(180,145,45,.45); color:#8A6A14; font-size:13px; font-weight:600; letter-spacing:.01em; }
+  .hold-timer.warn { background:rgba(229,57,53,.10); border-color:rgba(229,57,53,.45); color:#B3261E; }
+  .toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(12px); background:#14161A; border:1px solid rgba(255,255,255,.14); color:#fff; padding:11px 18px; border-radius:10px; font-size:14px; z-index:200; opacity:0; pointer-events:none; transition:.2s; max-width:90vw; text-align:center; box-shadow:0 8px 30px rgba(16,24,40,.28); }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   .cell.buffer { color: var(--dim); cursor: not-allowed; border-color: var(--border);
-    background: repeating-linear-gradient(45deg,#161616,#161616 6px,#0e0e0e 6px,#0e0e0e 12px); }
+    background: repeating-linear-gradient(45deg,#F0F2F5,#F0F2F5 6px,#E6E9EE 6px,#E6E9EE 12px); }
   .cell.buffer .price { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
   .cell.buffer .per { display: none; }
   .cell.sel { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
-  .cell.sel .price, .cell.sel .per { color: #000; }
+  .cell.sel .price, .cell.sel .per { color: #fff; }
   .closed-note { color: var(--dim); padding: 30px 0; text-align: center; font-size: 14px; }
 
   /* Sticky checkout bar */
   .checkbar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-    background: rgba(14,14,14,.95); backdrop-filter: blur(12px); border-top: 1px solid var(--border);
+    background: rgba(255,255,255,.96); backdrop-filter: blur(12px); border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 24px rgba(16,24,40,.08);
     transform: translateY(115%); transition: transform .25s ease; }
   .checkbar.show { transform: translateY(0); }
   .checkbar .inner { max-width: 1180px; margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
@@ -199,7 +203,7 @@
     stroke-linejoin: round; opacity: .75; transition: transform .15s; }
   .cbsel.open .cbsel-arrow { transform: rotate(180deg); }
   .cbsel-menu { display: none; position: absolute; left: 0; bottom: calc(100% + 8px); min-width: 100%; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 12px; padding: 6px; z-index: 40; box-shadow: 0 14px 34px rgba(0,0,0,.55);
+    border: 1px solid var(--border); border-radius: 12px; padding: 6px; z-index: 40; box-shadow: 0 14px 34px rgba(16,24,40,.16);
     max-height: 240px; overflow-y: auto; scrollbar-width: none; }
   .cbsel-menu::-webkit-scrollbar { display: none; }
   .cbsel.open .cbsel-menu { display: block; }
@@ -210,9 +214,9 @@
 
   .btn { border: none; border-radius: 11px; padding: 14px 22px; font-weight: 700; font-size: 15px;
     font-family: 'Space Grotesk'; cursor: pointer; transition: .15s; }
-  .btn-primary { background: var(--green); color: #000; }
-  .btn-primary:hover { background: #ff6450; }
-  .btn-primary:disabled { background: #2a2a2a; color: #666; cursor: not-allowed; }
+  .btn-primary { background: var(--green); color: #fff; }
+  .btn-primary:hover { background: #d8452f; }
+  .btn-primary:disabled { background: #E4E7EC; color: #98A2B3; cursor: not-allowed; }
   .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
   .btn-ghost:hover { color: var(--white); border-color: var(--dim); }
   .btn-block { width: 100%; }
@@ -223,7 +227,7 @@
   #pay-note b { color: var(--green); font-weight: 700; letter-spacing: .02em; }
 
   /* Modal */
-  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.78); backdrop-filter: blur(4px);
+  .overlay { position: fixed; inset: 0; background: rgba(16,24,40,.48); backdrop-filter: blur(4px);
     display: none; place-items: center; z-index: 50; padding: 20px; }
   .overlay.show { display: grid; }
   .modal { width: 100%; max-width: 430px; background: var(--surface); border: 1px solid var(--border);
@@ -274,13 +278,13 @@
   /* SMS-notifications toggle on checkout */
   /* Country hint that appears while typing a phone number */
   .ph-hint { font-size: 12px; color: var(--dim); margin: 4px 0 0 2px; min-height: 15px; letter-spacing: .01em; }
-  .ph-hint.on { color: #7ad492; }
+  .ph-hint.on { color: #067647; }
   .sms-toggle { display: flex; align-items: center; gap: 11px; margin-top: 14px; cursor: pointer; font-size: 13px; color: var(--muted); line-height: 1.3; }
   .sms-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-  .sms-track { flex: none; width: 54px; height: 26px; border-radius: 999px; background: #262626; border: 1px solid #4a4a4a; position: relative; transition: .18s; }
-  .sms-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #8a8a8a; transition: .18s; }
+  .sms-track { flex: none; width: 54px; height: 26px; border-radius: 999px; background: #E4E7EC; border: 1px solid #CFD4DC; position: relative; transition: .18s; }
+  .sms-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(16,24,40,.28); transition: .18s; }
   /* The state is written on the track so on/off is unmistakable */
-  .sms-track:after { content: 'OFF'; position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-family: 'Space Grotesk'; font-size: 9px; font-weight: 700; letter-spacing: .05em; color: #9a9a9a; }
+  .sms-track:after { content: 'OFF'; position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-family: 'Space Grotesk'; font-size: 9px; font-weight: 700; letter-spacing: .05em; color: #667085; }
   .sms-toggle input:checked + .sms-track { background: var(--orange); border-color: var(--orange); }
   .sms-toggle input:checked + .sms-track .sms-thumb { transform: translateX(28px); background: #fff; }
   .sms-toggle input:checked + .sms-track:after { content: 'ON'; right: auto; left: 9px; color: #fff; }
@@ -296,14 +300,14 @@
   /* "Pay with hours" option in checkout */
   .hours-opt { margin-top: 14px; background: rgba(74,163,255,.08); border: 1px solid rgba(74,163,255,.4); border-radius: 12px; padding: 13px 14px; }
   .hours-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
-  .hours-opt .ho-txt b { color: #fff; }
+  .hours-opt .ho-txt b { color: var(--white); }
   .hours-opt .btn { width: 100%; }
   /* Loyalty points option in checkout (green accent to read as a reward) */
   .points-opt { margin-top: 14px; background: rgba(78,192,106,.08); border: 1px solid rgba(78,192,106,.4); border-radius: 12px; padding: 13px 14px; }
   .points-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
-  .points-opt .ho-txt b { color: #fff; }
+  .points-opt .ho-txt b { color: var(--white); }
   .points-opt .btn { width: 100%; }
-  .points-opt .applied { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: #7ad492; }
+  .points-opt .applied { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: #067647; }
   .points-opt .applied a { color: var(--dim); cursor: pointer; text-decoration: underline; font-size: 12px; }
   .conf .recap { text-align: left; background: var(--near-black); border: 1px solid var(--border);
     border-radius: 12px; padding: 16px; margin: 20px 0; }
@@ -367,25 +371,26 @@
 </div>
 <style>
   .view-switch{position:fixed;bottom:18px;right:18px;z-index:9999;display:flex;align-items:center;gap:6px;
-    background:rgba(20,20,20,.92);border:1px solid #333;border-radius:999px;padding:6px 8px;
-    backdrop-filter:blur(8px);box-shadow:0 6px 24px rgba(0,0,0,.45);font-family:'Space Grotesk',sans-serif;}
-  .view-switch .vs-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7A7A7A;padding:0 6px;}
-  .view-switch .vs-btn{font-size:13px;font-weight:700;color:#B5B5B5;text-decoration:none;padding:6px 14px;border-radius:999px;transition:.15s;}
-  .view-switch .vs-btn:hover{color:#fff;}
+    background:rgba(255,255,255,.94);border:1px solid #E3E6EB;border-radius:999px;padding:6px 8px;
+    backdrop-filter:blur(8px);box-shadow:0 6px 24px rgba(16,24,40,.14);font-family:'Space Grotesk',sans-serif;}
+  .view-switch .vs-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#858C99;padding:0 6px;}
+  .view-switch .vs-btn{font-size:13px;font-weight:700;color:#555C68;text-decoration:none;padding:6px 14px;border-radius:999px;transition:.15s;}
+  .view-switch .vs-btn:hover{color:#14161A;}
+  .view-switch{border-color:#D7DCE3;}
   .view-switch .vs-btn.active{background:#F0523D;color:#fff;}
 </style>
 
 <div class="demo-banner">
-  <b>PROTOTYPE</b> — Branded booking demo for Joy House Golf · real bays, hours &amp; rates · Stripe step is simulated (no real charge)
+  <b>PROTOTYPE</b> — Branded booking demo for Invictus Golf · real bays, hours &amp; rates · Stripe step is simulated (no real charge)
 </div>
 
 <header>
   <div class="wrap nav">
     <div class="brand">
-      <img src="https://images.squarespace-cdn.com/content/v1/66fb54c58833195056a5c6b1/f64e42aa-7dd9-4434-bade-a6342963fac0/JoyHouse+Golf+logo+dark+background+new+green.png"
-           alt="Joy House Golf"
+      <img src="/demo/assets/invictus-logo.png"
+           alt="Invictus Golf"
            onerror="this.style.display='none';document.getElementById('bf').style.display='block'" />
-      <span id="bf" class="brand-fallback" style="display:none"><span class="joy">JOY</span><span class="hg">HOUSE GOLF</span></span>
+      <span id="bf" class="brand-fallback" style="display:none"><span class="joy">INVICTUS</span><span class="hg"> GOLF</span></span>
     </div>
     <div class="nav-links">
       <a class="nav-mem" href="/hours">Hours Cards</a>
@@ -544,11 +549,13 @@
 </div>
 
 <footer>
-  Joy House Golf · Booking prototype · Built by Voltris AI
+  Invictus Golf · Booking prototype · Built by Voltris AI
 </footer>
 
 <script>
-/* ---------- Real configuration (from joyhousegolf.com) ---------- */
+/* ---------- Fallback configuration ----------
+   NOTE: these bay names, hours and rates are still Joy House's real data,
+   carried over from the original demo. Replace with Invictus Golf's own. */
 // Defaults — used until live settings load (and as fallback if the DB isn't configured).
 const CONFIG = {
   bays: [
@@ -1284,7 +1291,7 @@ function showStripeConfirmation(pi){
   const code='JH-'+Math.abs([...pi.id].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
   piCache=null;
   $('#conf-code').textContent=code;
-  $('#conf-msg').textContent="You're all set! Your bay is reserved — we'll see you at the Joy House.";
+  $('#conf-msg').textContent="You're all set! Your bay is reserved — we'll see you at Invictus Golf.";
   $('#conf-recap').innerHTML=`
     <div class="row"><span class="k">Bay</span><span>${pi.metadata?.bayName||''}</span></div>
     <div class="row"><span class="k">When</span><span>${pi.metadata?.summary||''}</span></div>
@@ -1302,7 +1309,7 @@ function showConfirmation(name){
   const code='JH-'+Math.abs([...(name+dateStr+state.startMin+bay.id)].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
   piCache=null;
   $('#conf-code').textContent=code;
-  $('#conf-msg').textContent=`You're all set${name && name!=='Guest' ? ', '+name : ''}! Your bay is reserved — we'll see you at the Joy House.`;
+  $('#conf-msg').textContent=`You're all set${name && name!=='Guest' ? ', '+name : ''}! Your bay is reserved — we'll see you at Invictus Golf.`;
   $('#conf-recap').innerHTML=`
     <div class="row"><span class="k">Name</span><span>${name}</span></div>
     <div class="row"><span class="k">Bay</span><span>${bay.name}</span></div>
@@ -1315,7 +1322,8 @@ function showConfirmation(name){
   setStep(4);
 }
 $('#conf-done').onclick=()=>{
-  window.location.href='https://www.joyhousegolf.com';
+  // TODO: point this at the real Invictus Golf website once the domain is confirmed
+  window.location.href='/';
 };
 
 /* ---------- Init ---------- */

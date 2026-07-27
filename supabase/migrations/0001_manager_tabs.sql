@@ -1,4 +1,4 @@
--- Joy House Golf — manager portal expansion
+-- Invictus Golf — manager portal expansion
 -- Adds: bay categories, schedule overrides, schedule templates,
 --        custom booking statuses, tags, and per-booking tags/status label.
 -- Paste this whole file into Supabase → SQL Editor → New query → Run.

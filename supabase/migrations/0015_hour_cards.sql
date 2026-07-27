@@ -1,4 +1,4 @@
--- Joy House Golf — prepaid hour cards (virtual punch cards)
+-- Invictus Golf — prepaid hour cards (virtual punch cards)
 -- The owner sells blocks of range time at a discount (e.g. 10 hours for the price of 8). Customers
 -- buy a card online; the hours land on their customer profile as a balance (in minutes) and get
 -- drawn down as they play — deducted by staff or self-serve at online checkout.

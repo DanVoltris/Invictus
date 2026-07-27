@@ -1,4 +1,4 @@
--- Joy House Golf — cart holds (Ticketmaster-style temporary reservations)
+-- Invictus Golf — cart holds (Ticketmaster-style temporary reservations)
 -- When a customer opens checkout, the slot is locked with a short-lived `held` booking row that
 -- expires after ~5 min. Others see it as unavailable ("Held") until it's paid (→ confirmed) or
 -- it expires (→ released). The existing bookings_no_overlap exclusion constraint makes the hold
