@@ -557,24 +557,34 @@
 
 <script>
 /* ---------- Fallback configuration ----------
-   NOTE: these bay names, hours and rates are still Joy House's real data,
-   carried over from the original demo. Replace with Invictus Golf's own. */
+   Invictus Golf's real bays and CA$20/hour rate, taken from their GolfBook sheet.
+   Opening hours are ASSUMED (see `hours` below) and want confirming.
+   Keep this in step with DEFAULT_SETTINGS in lib/booking.js. */
 // Defaults — used until live settings load (and as fallback if the DB isn't configured).
 const CONFIG = {
   bays: [
-    { id: 'B1', name: 'The Tee Time Tavern Bay', sim: 'Uneekor' },
-    { id: 'B2', name: 'The Bunker Bistro Bay',    sim: 'Uneekor' },
-    { id: 'B3', name: 'The Bogey Barn Bay',       sim: 'Uneekor' },
-    { id: 'B4', name: 'The Mulligan Manor Bay',   sim: 'TrackMan' },
-    { id: 'B5', name: 'The Sunset Sipper Bay',    sim: 'TrackMan' },
+    { id: 'B1', name: 'Assiniboine Credit Union Bay #1', sim: 'Golfzon TwoVision', description: 'Right hand only' },
+    { id: 'B2', name: 'Birchwood Bay #2',                sim: 'Golfzon TwoVision' },
+    { id: 'B3', name: 'Manitopia Realty Bay #3',         sim: 'Golfzon TwoVision' },
+    { id: 'B4', name: 'Public Bay #4',                   sim: 'Golfzon TwoVision', description: 'Flat base' },
+    { id: 'B5', name: 'McNaught Private Room #1',        sim: 'Golfzon TwoVision', description: 'Private room' },
+    { id: 'B6', name: 'Private Room #2',                 sim: 'Golfzon TwoVision', description: 'Private room' },
   ],
-  hours: { 0:[9,21], 1:[11,23], 2:[11,23], 3:[11,23], 4:[11,23], 5:[11,23], 6:[9,23] },
+  // ASSUMED: the GolfBook sheet's day starts at 4:00 AM, so this runs 4:00 AM–midnight daily.
+  hours: { 0:[4,24], 1:[4,24], 2:[4,24], 3:[4,24], 4:[4,24], 5:[4,24], 6:[4,24] },
   maxParty: 4,
   peakStartHour: 17,
   slotStep: 30,
   minMins: 60,
-  rates: { weekdayOffPeak:25, weekdayPeak:32, weekendOffPeak:30, weekendPeak:36 },
+  // Flat CA$20/hour across every bay and time band.
+  rates: { weekdayOffPeak:20, weekdayPeak:20, weekendOffPeak:20, weekendPeak:20 },
 };
+
+// Shown on short "call to book" slots, and dialled directly on mobile.
+// TODO: replace with Invictus Golf's real number — this is a reserved placeholder
+// so the demo never rings a real business. Keep in step with demo/manage.html.
+const SHOP_PHONE = '+12045550100';
+const SHOP_PHONE_DISPLAY = '(204) 555-0100';
 
 // Live-data state: when the DB is on, settings + real bookings come from /api/availability.
 let DB = false;
@@ -810,7 +820,7 @@ function buildGrid(){
       } else {
         // free, but not enough room for a full session (next booking/close is under the minimum) —
         // let the customer phone the shop to grab the short slot.
-        bodyRows+=`<td class="cell callbook"><a href="tel:+12048154142" onclick="event.stopPropagation()">Please Call<br>(204)&nbsp;815-4142<br>to Book</a></td>`;
+        bodyRows+=`<td class="cell callbook"><a href="tel:${SHOP_PHONE}" onclick="event.stopPropagation()">Please Call<br>${SHOP_PHONE_DISPLAY.replace(/ /g,'&nbsp;')}<br>to Book</a></td>`;
       }
     });
     bodyRows+='</tr>';
