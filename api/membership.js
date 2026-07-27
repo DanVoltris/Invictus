@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { stripeStatus, normalizeSettings, membershipExpiryISO } from '../lib/booking.js';
+import { stripeStatus, normalizeSettings, membershipExpiryISO, DEMO_MEMBERSHIPS } from '../lib/booking.js';
 import { getSettings, admin, grantMembership } from '../lib/db.js';
 
 // One function for the whole membership flow (kept as a single serverless function to stay within
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
 // GET ?action=list — public list of plans for the /membership page (no customer data).
 async function listPlans(_req, res) {
   const db = admin();
-  if (!db) return res.status(200).json({ plans: [] });
+  if (!db) return res.status(200).json({ plans: DEMO_MEMBERSHIPS });   // placeholder until Supabase is connected
   const { data, error } = await db.from('memberships')
     .select('id,name,price_cents,period,discount_pct,perks,color,sort').order('sort');
   if (error) { console.error('memberships list:', error.message); return res.status(200).json({ plans: [] }); }
@@ -34,7 +34,7 @@ async function createCheckout(req, res) {
   if (!validEmail(email)) return res.status(400).json({ error: 'A valid email is required so we can link your membership.' });
 
   const db = admin();
-  if (!db) return res.status(503).json({ error: 'Not configured.' });
+  if (!db) return res.status(503).json({ error: 'Memberships aren’t available for purchase yet — please call the shop to sign up.' });
   const { data: plan } = await db.from('memberships').select('*').eq('id', membershipId).maybeSingle();
   if (!plan) return res.status(404).json({ error: 'That plan was not found.' });
   if (!(plan.price_cents > 0)) return res.status(400).json({ error: 'This plan can’t be purchased online — please contact the shop.' });

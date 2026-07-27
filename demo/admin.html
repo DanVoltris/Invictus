@@ -247,7 +247,7 @@
   .pill.blocked{background:rgba(240,82,61,.12);color:#B3261E;border:1px solid rgba(240,82,61,.4)}
   .pill.cancelled{background:#EDEFF3;color:var(--dim);border:1px solid var(--border)}
   .pill.online{background:var(--surface-2);color:var(--muted);border:1px solid var(--border)}
-  .pill.manager{background:rgba(196,229,56,.10);color:#c4e538;border:1px solid rgba(196,229,56,.35)}
+  .pill.manager{background:rgba(196,229,56,.10);color:#5A6B00;border:1px solid rgba(196,229,56,.35)}
   .tagpill{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin:1px 2px 1px 0;border:1px solid}
   .empty{color:var(--dim);text-align:center;padding:30px 0;font-size:14px}
   .hidden{display:none!important}
@@ -283,10 +283,10 @@
   /* Closed status cells — coloured, no price, not bookable */
   .cell.shut{cursor:default}
   .cell.shut .nm{display:block;font-weight:700;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .cell.bk{background:rgba(78,192,106,.12);border-color:rgba(78,192,106,.45);color:#9fe0b0}
+  .cell.bk{background:rgba(78,192,106,.12);border-color:rgba(78,192,106,.45);color:#067647}
   .cell.bl{background:rgba(240,82,61,.10);border-color:rgba(240,82,61,.45);border-style:dashed;color:#B3261E}
   .cell.held{background:rgba(214,180,90,.10);border-color:rgba(214,180,90,.45);border-style:dashed;color:#8A6A14;cursor:default}
-  .cell.held .bnote{color:#b79a52;font-style:normal}
+  .cell.held .bnote{color:#7A6420;font-style:normal}
   .cell .nm{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .cell .cont{opacity:.5}
   .cell .cmeta{display:flex;gap:4px;justify-content:center;align-items:center;flex-wrap:nowrap;overflow:hidden;margin-top:4px;max-width:100%}
@@ -311,7 +311,7 @@
   .cell.holdcell.open{border-style:dashed;border-color:var(--orange-dim);color:var(--orange-dim)}
   /* Schedule-override tiles (blocked time with a reason, like GolfBooking's black "Break" tiles) */
   .cell.ovr{background:#F0F2F5;border-color:#B0B6C0;cursor:pointer}
-  .cell.ovr .nm{color:#e8e8e8;font-weight:700;font-size:11.5px}
+  .cell.ovr .nm{color:var(--white);font-weight:700;font-size:11.5px}
   .cell.ovr:hover{border-color:var(--dim)}
   .seg-sm button{padding:7px 12px;font-size:13px}
   /* Day grid + side list */
@@ -409,11 +409,11 @@
   .sec-h{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;font-weight:700;font-family:'Space Grotesk';margin:18px 0 4px}
   .txn{background:var(--near-black);border:1px solid var(--border);border-radius:10px;padding:4px 14px;margin-top:4px}
   .txn-row{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:9px 0}
-  .rep{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(196,229,56,.12);color:#c4e538;border:1px solid rgba(196,229,56,.35);margin-left:6px;vertical-align:middle}
+  .rep{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(196,229,56,.12);color:#5A6B00;border:1px solid rgba(196,229,56,.35);margin-left:6px;vertical-align:middle}
 
   /* Amber review badge with a custom hover tooltip (imported data that needs a look) */
   .fbadge{position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex:none;
-    border-radius:50%;background:rgba(240,151,61,.15);border:1px solid rgba(240,151,61,.55);color:#f0973d;
+    border-radius:50%;background:rgba(240,151,61,.15);border:1px solid rgba(240,151,61,.55);color:#B26A15;
     font-size:11px;font-weight:700;font-family:'Space Grotesk';cursor:help;margin-left:6px;vertical-align:middle}
   .fbadge::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);
     width:260px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;
@@ -425,7 +425,7 @@
   .exp.expired{color:var(--danger)}
   .wv-code{font-family:'Space Grotesk';font-size:12px;letter-spacing:.04em}
   .note-flag{display:flex;gap:9px;align-items:flex-start;background:rgba(240,151,61,.08);border:1px solid rgba(240,151,61,.35);
-    border-radius:10px;padding:10px 12px;font-size:12.5px;color:#e8b98a;line-height:1.5;margin:2px 0 12px}
+    border-radius:10px;padding:10px 12px;font-size:12.5px;color:#8A5A2B;line-height:1.5;margin:2px 0 12px}
   .note-flag .fbadge{margin:1px 0 0}
   .chips{display:flex;flex-wrap:wrap;gap:7px}
   .chip{font-size:12.5px;font-weight:700;padding:6px 11px;border-radius:999px;border:1px solid var(--border);background:var(--near-black);color:var(--muted);cursor:pointer}
@@ -436,7 +436,7 @@
     background:rgba(255,255,255,.94);border:1px solid #D7DCE3;border-radius:999px;padding:6px 8px;
     backdrop-filter:blur(8px);box-shadow:0 6px 24px rgba(16,24,40,.14);font-family:'Space Grotesk',sans-serif;}
   .view-switch .vs-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7A7A7A;padding:0 6px;}
-  .view-switch .vs-btn{font-size:13px;font-weight:700;color:#B5B5B5;text-decoration:none;padding:6px 14px;border-radius:999px;transition:.15s;}
+  .view-switch .vs-btn{font-size:13px;font-weight:700;color:#555C68;text-decoration:none;padding:6px 14px;border-radius:999px;transition:.15s;}
   .view-switch .vs-btn:hover{color:var(--white);}
   .view-switch .vs-btn.active{background:#F0523D;color:#fff;}
 </style>
@@ -1836,7 +1836,7 @@ function renderCustGrid(rows, empty){
       <div class="cuc-meta">${st.count+(c.legacy_bookings||0)} booking${(st.count+(c.legacy_bookings||0))===1?'':'s'}${st.last?` · last ${shortDate(st.last)}`:''}</div>
       <div class="cuc-badges">
         ${pts>0?`<span class="pill confirmed">${pts.toLocaleString()} pts</span>`:''}
-        ${hrs>0?`<span class="pill" style="background:rgba(74,163,255,.12);color:#7ab8ff;border:1px solid rgba(74,163,255,.4)">${fmtHrs(hrs)}</span>`:''}
+        ${hrs>0?`<span class="pill" style="background:rgba(74,163,255,.12);color:#1257A0;border:1px solid rgba(74,163,255,.4)">${fmtHrs(hrs)}</span>`:''}
         ${c.waiver_code?'<span class="pill confirmed">Waiver</span>':'<span class="pill cancelled">No waiver</span>'}
       </div>
     </div>`; }).join('');

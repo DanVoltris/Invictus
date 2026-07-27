@@ -34,7 +34,7 @@ async function checkout(req, res) {
   if (!validEmail(email)) return res.status(400).json({ error: 'A valid email is required for your receipt.' });
 
   const db = admin();
-  if (!db) return res.status(503).json({ error: 'Not configured.' });
+  if (!db) return res.status(503).json({ error: 'Hour cards aren’t available for purchase yet — please call the shop.' });
   const { data: card } = await db.from('hour_cards').select('*').eq('id', cardId).maybeSingle();
   if (!card) return res.status(404).json({ error: 'That card was not found.' });
   if (!(card.price_cents > 0)) return res.status(400).json({ error: 'This card can’t be purchased online — please contact the shop.' });
