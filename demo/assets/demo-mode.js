@@ -39,7 +39,8 @@
     { id: 'B6', name: 'Private Room #2', sim: 'Golfzon TwoVision', description: 'Private room' },
   ];
 
-  const FLAT = { weekdayOffPeak: 20, weekdayPeak: 20, weekendOffPeak: 20, weekendPeak: 20 };
+  // CA$20/hour Mon–Thu, CA$25/hour Fri–Sun — matches lib/booking.js DEFAULT_SETTINGS.
+  const FLAT = { weekdayOffPeak: 20, weekdayPeak: 20, weekendOffPeak: 25, weekendPeak: 25 };
 
   /* ---------- customers ---------- */
   const CUSTOMERS = [
@@ -71,7 +72,10 @@
     created_at: hoursAgo(600 + i * 40),
   }));
 
-  /* ---------- bookings: a busy but plausible week ---------- */
+  /* ---------- bookings ----------
+     The tee sheet starts empty. Flip SEED_BOOKINGS to true to generate a busy but
+     plausible week of sample bookings again (the generator below is left intact). */
+  const SEED_BOOKINGS = false;
   const NAMES = CUSTOMERS.map((c) => [c.name, c.email, c.phone]);
   const BOOKINGS = [];
   const SLOTS = [
@@ -81,7 +85,7 @@
   let seed = 7;
   const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
 
-  for (let d = -3; d <= 6; d++) {
+  for (let d = -3; SEED_BOOKINGS && d <= 6; d++) {
     const date = dayOffset(d);
     const perDay = 5 + rnd(6);
     const used = {};

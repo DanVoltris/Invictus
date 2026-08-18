@@ -645,7 +645,7 @@
               <button class="btn btn-primary btn-sm" id="save-prices">Save prices</button>
             </div>
           </div>
-          <div class="band-head"><span>Starts at</span><span>Weekday $/hr</span><span>Weekend $/hr</span><span></span></div>
+          <div class="band-head"><span>Starts at</span><span>Mon–Thu $/hr</span><span>Fri–Sun $/hr</span><span></span></div>
           <div id="bands-list"></div>
           <button class="btn btn-ghost btn-sm" id="add-band" style="margin-top:4px">+ Add time block</button>
           <div class="grid2" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
@@ -885,6 +885,7 @@
 const $ = s => document.querySelector(s);
 const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 let sb = null;          // supabase client
+let DEMO_MODE = false;  // true when running on the in-memory stand-in (no account, nothing saved)
 let SETTINGS = null;    // current settings row
 let CATEGORIES = [];    // bay_categories
 let STATUSES = [];      // booking_statuses
@@ -903,22 +904,29 @@ function hourOptions(sel){ let o=''; for(let h=0;h<=24;h++){ const lbl=h===24?'M
 async function boot(){
   let cfg;
   try{ cfg = await (await fetch('/api/config')).json(); }catch(e){ cfg = {}; }
-  if(!cfg.supabase){
-    // No database configured. Rather than dead-end, fall back to the in-memory
-    // demo backend so the manager view is fully browsable. Nothing persists.
-    // See demo/assets/demo-mode.js — delete both once Supabase is connected.
+  // With a database configured, the portal uses it: real sign-in, real saves. Without one
+  // it falls back to the in-memory demo backend (demo/assets/demo-mode.js) so the view is
+  // still browsable with no account — edits react like the real thing, but nothing persists.
+  // Add ?demo=1 to force the demo backend even when a database is configured.
+  const wantsDemo = new URLSearchParams(location.search).has('demo');
+  if(!cfg.supabase || wantsDemo){
     const loaded = await new Promise(res=>{
       const s=document.createElement('script'); s.src='/assets/demo-mode.js';
       s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s);
     });
-    if(!loaded || !window.createDemoSupabase){
+    if(loaded && window.createDemoSupabase){
+      sb = window.createDemoSupabase();
+      DEMO_MODE = true;
+      document.body.classList.add('demo-mode');
+      $('#logout-btn').classList.add('hidden');   // no account, so nothing to sign out of
+      await showApp({ user:{ email:'Demo data — nothing is saved' } });
+      return;
+    }
+    if(!cfg.supabase){
       $('#app-loading').innerHTML='<div class="login"><h1>Not configured</h1><div class="sub">Supabase isn\'t set up on the server yet.</div></div>';
       return;
     }
-    sb = window.createDemoSupabase();
-    document.body.classList.add('demo-mode');
-    await showApp({ user:{ email:'Demo data — nothing is saved' } });
-    return;
+    // Demo script failed to load but a real database is configured — fall through to sign-in.
   }
   sb = supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey,
     { auth:{ persistSession:true, autoRefreshToken:true } });
@@ -1161,7 +1169,7 @@ function renderPriceOverview(){
       <td><div class="blk-list">${blocks(r)}</div></td>
       <td>${custom?`<span class="pill manager">Custom</span> <button class="btn btn-ghost btn-sm br-reset" data-id="${b.id}" style="margin-left:6px">Reset</button>`:'<span class="pill online">Standard</span>'}</td>
     </tr>`; }).join('');
-  $('#price-overview').innerHTML=`<thead><tr><th>Bay</th><th>Rate blocks <span class="dim">(weekday / weekend $ per hr)</span></th><th>Pricing</th></tr></thead><tbody>${rows}</tbody>`;
+  $('#price-overview').innerHTML=`<thead><tr><th>Bay</th><th>Rate blocks <span class="dim">(Mon–Thu / Fri–Sun $ per hr)</span></th><th>Pricing</th></tr></thead><tbody>${rows}</tbody>`;
   $('#price-overview').querySelectorAll('.br-reset').forEach(b=>b.onclick=()=>resetBayRate(b.dataset.id));
 }
 async function resetBayRate(id){
@@ -1179,7 +1187,7 @@ $('#save-season').onclick = () => {
     <div class="sub">Saves the rates currently in the editor so you can re-apply them anytime.</div>
     <div class="field"><label>Template name</label><input class="input" id="px-name" placeholder="e.g. Summer, Winter, Holiday" autocomplete="off" /></div>
     <div class="pay-box">
-      ${curRates().bands.map(b=>`<div class="kv"><span class="k">${hourLabel(b.start)}</span><span>$${b.wd} <span class="dim">weekday</span> &nbsp;·&nbsp; $${b.we} <span class="dim">weekend</span></span></div>`).join('')}
+      ${curRates().bands.map(b=>`<div class="kv"><span class="k">${hourLabel(b.start)}</span><span>$${b.wd} <span class="dim">Mon–Thu</span> &nbsp;·&nbsp; $${b.we} <span class="dim">Fri–Sun</span></span></div>`).join('')}
     </div>
     <button class="btn btn-primary" id="px-save" style="width:100%;margin-top:14px">Save template</button>`;
   co.classList.add('show'); $('#pxx').onclick=closePx; co.onclick=e=>{ if(e.target===co) closePx(); }; $('#px-name').focus();
@@ -2780,7 +2788,7 @@ function openAdd(bayId,startMin,dateISO){
 // ----- Reservation details helpers -----
 function rateForBay(bayId, weekday, hour){
   const r=(SETTINGS.bay_rates||{})[bayId]||SETTINGS.rates||{};
-  const weekend=weekday===0||weekday===6;
+  const weekend=weekday===0||weekday===5||weekday===6;   // Fri–Sun price as "weekend" (see lib/booking.js rateFor)
   return rateFromBands(bandsOf(r), weekend, hour);
 }
 function bookingPriceCents(b){
@@ -2920,7 +2928,11 @@ function openManage(id){
   if($('#m-wv-copy')) $('#m-wv-copy').onclick=()=>{ const link=`${location.origin}/waiver?c=${cust.id}`; navigator.clipboard&&navigator.clipboard.writeText(link); toast('Waiver link copied — text or email it to the customer','ok'); };
   if($('#m-wv-mark')) $('#m-wv-mark').onclick=async()=>{
     const btn=$('#m-wv-mark'); btn.disabled=true; btn.textContent='Saving…';
-    let r; try{ r=await (await fetch('/api/sign-waiver',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customerId:cust.id,name:cust.name||b.customer_name||'In person',version:'v2'})})).json(); }catch(e){ r={ok:false,error:'Network error'}; }
+    // Every other write goes through `sb`, which demo mode replaces. This one is a server
+    // call, so in demo mode it has to be stubbed or it would write to the real database.
+    let r;
+    if(DEMO_MODE){ r={ok:true,signedAt:new Date().toISOString()}; }
+    else try{ r=await (await fetch('/api/sign-waiver',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customerId:cust.id,name:cust.name||b.customer_name||'In person',version:'v2'})})).json(); }catch(e){ r={ok:false,error:'Network error'}; }
     if(r&&r.ok){ cust.waiver_signed_at=r.signedAt; $('#m-wv-status').innerHTML=waiverStatusHTML(cust); btn.remove(); toast('Waiver marked signed','ok'); }
     else { btn.disabled=false; btn.textContent='Mark signed in person'; toast((r&&r.error)||'Could not update','err'); }
   };

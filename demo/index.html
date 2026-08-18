@@ -455,6 +455,7 @@
     <div class="grid-scroll">
       <div id="grid-host"></div>
     </div>
+    <div class="note" id="door-note"></div>
   </div>
 </div>
 
@@ -576,13 +577,21 @@ const CONFIG = {
   slotStep: 30,
   minMins: 60,
   // Flat CA$20/hour across every bay and time band.
-  rates: { weekdayOffPeak:20, weekdayPeak:20, weekendOffPeak:20, weekendPeak:20 },
+  // CA$20/hour Mon–Thu, CA$25/hour Fri–Sun. No evening peak, so both bands match.
+  rates: { weekdayOffPeak:20, weekdayPeak:20, weekendOffPeak:25, weekendPeak:25 },
 };
 
 // Shown on short "call to book" slots, and dialled directly on mobile.
 // Keep in step with demo/manage.html.
 const SHOP_PHONE = '+12044886177';
 const SHOP_PHONE_DISPLAY = '(204) 488-6177';
+// Bays are bookable around the clock, but the front door is locked overnight — say so here
+// rather than letting someone book 3 AM and arrive to a locked door.
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('door-note');
+  if (el) el.innerHTML = `Open 24 hours, 7 days a week. Doors may be locked from 2&nbsp;AM to 5&nbsp;AM — `
+    + `please call <a href="tel:${SHOP_PHONE}">${SHOP_PHONE_DISPLAY.replace(/ /g,'&nbsp;')}</a> for entry.`;
+});
 
 // Live-data state: when the DB is on, settings + real bookings come from /api/availability.
 let DB = false;
@@ -608,7 +617,7 @@ function bandsOf(r){
           {start:peak,wd:(r&&r.weekdayPeak)??32,we:(r&&r.weekendPeak)??36}].sort((a,b)=>a.start-b.start);
 }
 function rateFor(date, hour, bayId){
-  const weekend = [0,6].includes(date.getDay());
+  const weekend = [0,5,6].includes(date.getDay());   // Fri–Sun price as "weekend" (see lib/booking.js rateFor)
   const r = (bayId && CONFIG.bayRates && CONFIG.bayRates[bayId]) || CONFIG.rates;
   const bands=bandsOf(r); let band=bands[0];
   for(const b of bands){ if(b.start<=hour) band=b; else break; }
@@ -644,11 +653,10 @@ function winnipegNow(){
 const dayRank = (y, mIdx, d) => y*10000 + mIdx*100 + d;           // mIdx = 0-based month
 const winnipegToday = () => { const w = winnipegNow(); return { rank: dayRank(w.y, w.mo-1, w.d), w }; };
 
-// Fallback when no DB: deterministic pseudo-random so "booked" blocks stay stable per day/bay.
-function bookedSubFallback(dateKey, bayId, minute){
-  let h = 0; const s = dateKey+bayId+minute;
-  for (let i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) >>> 0; }
-  return (h % 100) < 20;
+// Fallback when no DB: every slot shows as free. (This previously marked ~20% of slots
+// "booked" via a per-day/bay hash so the grid looked busy — removed so the page starts clean.)
+function bookedSubFallback(){
+  return false;
 }
 
 // Is the half-hour slot starting at `m` taken? Real bookings when DB is on, else the fallback.
