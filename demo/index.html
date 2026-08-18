@@ -493,6 +493,7 @@
             <span class="sms-track"><span class="sms-thumb"></span></span>
             <span class="sms-txt">Text me updates about this booking<small>Standard message rates may apply</small></span>
           </label>
+          <div id="member-pay" style="display:none"></div>
           <div id="hours-pay" style="display:none"></div>
           <div id="points-pay" style="display:none"></div>
           <div class="good-to-know">
@@ -990,18 +991,33 @@ async function createPI(){
   const key=bookingKey();
   // hold:true locks the slot for ~5 min while the customer checks out (Ticketmaster-style cart hold).
   const body={ dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin, party:state.party, hold:true };
-  if(POINTS_APPLY){ body.applyPoints=true; body.email=($('#sc-email')?.value||'').trim(); body.phone=($('#sc-phone')?.value||'').trim(); }
+  // Always send the typed contact: the server needs it to spot an active membership, not just
+  // to spend points. Without this a member is billed full price with no indication why.
+  body.email=($('#sc-email')?.value||'').trim();
+  body.phone=($('#sc-phone')?.value||'').trim();
+  if(POINTS_APPLY) body.applyPoints=true;
   const r=await fetch('/api/create-payment-intent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await r.json();
   if(r.status===409){ const e=new Error(data.error||'That time was just taken — pick another slot.'); e.taken=true; throw e; }
   if(!r.ok) throw new Error(data.error||'error');
-  piCache={ key, clientSecret:data.clientSecret, amount:data.amount };
+  piCache={ key, clientSecret:data.clientSecret, amount:data.amount,
+            memberPct:data.memberPct||0, memberDiscountCents:data.memberDiscountCents||0 };
+  renderMemberDiscount(piCache);
   if(data.expiresAt) startHoldTimer(data.expiresAt);
   return piCache;
 }
 // Holds are created only when the customer actually opens checkout — never on hover/selection —
 // so browsing the grid doesn't lock slots.
 function prefetchPI(){}
+
+// Show the member saving at checkout. Without this the total simply drops with no explanation,
+// which reads as a bug rather than a benefit they are paying a monthly fee for.
+function renderMemberDiscount(q){
+  const host=$('#member-pay'); if(!host) return;
+  if(!q || !(q.memberDiscountCents>0)){ host.style.display='none'; host.innerHTML=''; return; }
+  host.style.display='block';
+  host.innerHTML=`<div class="points-opt"><div class="applied"><span>\u2713 Member discount (${q.memberPct}% off) \u2014 you save ${money(q.memberDiscountCents/100)}</span></div></div>`;
+}
 
 /* ---------- Cart hold timer ---------- */
 let holdTimer=null, holdExpiresAt=0, holdActive=false;
@@ -1089,6 +1105,7 @@ function closePayment(){
   const hp=$('#hours-pay'); if(hp){ hp.style.display='none'; hp.innerHTML=''; }
   POINTS_APPLY=false; POINTS_QUOTE=null;
   const pp=$('#points-pay'); if(pp){ pp.style.display='none'; pp.innerHTML=''; }
+  const mp=$('#member-pay'); if(mp){ mp.style.display='none'; mp.innerHTML=''; }
   $('#pay-overlay').classList.remove('show');
   setStep(2);
   loadAvailability().then(renderAll);   // reflect the released slot

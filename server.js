@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url';
 import {
   priceForBooking, summaryFor, stripeStatus, normalizeSettings, bayName, fmtMin, hoursUntilBooking,
   overrideEffects, overrideConflicts, weeklyStatusBlocked, weeklyStatusConflicts, pointsRedemption, pointsEarned,
+  quoteBooking, winnipegTodayISO,
 } from './lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, insertBooking, dbEnabled, admin,
   createHold, releaseHold, confirmHold, cleanupExpiredHolds, upsertCustomer,
-  customerHoursByContact, bookingExistsForPI, adjustPoints, awardBookingPoints } from './lib/db.js';
+  customerHoursByContact, bookingExistsForPI, adjustPoints, awardBookingPoints, membershipById } from './lib/db.js';
 import signWaiver from './api/sign-waiver.js';
 import confirmBooking from './api/confirm-booking.js';
 import membership from './api/membership.js';
@@ -179,12 +180,18 @@ app.post('/api/create-payment-intent', async (req, res) => {
     // Loyalty points as dollars off (deducted for real on payment success — see the webhook/confirm).
     // partialOnly: a charge must remain on this card path — full-cover balances get the max
     // discount (50¢ minimum charge) instead of being silently ignored.
-    let charge = amount, pointsUsed = 0, pointsCustomerId = '';
-    if (req.body.applyPoints) {
-      const cust = await customerHoursByContact({ email: req.body.email, phone: req.body.phone });
-      const r = pointsRedemption(settings, (cust && cust.points_balance) || 0, amount, { partialOnly: true });
-      if (cust && r.pointsUsed > 0) { charge = amount - r.discountCents; pointsUsed = r.pointsUsed; pointsCustomerId = cust.id; }
-    }
+    // Look the customer up whether or not they are spending points — an active membership
+    // discounts the session on its own, and until now that discount was advertised but never applied.
+    const cust = await customerHoursByContact({ email: req.body.email, phone: req.body.phone });
+    const plan = cust && cust.membership_id ? await membershipById(cust.membership_id) : null;
+    const q = quoteBooking({
+      settings, amountCents: amount, plan,
+      membershipExpires: cust && cust.membership_expires, todayISO: winnipegTodayISO(),
+      pointsBalance: (cust && cust.points_balance) || 0, applyPoints: !!req.body.applyPoints,
+    });
+    const charge = q.charge;
+    const pointsUsed = q.pointsUsed;
+    const pointsCustomerId = (cust && q.pointsUsed > 0) ? cust.id : '';
     const pi = await stripe.paymentIntents.create({
       amount: charge, currency: settings.currency,
       automatic_payment_methods: { enabled: true },
@@ -193,9 +200,11 @@ app.post('/api/create-payment-intent', async (req, res) => {
         bayId, bayName: bayName(settings, bayId), dateISO, startMin: String(startMin), endMin: String(endMin),
         players: String(players), summary: summaryFor({ dateISO, startMin, endMin, players }),
         pointsUsed: String(pointsUsed), pointsCustomerId,
+        memberDiscountPct: String(q.memberPct), memberDiscountCents: String(q.memberDiscountCents),
       },
     });
-    res.json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed, expiresAt });
+    res.json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed,
+      memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents, expiresAt });
   } catch (err) {
     console.error('create-payment-intent:', err.message);
     res.status(400).json({ error: err.message });

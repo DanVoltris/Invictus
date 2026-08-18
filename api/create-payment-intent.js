@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
-import { priceForBooking, summaryFor, stripeStatus, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsRedemption } from '../lib/booking.js';
-import { getSettings, getBookingsForDate, getOverridesForDate, createHold, customerHoursByContact } from '../lib/db.js';
+import { priceForBooking, summaryFor, stripeStatus, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsRedemption, quoteBooking, winnipegTodayISO } from '../lib/booking.js';
+import { getSettings, getBookingsForDate, getOverridesForDate, createHold, customerHoursByContact, membershipById } from '../lib/db.js';
 
 // Creates a PaymentIntent for a booking. Price + availability are validated server-side.
 export default async function handler(req, res) {
@@ -45,14 +45,18 @@ export default async function handler(req, res) {
     // when the payment succeeds (confirm-booking/webhook, idempotent by PaymentIntent id).
     // partialOnly: on this card path a charge must remain — a balance big enough to fully cover
     // still gets the max discount (50¢ minimum charge) instead of being silently ignored.
-    let charge = amount, pointsUsed = 0, pointsCustomerId = '';
-    if (applyPoints) {
-      const cust = await customerHoursByContact({ email, phone });
-      const r = pointsRedemption(settings, (cust && cust.points_balance) || 0, amount, { partialOnly: true });
-      if (cust && r.pointsUsed > 0) {
-        charge = amount - r.discountCents; pointsUsed = r.pointsUsed; pointsCustomerId = cust.id;
-      }
-    }
+    // Look the customer up whether or not they are spending points — an active membership
+    // discounts the session on its own. Same quoteBooking call as server.js, deliberately.
+    const cust = await customerHoursByContact({ email, phone });
+    const plan = cust && cust.membership_id ? await membershipById(cust.membership_id) : null;
+    const q = quoteBooking({
+      settings, amountCents: amount, plan,
+      membershipExpires: cust && cust.membership_expires, todayISO: winnipegTodayISO(),
+      pointsBalance: (cust && cust.points_balance) || 0, applyPoints: !!applyPoints,
+    });
+    const charge = q.charge;
+    const pointsUsed = q.pointsUsed;
+    const pointsCustomerId = (cust && q.pointsUsed > 0) ? cust.id : '';
 
     const pi = await stripe.paymentIntents.create({
       amount: charge,
@@ -69,10 +73,13 @@ export default async function handler(req, res) {
         summary: summaryFor({ dateISO, startMin, endMin, players }),
         pointsUsed: String(pointsUsed),
         pointsCustomerId,
+        memberDiscountPct: String(q.memberPct),
+        memberDiscountCents: String(q.memberDiscountCents),
       },
     });
 
-    res.status(200).json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed, expiresAt });
+    res.status(200).json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed,
+      memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents, expiresAt });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
