@@ -1,29 +1,28 @@
 import 'dotenv/config';
 import express from 'express';
-import Stripe from 'stripe';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  priceForBooking, summaryFor, stripeStatus, normalizeSettings, bayName, fmtMin, hoursUntilBooking,
-  overrideEffects, overrideConflicts, weeklyStatusBlocked, weeklyStatusConflicts, pointsRedemption, pointsEarned,
-  quoteBooking, winnipegTodayISO,
+  stripeStatus, normalizeSettings, fmtMin, hoursUntilBooking,
+  overrideEffects, weeklyStatusBlocked, pointsRedemption,
 } from './lib/booking.js';
-import { getSettings, getBookingsForDate, getOverridesForDate, insertBooking, dbEnabled, admin,
-  createHold, releaseHold, confirmHold, cleanupExpiredHolds, upsertCustomer,
-  customerHoursByContact, bookingExistsForPI, adjustPoints, awardBookingPoints, membershipById } from './lib/db.js';
+import { getSettings, getBookingsForDate, getOverridesForDate, dbEnabled, admin,
+  releaseHold, cleanupExpiredHolds } from './lib/db.js';
 import signWaiver from './api/sign-waiver.js';
 import confirmBooking from './api/confirm-booking.js';
 import membership from './api/membership.js';
 import hourCards from './api/hour-cards.js';
 import points from './api/points.js';
 import bookingSelfService from './api/booking.js';
+import createPaymentIntent from './api/create-payment-intent.js';
+import webhook from './api/webhook.js';
 
 // Local dev server. On Vercel the same logic runs as serverless functions in /api.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { PORT = 4242, STRIPE_WEBHOOK_SECRET, SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
+const { PORT = 4242, SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
 
-const { enabled: stripeEnabled, hasLive, secretKey, publishableKey } = stripeStatus(process.env);
-const stripe = stripeEnabled ? new Stripe(secretKey) : null;
+// Startup banner + /api/config only. The Stripe client itself lives in the api/ handlers.
+const { enabled: stripeEnabled, hasLive, publishableKey } = stripeStatus(process.env);
 
 if (hasLive) {
   console.error('\n⛔  LIVE Stripe keys detected in .env — refusing to start Stripe.');
@@ -35,56 +34,9 @@ console.log(dbEnabled ? '🗄  Supabase connected — live settings & bookings.'
 
 const app = express();
 
-// Webhook needs the raw body, so register it BEFORE express.json().
-app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  if (!stripeEnabled) return res.json({ received: true });
-  let event;
-  if (STRIPE_WEBHOOK_SECRET) {
-    try {
-      event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET);
-    } catch (err) {
-      console.error('Webhook signature verification failed:', err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-  } else {
-    event = JSON.parse(req.body.toString());
-  }
-  if (event.type === 'payment_intent.succeeded') {
-    const pi = event.data.object;
-    const md = pi.metadata || {};
-    if (md.dateISO && md.bayId) {
-      let name = null, email = pi.receipt_email || null, phone = null;
-      try {
-        if (pi.latest_charge) {
-          const ch = await stripe.charges.retrieve(pi.latest_charge);
-          const bd = ch.billing_details || {};
-          name = bd.name || null; email = email || bd.email || null; phone = bd.phone || null;
-        }
-      } catch (_) {}
-      if (await bookingExistsForPI(pi.id)) { res.json({ received: true }); return; }   // client confirm beat us
-      const settings = normalizeSettings(await getSettings());
-      const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
-      const patch = { status_label: settings.onlineStatusLabel || null, customer_name: name, customer_email: email, customer_phone: phone,
-        amount_cents: pi.amount, stripe_payment_intent: pi.id, source: 'online' };
-      // Prefer flipping the customer's live cart hold → confirmed; fall back to a fresh insert if it lapsed.
-      const flip = await confirmHold({ ...slot, patch });
-      let error = flip.error || null;
-      let bookingId = flip.id;
-      if (!flip.updated) {
-        const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
-        error = ins.error;
-        bookingId = ins.id;
-      }
-      console.log(error ? `⚠ Booking save failed: ${error}` : `✅ Booking PAID & saved — ${md.summary}`);
-      const up = await upsertCustomer({ name, email, phone });   // save the booker into the customer database
-      // Loyalty: spend applied points (idempotent by PI id) + earn for time played (once per booking).
-      const spent = Number(md.pointsUsed) || 0;
-      if (!error && spent > 0 && md.pointsCustomerId) await adjustPoints({ customerId: md.pointsCustomerId, delta: -spent, kind: 'redeem', note: `Booking ${slot.dateISO}`, bookingId, ref: pi.id });
-      if (!error && up.id && bookingId) await awardBookingPoints({ customerId: up.id, bookingId, points: pointsEarned(settings, slot.endMin - slot.startMin) });
-    }
-  }
-  res.json({ received: true });
-});
+// Webhook needs the raw body for signature verification, so register it — with express.raw() —
+// BEFORE express.json(). Same shared handler the Vercel function uses.
+app.post('/api/webhook', express.raw({ type: 'application/json' }), (req, res) => webhook(req, res));
 
 app.use(express.json());
 
@@ -154,62 +106,8 @@ app.get('/api/availability', async (req, res) => {
   });
 });
 
-app.post('/api/create-payment-intent', async (req, res) => {
-  if (!stripeEnabled) return res.status(503).json({ error: 'Stripe not configured' });
-  try {
-    const { dateISO, bayId, startMin, endMin, party, hold } = req.body;
-    const settings = normalizeSettings(await getSettings());
-    const overrides = await getOverridesForDate(dateISO);
-    const fx = overrideEffects(overrides, settings, dateISO);
-    const amount = priceForBooking({ settings, dateISO, bayId, startMin, endMin, dateHours: fx.dateHours });
-    const players = Math.min(Math.max(parseInt(party, 10) || 1, 1), settings.maxParty);
-    const conflict = (await getBookingsForDate(dateISO))
-      .some((b) => b.status !== 'held' && b.bay_id === bayId && Number(startMin) < b.end_min && Number(endMin) > b.start_min);
-    if (conflict) return res.status(409).json({ error: 'That time was just booked — pick another slot.' });
-    if (overrideConflicts(fx, settings, dateISO, bayId, Number(startMin), Number(endMin)) ||
-        weeklyStatusConflicts(settings, overrides, dateISO, bayId, Number(startMin), Number(endMin))) {
-      return res.status(409).json({ error: 'That time is unavailable — pick another slot.' });
-    }
-    let expiresAt = null;
-    if (hold) {
-      const h = await createHold({ dateISO, bayId, startMin: Number(startMin), endMin: Number(endMin) });
-      if (h.conflict) return res.status(409).json({ error: 'That time was just taken — pick another slot.' });
-      if (h.error) return res.status(500).json({ error: h.error });
-      expiresAt = h.expiresAt;
-    }
-    // Loyalty points as dollars off (deducted for real on payment success — see the webhook/confirm).
-    // partialOnly: a charge must remain on this card path — full-cover balances get the max
-    // discount (50¢ minimum charge) instead of being silently ignored.
-    // Look the customer up whether or not they are spending points — an active membership
-    // discounts the session on its own, and until now that discount was advertised but never applied.
-    const cust = await customerHoursByContact({ email: req.body.email, phone: req.body.phone });
-    const plan = cust && cust.membership_id ? await membershipById(cust.membership_id) : null;
-    const q = quoteBooking({
-      settings, amountCents: amount, plan,
-      membershipExpires: cust && cust.membership_expires, todayISO: winnipegTodayISO(),
-      pointsBalance: (cust && cust.points_balance) || 0, applyPoints: !!req.body.applyPoints,
-    });
-    const charge = q.charge;
-    const pointsUsed = q.pointsUsed;
-    const pointsCustomerId = (cust && q.pointsUsed > 0) ? cust.id : '';
-    const pi = await stripe.paymentIntents.create({
-      amount: charge, currency: settings.currency,
-      automatic_payment_methods: { enabled: true },
-      description: `${bayName(settings, bayId)} — simulator session`,
-      metadata: {
-        bayId, bayName: bayName(settings, bayId), dateISO, startMin: String(startMin), endMin: String(endMin),
-        players: String(players), summary: summaryFor({ dateISO, startMin, endMin, players }),
-        pointsUsed: String(pointsUsed), pointsCustomerId,
-        memberDiscountPct: String(q.memberPct), memberDiscountCents: String(q.memberDiscountCents),
-      },
-    });
-    res.json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed,
-      memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents, expiresAt });
-  } catch (err) {
-    console.error('create-payment-intent:', err.message);
-    res.status(400).json({ error: err.message });
-  }
-});
+// PaymentIntent creation (pricing, availability, cart hold, member/points discount) — shared module handler.
+app.all('/api/create-payment-intent', (req, res) => createPaymentIntent(req, res));
 
 // Release a cart hold (checkout closed/abandoned before payment). Best-effort — the 5-min TTL is the backstop.
 app.post('/api/release-hold', async (req, res) => {

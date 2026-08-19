@@ -1,5 +1,4 @@
-import Stripe from 'stripe';
-import { stripeStatus, normalizeSettings, membershipExpiryISO, DEMO_MEMBERSHIPS } from '../lib/booking.js';
+import { stripeStatus, stripeClient, normalizeSettings, membershipExpiryISO, DEMO_MEMBERSHIPS } from '../lib/booking.js';
 import { getSettings, admin, grantMembership } from '../lib/db.js';
 
 // One function for the whole membership flow (kept as a single serverless function to stay within
@@ -27,7 +26,7 @@ async function listPlans(_req, res) {
 
 // POST ?action=checkout — start a hosted Stripe Checkout for a one-time membership purchase.
 async function createCheckout(req, res) {
-  const { enabled, secretKey } = stripeStatus(process.env);
+  const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(503).json({ error: 'Online membership purchase isn’t available right now — please call the shop.' });
   const { membershipId, name, email, phone } = req.body || {};
   if (!membershipId) return res.status(400).json({ error: 'Please choose a plan.' });
@@ -41,7 +40,7 @@ async function createCheckout(req, res) {
 
   const settings = normalizeSettings(await getSettings());
   const origin = req.headers.origin || `https://${req.headers.host}`;
-  const stripe = new Stripe(secretKey);
+  const stripe = stripeClient(process.env);
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
@@ -70,12 +69,12 @@ async function createCheckout(req, res) {
 
 // POST ?action=confirm — re-verify the paid session and link the plan to the customer (idempotent).
 async function confirmPurchase(req, res) {
-  const { enabled, secretKey } = stripeStatus(process.env);
+  const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(503).json({ ok: false, error: 'Stripe not configured' });
   const { sessionId } = req.body || {};
   if (!sessionId) return res.status(400).json({ ok: false, error: 'Missing checkout session.' });
 
-  const stripe = new Stripe(secretKey);
+  const stripe = stripeClient(process.env);
   let session;
   try { session = await stripe.checkout.sessions.retrieve(sessionId); }
   catch (_) { return res.status(400).json({ ok: false, error: 'Checkout session not found.' }); }

@@ -5,7 +5,8 @@
   "description": "Invictus Golf — branded simulator booking demo with embedded Stripe Checkout",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build:schema": "node scripts/build-schema.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",

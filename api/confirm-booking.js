@@ -1,5 +1,4 @@
-import Stripe from 'stripe';
-import { stripeStatus, normalizeSettings, pointsEarned } from '../lib/booking.js';
+import { stripeStatus, stripeClient, normalizeSettings, pointsEarned } from '../lib/booking.js';
 import { getSettings, confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, adjustPoints, awardBookingPoints } from '../lib/db.js';
 
 // Called by the booking site the moment a payment succeeds. It re-verifies the PaymentIntent with
@@ -8,13 +7,13 @@ import { getSettings, confirmHold, insertBooking, upsertCustomer, bookingExistsF
 // IS configured it stays a backup — bookingExistsForPI keeps the two from double-booking.
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
-  const { enabled, secretKey } = stripeStatus(process.env);
+  const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(503).json({ ok: false, error: 'Stripe not configured' });
 
   const { paymentIntentId, name, email, phone, sms } = req.body || {};
   if (!paymentIntentId) return res.status(400).json({ ok: false, error: 'Missing payment reference.' });
 
-  const stripe = new Stripe(secretKey);
+  const stripe = stripeClient(process.env);
   let pi;
   try { pi = await stripe.paymentIntents.retrieve(paymentIntentId); }
   catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }

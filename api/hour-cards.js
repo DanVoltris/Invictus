@@ -1,6 +1,5 @@
-import Stripe from 'stripe';
 import {
-  stripeStatus, normalizeSettings, priceForBooking, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsEarned,
+  stripeStatus, stripeClient, normalizeSettings, priceForBooking, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsEarned,
 } from '../lib/booking.js';
 import {
   getSettings, getOverridesForDate, getBookingsForDate, admin,
@@ -26,7 +25,7 @@ export default async function handler(req, res) {
 
 // POST ?action=checkout — hosted Stripe Checkout to buy an hour card.
 async function checkout(req, res) {
-  const { enabled, secretKey } = stripeStatus(process.env);
+  const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(503).json({ error: 'Online purchase isn’t available right now — please call the shop.' });
   const { cardId, name, email, phone } = req.body || {};
   if (!cardId) return res.status(400).json({ error: 'Please choose a card.' });
@@ -41,7 +40,7 @@ async function checkout(req, res) {
 
   const settings = normalizeSettings(await getSettings());
   const origin = req.headers.origin || `https://${req.headers.host}`;
-  const stripe = new Stripe(secretKey);
+  const stripe = stripeClient(process.env);
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
@@ -67,12 +66,12 @@ async function checkout(req, res) {
 
 // POST ?action=confirm — re-verify the paid session and credit the hours (idempotent via session id).
 async function confirm(req, res) {
-  const { enabled, secretKey } = stripeStatus(process.env);
+  const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(503).json({ ok: false, error: 'Stripe not configured' });
   const { sessionId } = req.body || {};
   if (!sessionId) return res.status(400).json({ ok: false, error: 'Missing checkout session.' });
 
-  const stripe = new Stripe(secretKey);
+  const stripe = stripeClient(process.env);
   let session;
   try { session = await stripe.checkout.sessions.retrieve(sessionId); }
   catch (_) { return res.status(400).json({ ok: false, error: 'Checkout session not found.' }); }

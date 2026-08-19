@@ -1,16 +1,15 @@
-import Stripe from 'stripe';
-import { priceForBooking, summaryFor, stripeStatus, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsRedemption, quoteBooking, winnipegTodayISO } from '../lib/booking.js';
+import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsRedemption, quoteBooking, winnipegTodayISO } from '../lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, customerHoursByContact, membershipById } from '../lib/db.js';
 
 // Creates a PaymentIntent for a booking. Price + availability are validated server-side.
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { enabled, secretKey } = stripeStatus(process.env);
+  const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(503).json({ error: 'Stripe not configured' });
 
   try {
-    const stripe = new Stripe(secretKey);
+    const stripe = stripeClient(process.env);
     const { dateISO, bayId, startMin, endMin, party, hold, applyPoints, email, phone } = req.body || {};
 
     const settings = normalizeSettings(await getSettings());
@@ -81,6 +80,7 @@ export default async function handler(req, res) {
     res.status(200).json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed,
       memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents, expiresAt });
   } catch (err) {
+    console.error('create-payment-intent:', err.message);
     res.status(400).json({ error: err.message });
   }
 }

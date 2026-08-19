@@ -1,5 +1,4 @@
-import Stripe from 'stripe';
-import { stripeStatus, normalizeSettings, pointsEarned } from '../lib/booking.js';
+import { stripeStatus, stripeClient, normalizeSettings, pointsEarned } from '../lib/booking.js';
 import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingExistsForPI, adjustPoints, awardBookingPoints } from '../lib/db.js';
 
 function readRaw(req) {
@@ -14,21 +13,25 @@ function readRaw(req) {
 // Source of truth: only record a confirmed booking here, never on the client redirect.
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-  const { enabled, secretKey } = stripeStatus(process.env);
+  const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(200).json({ received: true });
 
-  const stripe = new Stripe(secretKey);
+  const stripe = stripeClient(process.env);
   const whsec = process.env.STRIPE_WEBHOOK_SECRET;
+  // Local dev mounts this behind express.raw(), which hands us a Buffer and leaves the request
+  // stream drained — readRaw() would never resolve, so always prefer the Buffer when there is one.
+  const buf = req.body && Buffer.isBuffer(req.body) ? req.body : null;
   let event;
   try {
     if (whsec) {
-      const raw = req.body && Buffer.isBuffer(req.body) ? req.body : await readRaw(req);
-      event = stripe.webhooks.constructEvent(raw, req.headers['stripe-signature'], whsec);
+      event = stripe.webhooks.constructEvent(buf || await readRaw(req), req.headers['stripe-signature'], whsec);
     } else {
       // No signing secret configured — accept the parsed event (fine for a test-mode prototype).
-      event = req.body && req.body.type ? req.body : JSON.parse((await readRaw(req)).toString());
+      if (buf) event = JSON.parse(buf.toString());
+      else event = req.body && req.body.type ? req.body : JSON.parse((await readRaw(req)).toString());
     }
   } catch (err) {
+    console.error('Webhook error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
