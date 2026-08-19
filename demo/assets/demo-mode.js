@@ -118,6 +118,96 @@
     }
   }
 
+
+  /* ---------- booking history (the operator dashboard's data) ----------
+     The tee sheet above deliberately starts empty, but a dashboard with no
+     history is a screen of zeros — useless in a sales demo. So this generates
+     PAST bookings only (yesterday back 60 days); today and everything ahead of
+     it stay clean. Set SEED_HISTORY to false to turn the dashboard back to zeros.
+
+     The shape is chosen to make the venue's real problem visible: Invictus is
+     open 24 hours, so the whole-day utilisation number is always going to look
+     dismal next to the ~50-60% it does in the 4pm-10pm prime window. Overnight
+     hours are near-empty, evenings are busy. */
+  const SEED_HISTORY = true;
+  const HISTORY_DAYS = 60;
+
+  // Chance a bay starts a new booking at a given half-hour, by hour of day.
+  const START_ODDS = (h) => (h < 8 ? 0.008 : h < 12 ? 0.03 : h < 16 ? 0.08 : h < 22 ? 0.34 : 0.05);
+  const DURATIONS = [60, 60, 60, 90, 90, 120];       // most sessions are an hour
+
+  // rnd() above returns seed % n, and for a small n that leans on an LCG's weakest low bits.
+  // Taking the low 30 of the 31 seed bits instead gives a fraction that is actually spread out,
+  // which matters here because these odds decide the demo's headline percentages.
+  const rnd01 = () => rnd(1073741824) / 1073741824;
+  const pick = (arr) => arr[Math.floor(rnd01() * arr.length)];
+
+  // A long tail of one-and-done guests plus a few regulars, so the repeat-customer
+  // rate is something other than 0% or 100%. These are booking contacts only — they
+  // are NOT in the customers table, exactly like a real walk-in who never signed up.
+  const FIRST = ['Aiden','Brooke','Callum','Delia','Emmett','Farah','Gus','Hana','Isaac','Jules','Kira','Liam',
+                 'Mara','Nolan','Odette','Pierce','Quinn','Rosa','Silas','Tess','Ulric','Vera','Wes','Xena'];
+  const LAST  = ['Archer','Boyd','Castellan','Doyle','Ellsworth','Farrow','Gagnon','Hollis','Ivers','Janzen',
+                 'Kowalchuk','Lemay','Mercier','Novak','Oland','Pruden','Quill','Rondeau','Sandhu','Thibault',
+                 'Underhill','Vachon','Wiebe','Yakimchuk'];
+  const guest = (i) => {
+    const name = FIRST[i % FIRST.length] + ' ' + LAST[Math.floor(i / FIRST.length) % LAST.length];
+    return [name, name.toLowerCase().replace(/[^a-z]/g, '.') + (1000 + i) + '@example.com', '+1204555' + (1000 + i)];
+  };
+  const GUEST_POOL = FIRST.length * LAST.length;     // 576 possible walk-in identities
+
+  const memberOf = (email) => CUSTOMERS.find((c) => c.email === email) || null;
+  const DISCOUNT = { 'demo-range': 10, 'demo-clubhouse': 15, 'demo-elite': 25 };
+
+  for (let d = -HISTORY_DAYS; SEED_HISTORY && d <= -1; d++) {
+    const date = dayOffset(d);
+    const wd = new Date(date + 'T00:00:00Z').getUTCDay();
+    const weekend = wd === 0 || wd === 5 || wd === 6;          // Fri-Sun is the busy, CA$25 band
+    const rate = weekend ? 25 : 20;
+    const busy = weekend ? 1.25 : 1;
+
+    for (const bay of BAYS) {
+      for (let m = 0; m < 1440;) {
+        if (rnd01() > START_ODDS(Math.floor(m / 60)) * busy) { m += 30; continue; }
+        const mins = pick(DURATIONS);
+        if (m + mins > 1440) { m += 30; continue; }
+
+        // A third of bookings come from the twelve known customers (the regulars);
+        // the rest are guests drawn with a square-law bias toward the low indices,
+        // which produces a handful of frequent faces and a long single-visit tail.
+        let nm, em, ph;
+        if (rnd01() < 0.34) { const c = pick(CUSTOMERS); nm = c.name; em = c.email; ph = c.phone; }
+        else { [nm, em, ph] = guest(Math.floor(rnd01() * rnd01() * GUEST_POOL)); }
+
+        const roll = rnd01() * 100;
+        const cancelled = roll < 7;
+        const noShow = !cancelled && roll < 14;
+        const cust = memberOf(em);
+        const pctOff = cust && cust.membership_id ? (DISCOUNT[cust.membership_id] || 0) : 0;
+        const gross = Math.round((mins / 60) * rate * 100);
+        const s2 = rnd01();
+        const src = s2 < 0.62 ? 'online' : s2 < 0.92 ? 'admin' : (s2 < 0.96 ? 'hours' : 'points');
+
+        BOOKINGS.push({
+          id: uid('bk'), bay_id: bay.id, booking_date: date,
+          start_min: m, end_min: m + mins,
+          status: cancelled ? 'cancelled' : 'confirmed',
+          status_label: cancelled ? 'Cancelled' : noShow ? 'No Show' : 'Checked In',
+          customer_name: nm, customer_email: em, customer_phone: ph,
+          amount_cents: (src === 'hours' || src === 'points') ? 0 : gross - Math.round(gross * pctOff / 100),
+          stripe_payment_intent: null,
+          source: src,
+          note: rnd01() < 0.05 ? 'Bringing own clubs.' : null,
+          tags: rnd01() < 0.08 ? ['League'] : [],
+          expires_at: null,
+          cancelled_at: cancelled ? hoursAgo(-d * 24 + rnd(40) + 4) : null,
+          created_at: hoursAgo(-d * 24 + rnd(240) + 6),
+        });
+        m += mins;
+      }
+    }
+  }
+
   /* ---------- everything the manager tabs read ---------- */
   const DB = {
     settings: [{

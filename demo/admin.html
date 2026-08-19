@@ -8,6 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Metrics layer behind the Dashboard tab, and the shared weekly tee-sheet status helper.
+     Loaded unconditionally (not lazily like demo-mode.js) because the tee sheet needs it too. -->
+<script src="/assets/analytics.js"></script>
 <style>
   :root{
     --black:#F6F7F9;--near-black:#F5F7FA;--surface:#FFFFFF;--surface-2:#EDEFF3;--border:#D7DCE3;
@@ -431,6 +434,37 @@
   .chip{font-size:12.5px;font-weight:700;padding:6px 11px;border-radius:999px;border:1px solid var(--border);background:var(--near-black);color:var(--muted);cursor:pointer}
   .chip.on{color:var(--white);background:var(--surface-2)}
 
+  /* Operator dashboard */
+  .dash-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+  .dash-bar .dash-lab{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.07em;font-weight:700;font-family:'Space Grotesk'}
+  .dash-bar select.input{width:auto;min-width:132px}
+  .dash-bar .cs-wrap{width:auto;min-width:150px}
+  .dash-bar .dash-note{flex-basis:100%;font-size:12px;color:var(--dim);line-height:1.55;margin-top:2px}
+  .dash-busy{opacity:.4;transition:opacity .15s}
+  .stat .stat-s{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45}
+  .card-head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+  .card-head .seg{margin-left:auto;flex:none}
+  .card-head .seg button{white-space:nowrap}
+  /* Charts are hand-rolled inline SVG — no library, nothing loaded from a CDN.
+     They scroll sideways below ~620px rather than shrinking the type into illegibility,
+     the same way the tee sheet's .grid-scroll does. */
+  .chart{margin-top:16px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .chart svg{display:block;width:100%;min-width:560px;height:auto}
+  .chart .gl{stroke:var(--border);stroke-width:1;stroke-dasharray:2 4}
+  .chart .ax{stroke:var(--border);stroke-width:1}
+  .chart .tk{fill:var(--dim);font-size:11px;font-family:'Raleway',sans-serif}
+  .chart .rl{fill:var(--muted);font-size:11.5px;font-family:'Raleway',sans-serif}
+  .chart .axl{fill:var(--dim);font-size:10px;font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+  .chart .vlab{fill:var(--white);font-size:11.5px;font-family:'Space Grotesk',sans-serif;font-weight:700}
+  .chart .bar{fill:var(--orange)}
+  .chart .bar-bg{fill:var(--surface-2)}
+  .foot-note{font-size:12px;color:var(--dim);line-height:1.6;margin-top:16px;padding-top:13px;border-top:1px solid var(--border)}
+  .kvrow{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13.5px}
+  .kvrow:last-child{border-bottom:none}
+  .kvrow .k{color:var(--muted)}
+  .kvrow .k small{display:block;color:var(--dim);font-size:11.5px;margin-top:2px}
+  .kvrow .v{font-family:'Space Grotesk';font-weight:700;white-space:nowrap}
+
   /* Demo-only view switcher */
   .view-switch{position:fixed;bottom:18px;right:18px;z-index:9999;display:flex;align-items:center;gap:6px;
     background:rgba(255,255,255,.94);border:1px solid #D7DCE3;border-radius:999px;padding:6px 8px;
@@ -468,23 +502,8 @@
   <div class="shell">
     <aside class="sidebar">
       <div class="side-brand"><span class="o">INVICTUS</span> GOLF<span class="side-sub">Manager</span></div>
-      <nav class="side-nav">
-        <div class="side-cap">Operations</div>
-        <div class="tab active" data-tab="bookings">Tee Sheet</div>
-        <div class="tab" data-tab="membership">Members</div>
-        <div class="tab" data-tab="hourcards">Hours Cards</div>
-        <div class="tab" data-tab="points">Points</div>
-        <div class="tab" data-tab="logs">Booking Logs</div>
-        <div class="tab" data-tab="customers">Search Customers</div>
-        <div class="side-cap">Configuration</div>
-        <div class="tab" data-tab="bays">Bays</div>
-        <div class="tab" data-tab="prices">Prices</div>
-        <div class="tab" data-tab="overrides">Schedule Overrides</div>
-        <div class="tab" data-tab="templates">Schedule Templates</div>
-        <div class="tab" data-tab="statuses">Statuses</div>
-        <div class="tab" data-tab="tags">Tags</div>
-        <div class="tab" data-tab="paysettings">Payment Settings</div>
-      </nav>
+      <!-- Rendered from the TABS array in the script below — see "Tabs" there to add one. -->
+      <nav class="side-nav" id="side-nav"></nav>
       <div class="side-foot">
         <div class="who" id="who"></div>
         <a class="btn btn-ghost btn-sm" href="/" style="text-decoration:none">View booking site ↗</a>
@@ -493,6 +512,94 @@
     </aside>
 
     <main class="content">
+      <!-- DASHBOARD -->
+      <div id="tab-dashboard" class="hidden">
+        <div class="toolbar">
+          <div><h2>Dashboard</h2><div class="day-label" id="dash-range-label">Loading…</div></div>
+          <div class="day-nav">
+            <select class="input" id="dash-preset">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="365">Last 12 months</option>
+              <option value="thismonth">This month</option>
+              <option value="lastmonth">Last month</option>
+              <option value="custom">Custom range</option>
+            </select>
+            <input class="input" id="dash-from" type="date" />
+            <span class="dim" style="font-size:13px">to</span>
+            <input class="input" id="dash-to" type="date" />
+            <button class="btn btn-ghost btn-sm" id="dash-refresh">Refresh</button>
+          </div>
+        </div>
+
+        <div class="dash-bar">
+          <span class="dash-lab">Measure</span>
+          <div class="seg seg-sm" id="dash-window">
+            <button data-w="allDay" class="on">Whole day</button>
+            <button data-w="prime">Prime time only</button>
+          </div>
+          <span class="dash-lab" style="margin-left:6px">Prime time is</span>
+          <select class="input" id="dash-prime-from"></select>
+          <span class="dim">to</span>
+          <select class="input" id="dash-prime-to"></select>
+          <span class="dash-note" id="dash-window-note"></span>
+        </div>
+
+        <div id="dash-wrap">
+          <div class="stats" id="dash-stats"></div>
+
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h3 class="card-h">Booking volume</h3>
+                <div class="sub" id="dash-vol-sub" style="margin:0">—</div>
+              </div>
+              <div class="seg seg-sm" id="dash-vol-metric">
+                <button data-m="bookings" class="on">Bookings</button>
+                <button data-m="minutes">Bay-hours</button>
+                <button data-m="revenueCents">Revenue</button>
+                <button data-m="utilisationPct">Utilisation</button>
+              </div>
+            </div>
+            <div class="chart" id="dash-volume"></div>
+          </div>
+
+          <div class="grid2">
+            <div class="card">
+              <h3 class="card-h">Utilisation by bay</h3>
+              <div class="sub" id="dash-bays-sub" style="margin:0">—</div>
+              <div class="chart" id="dash-bays"></div>
+              <div class="foot-note">Sellable bay-hours are the venue's opening hours for each day, minus closures painted on the tee sheet, minus time you blocked out yourself. Nothing here is an estimate — it is the same schedule the booking site sells from.</div>
+            </div>
+
+            <div class="card">
+              <h3 class="card-h">Prime time vs off-peak</h3>
+              <div class="sub" id="dash-split-sub" style="margin:0">—</div>
+              <div class="chart" id="dash-split"></div>
+              <div class="foot-note">A session that straddles the boundary is split by the minute, and its revenue is divided in the same proportion — so a 3–6pm booking puts two of its three hours, and two thirds of its money, in prime time.</div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="card">
+              <h3 class="card-h">Who's booking</h3>
+              <div class="sub" id="dash-mix-sub" style="margin:0">—</div>
+              <div class="chart" id="dash-mix"></div>
+              <div id="dash-channel" style="margin-top:16px"></div>
+              <div class="foot-note">Membership is read as it stands <b>today</b>, not as it stood on the day of the booking — a customer who has since let their plan lapse counts as a guest on their older sessions. Bookings are matched to a customer record by phone first, then email; a session booked with a phone number nobody has on file counts as a guest.</div>
+            </div>
+
+            <div class="card">
+              <h3 class="card-h">Repeat business &amp; no-shows</h3>
+              <div class="sub" id="dash-ret-sub" style="margin:0">—</div>
+              <div id="dash-retention" style="margin-top:14px"></div>
+              <div class="foot-note" id="dash-ret-note"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- SCHEDULE -->
       <div id="tab-bookings">
         <div class="toolbar">
@@ -984,15 +1091,45 @@ $('#login-btn').onclick = async () => {
 $('#login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#login-btn').click(); });
 $('#logout-btn').onclick = async () => { await sb.auth.signOut(); showLogin(); };
 
-/* ---------- Tabs ---------- */
-const TAB_IDS = ['bookings','logs','customers','membership','hourcards','points','bays','prices','overrides','templates','statuses','tags','paysettings'];
-const TAB_LOADERS = { logs:loadLogs, customers:loadCustomers, membership:loadMembership, hourcards:loadHourCardsTab, points:loadPointsTab, bays:loadBaysTab, prices:loadPricesTab,
-  overrides:loadOverridesTab, templates:loadTemplatesTab, statuses:loadStatuses, tags:loadTags, paysettings:loadPaySettings };
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active');
-  const id=t.dataset.tab;
+/* ---------- Tabs ----------
+   One descriptor per tab. The sidebar, the show/hide list and the loader map are all
+   derived from this array, so adding a tab is one object here plus its <div id="tab-…">
+   in the markup — no edits to lines another feature is also editing.
+     group  starts a new sidebar caption above this item
+     load   runs every time the tab is opened (the Tee Sheet is loaded by showApp and
+            goToBooking instead, so it deliberately has none) */
+const TABS = [
+  { id:'dashboard',   group:'Operations',    label:'Dashboard',          load:loadDashboardTab },
+  { id:'bookings',                           label:'Tee Sheet' },
+  { id:'membership',                         label:'Members',            load:loadMembership },
+  { id:'hourcards',                          label:'Hours Cards',        load:loadHourCardsTab },
+  { id:'points',                             label:'Points',             load:loadPointsTab },
+  { id:'logs',                               label:'Booking Logs',       load:loadLogs },
+  { id:'customers',                          label:'Search Customers',   load:loadCustomers },
+  { id:'bays',        group:'Configuration', label:'Bays',               load:loadBaysTab },
+  { id:'prices',                             label:'Prices',             load:loadPricesTab },
+  { id:'overrides',                          label:'Schedule Overrides', load:loadOverridesTab },
+  { id:'templates',                          label:'Schedule Templates', load:loadTemplatesTab },
+  { id:'statuses',                           label:'Statuses',           load:loadStatuses },
+  { id:'tags',                               label:'Tags',               load:loadTags },
+  { id:'paysettings',                        label:'Payment Settings',   load:loadPaySettings },
+];
+const DEFAULT_TAB = 'bookings';
+const TAB_IDS = TABS.map(t=>t.id);
+const TAB_LOADERS = Object.fromEntries(TABS.filter(t=>t.load).map(t=>[t.id, t.load]));
+
+$('#side-nav').innerHTML = TABS.map(t =>
+  (t.group ? `<div class="side-cap">${esc(t.group)}</div>` : '') +
+  `<div class="tab${t.id===DEFAULT_TAB?' active':''}" data-tab="${t.id}">${esc(t.label)}</div>`).join('');
+
+// Show one tab and light up its sidebar entry. Does NOT run the loader — callers decide.
+function showTab(id){
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x.dataset.tab===id));
   TAB_IDS.forEach(x=>$('#tab-'+x).classList.toggle('hidden', x!==id));
+}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  const id=t.dataset.tab;
+  showTab(id);
   if(TAB_LOADERS[id]) TAB_LOADERS[id]();
 });
 
@@ -1988,8 +2125,7 @@ async function loadCustHistory(c, hostId){
 async function goToBooking(id, dateISO){
   closeSheet();
   if(typeof setBrush==='function') setBrush(null);
-  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x.dataset.tab==='bookings'));
-  TAB_IDS.forEach(x=>$('#tab-'+x).classList.toggle('hidden', x!=='bookings'));
+  showTab('bookings');
   VIEW='day';
   $('#view-toggle').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.v==='day'));
   $('#day-layout').classList.remove('week');
@@ -2180,19 +2316,9 @@ const STATUS_GREEN='#4ec06a', STATUS_RED='#ff5b5b';
 function norm6(h){ h=(h||'').replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join(''); if(!/^[0-9a-fA-F]{6}$/.test(h)) h='4ec06a'; return '#'+h; }
 function readableOn(hex){ const h=norm6(hex).slice(1); const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16); return (0.2126*r+0.7152*g+0.0722*b) < 130 ? '#e2e2e2' : norm6(hex); }
 
-// Weekly-pattern status for a bay at a minute (client mirror of lib/booking.js weeklyStatusAt).
-function weeklyStatusAt(weekday, bayId, m){
-  const ws=(SETTINGS&&SETTINGS.weekly_status)||{}; const bands=ws[weekday]||ws[String(weekday)]||[];
-  let hit=null;
-  for(const b of (Array.isArray(bands)?bands:[])){
-    const bays=(Array.isArray(b.bays)&&b.bays.length)?b.bays:null;
-    if(bays && !bays.includes(bayId)) continue;
-    const s=b.full?0:Number(b.start), e=b.full?1440:Number(b.end);
-    if(!isFinite(s)||!isFinite(e)) continue;
-    if(m>=s && m<e) hit=b;      // last matching band wins
-  }
-  return hit ? { label:hit.label||'', color:hit.color||null, open:hit.open!==false, full:!!hit.full } : null;
-}
+// Weekly-pattern status for a bay at a minute. The rules live once per runtime: in
+// analytics.js for the browser (here and the dashboard), in lib/booking.js for the server.
+function weeklyStatusAt(weekday, bayId, m){ return InvictusAnalytics.weeklyStatusAt(SETTINGS, weekday, bayId, m); }
 
 // A painted status override covering a cell → { open, color, label } or null (saved overrides).
 function findOvStatus(bayId, iso, m){
@@ -3006,6 +3132,363 @@ function openManage(id){
     if(r.error){ toast('Failed: '+r.error.message,'err'); return; }
     closeSheet(); toast('Removed — slot freed','ok'); loadSchedule();
   };
+}
+
+/* ---------- Dashboard ----------
+   All of the arithmetic lives in demo/assets/analytics.js (window.InvictusAnalytics):
+   it fetches the bookings + customers, derives one fact per booking and computes the
+   metrics against the real opening schedule. Everything below only draws them.
+
+   Charts are hand-rolled inline SVG. No chart library, nothing from a CDN, and the
+   axes are always labelled and always start at zero — an operator has to be able to
+   trust these numbers to fund a decision with them. Where a figure is thinner than it
+   looks (a small sample, a range that runs into today, membership read as of today
+   rather than as of the booking) the card says so instead of rounding it away. */
+
+let DASH = { from:null, to:null, facts:null, overrides:null, prior:null, metrics:null, busy:false, bucket:'day' };
+let DASH_WINDOW = 'allDay';     // 'allDay' | 'prime' — the prime-time toggle
+let DASH_VOL = 'bookings';      // series drawn by the volume chart
+
+const DASH_PRIME_DEFAULT = { from:16, to:22 };
+const CHART_C = { orange:'#F0523D', green:'#4ec06a', blue:'#4AA3FF', amber:'#F0973D', grey:'#B0B6C0' };
+
+const dashNum = n => (Number(n)||0).toLocaleString('en-CA');
+const dashPct = n => (Math.round((Number(n)||0)*10)/10).toFixed(1)+'%';
+const dashHrs = m => { const h=(Number(m)||0)/60; return (h>=10?Math.round(h):Math.round(h*10)/10).toLocaleString('en-CA'); };
+const dashTrunc = (s,n) => String(s||'').length>n ? String(s).slice(0,n-1)+'…' : String(s||'');
+// Grouped, and no cents once a figure is big enough that they are noise on it.
+const dashMoney = c => { const d=(Number(c)||0)/100; return d>=1000 ? '$'+Math.round(d).toLocaleString('en-CA')
+  : '$'+d.toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+const dashLongDate = iso => new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+function dashBucketLabel(key, long){
+  if(/^\d{4}-\d{2}$/.test(key)){ const p=key.split('-'); return MON_S[+p[1]-1]+(long?' '+p[0]:" '"+p[0].slice(2)); }
+  if(long) return dashLongDate(key);
+  const d=new Date(key+'T00:00:00'); return MON_S[d.getMonth()]+' '+d.getDate();
+}
+
+function dashPrimeWindow(){
+  const a=+$('#dash-prime-from').value, b=+$('#dash-prime-to').value;
+  return { startHour: isFinite(a)?a:DASH_PRIME_DEFAULT.from, endHour: isFinite(b)?b:DASH_PRIME_DEFAULT.to };
+}
+const dashPrimeLabel = () => { const p=dashPrimeWindow(); return fmtMin(p.startHour*60)+'–'+fmtMin(p.endHour*60); };
+const dashWindowName = () => DASH_WINDOW==='prime' ? 'prime time ('+dashPrimeLabel()+')' : 'the whole opening day';
+
+/* ----- inline-SVG chart kit ----- */
+
+// A "nice" axis step (1 / 2 / 2.5 / 5 / 10 × a power of ten) so tick labels are readable numbers.
+function dashAxis(max, want){
+  if(!(max>0)) return { top:1, ticks:[0,1] };
+  const raw=max/want, mag=Math.pow(10,Math.floor(Math.log10(raw))), n=raw/mag;
+  const step=(n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*mag;
+  const top=Math.ceil(max/step)*step, ticks=[];
+  for(let v=0; v<=top+step/1000; v+=step) ticks.push(v);
+  return { top, ticks };
+}
+
+// Vertical bars over a time axis. Y starts at zero, both axes carry a title, and x
+// labels are thinned so they never collide.
+function dashBarChartSVG(rows, o){
+  const W=760, H=252, L=64, R=16, T=16, B=54, iw=W-L-R, ih=H-T-B;
+  const ax=dashAxis(Math.max.apply(null,[0].concat(rows.map(o.valueOf))), 4);
+  const y=v=>T+ih-(v/ax.top)*ih;
+  const step=iw/Math.max(1,rows.length), bw=Math.max(1,Math.min(40,step-5));
+  const last=rows.length-1, every=Math.ceil(rows.length/12), keep=Math.max(1,Math.round(every*0.6));
+  let s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(o.yLabel+' by '+o.xLabel)+'">';
+  ax.ticks.forEach(v=>{ const yy=y(v).toFixed(1);
+    s+='<line class="gl" x1="'+L+'" x2="'+(W-R)+'" y1="'+yy+'" y2="'+yy+'"/>'
+      +'<text class="tk" x="'+(L-9)+'" y="'+yy+'" text-anchor="end" dominant-baseline="middle">'+esc(o.fmtTick(v))+'</text>'; });
+  s+='<line class="ax" x1="'+L+'" x2="'+(W-R)+'" y1="'+(T+ih)+'" y2="'+(T+ih)+'"/>';
+  rows.forEach((r,i)=>{
+    const v=Math.max(0,o.valueOf(r)), x=L+i*step+(step-bw)/2, yy=y(v);
+    if(v>0) s+='<rect class="bar" x="'+x.toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+bw.toFixed(1)
+      +'" height="'+Math.max(1,T+ih-yy).toFixed(1)+'" rx="2"><title>'+esc(o.tip(r))+'</title></rect>';
+    if(i===last || (i%every===0 && last-i>=keep))
+      s+='<text class="tk" x="'+(L+i*step+step/2).toFixed(1)+'" y="'+(T+ih+17)+'" text-anchor="middle">'+esc(o.labelOf(r))+'</text>';
+  });
+  s+='<text class="axl" x="'+(L+iw/2)+'" y="'+(H-10)+'" text-anchor="middle">'+esc(o.xLabel)+'</text>';
+  s+='<text class="axl" transform="translate(15 '+(T+ih/2)+') rotate(-90)" text-anchor="middle">'+esc(o.yLabel)+'</text>';
+  return s+'</svg>';
+}
+
+// Horizontal percentage bars on a fixed 0–100% axis. Fixed, not fitted to the data:
+// a 12% bar has to look like 12%, or a 24-hour venue's utilisation reads as healthy.
+function dashPctBarsSVG(rows, o){
+  const W=760, L=178, R=58, T=12, B=38, rowH=30, iw=W-L-R;
+  const H=T+rows.length*rowH+B, base=T+rows.length*rowH;
+  let s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(o.xLabel)+'">';
+  for(let p=0;p<=100;p+=25){ const x=(L+iw*p/100).toFixed(1);
+    s+='<line class="gl" x1="'+x+'" x2="'+x+'" y1="'+T+'" y2="'+(base-8)+'"/>'
+      +'<text class="tk" x="'+x+'" y="'+(base+7)+'" text-anchor="middle">'+p+'%</text>'; }
+  rows.forEach((r,i)=>{
+    const y=T+i*rowH+3, bh=19, v=Math.max(0,Math.min(100,Number(r.pct)||0));
+    s+='<text class="rl" x="'+(L-11)+'" y="'+(y+bh/2)+'" text-anchor="end" dominant-baseline="middle">'+esc(r.label)
+      +(r.full&&r.full!==r.label ? '<title>'+esc(r.full)+'</title>' : '')+'</text>';
+    s+='<rect class="bar-bg" x="'+L+'" y="'+y+'" width="'+iw+'" height="'+bh+'" rx="4"/>';
+    if(v>0) s+='<rect class="bar" x="'+L+'" y="'+y+'" width="'+(iw*v/100).toFixed(1)+'" height="'+bh+'" rx="4"><title>'+esc(r.tip||'')+'</title></rect>';
+    s+='<text class="vlab" x="'+(W-R+9)+'" y="'+(y+bh/2)+'" dominant-baseline="middle">'+dashPct(r.pct)+'</text>';
+  });
+  s+='<text class="axl" x="'+(L+iw/2)+'" y="'+(H-6)+'" text-anchor="middle">'+esc(o.xLabel)+'</text>';
+  return s+'</svg>';
+}
+
+// One 100%-wide bar per row, split into segments. Percentages are read off the axis and
+// the exact figures sit in the legend, so nothing is printed inside a bar too small to hold it.
+function dashShareBarsSVG(bars, o){
+  const W=760, L=118, R=18, T=10, B=36, rowH=42, iw=W-L-R;
+  const H=T+bars.length*rowH+B, base=T+bars.length*rowH;
+  let s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(o.xLabel)+'">';
+  for(let p=0;p<=100;p+=25){ const x=(L+iw*p/100).toFixed(1);
+    s+='<line class="gl" x1="'+x+'" x2="'+x+'" y1="'+T+'" y2="'+(base-12)+'"/>'
+      +'<text class="tk" x="'+x+'" y="'+(base+2)+'" text-anchor="middle">'+p+'%</text>'; }
+  bars.forEach((bar,i)=>{
+    const y=T+i*rowH+5, bh=23;
+    const total=bar.segs.reduce((a,g)=>a+Math.max(0,Number(g.value)||0),0);
+    s+='<text class="rl" x="'+(L-11)+'" y="'+(y+bh/2)+'" text-anchor="end" dominant-baseline="middle">'+esc(bar.label)+'</text>';
+    if(!(total>0)){ s+='<rect class="bar-bg" x="'+L+'" y="'+y+'" width="'+iw+'" height="'+bh+'" rx="4"/>'; return; }
+    let x=L;
+    bar.segs.forEach(g=>{
+      const v=Math.max(0,Number(g.value)||0), gw=iw*v/total;
+      if(gw<=0) return;
+      s+='<rect x="'+x.toFixed(1)+'" y="'+y+'" width="'+gw.toFixed(1)+'" height="'+bh+'" fill="'+g.color+'" rx="3">'
+        +'<title>'+esc(g.name+' — '+g.fmt+' ('+dashPct(v*100/total)+')')+'</title></rect>';
+      x+=gw;
+    });
+  });
+  s+='<text class="axl" x="'+(L+iw/2)+'" y="'+(H-6)+'" text-anchor="middle">'+esc(o.xLabel)+'</text>';
+  return s+'</svg>';
+}
+
+function dashLegend(items){
+  return '<div class="legend2" style="margin:14px 0 0;flex-wrap:wrap">'+items.map(i=>
+    '<span><i class="sw" style="background:'+i.color+';border-color:'+i.color+'"></i> '+esc(i.text)+'</span>').join('')+'</div>';
+}
+const dashKv = rows => rows.map(r=>
+  '<div class="kvrow"><span class="k">'+esc(r.k)+(r.note?'<small>'+esc(r.note)+'</small>':'')+'</span><span class="v">'+esc(r.v)+'</span></div>').join('');
+
+/* ----- range + prime-time controls ----- */
+
+// Presets end yesterday: a day that has not finished yet still counts its whole opening
+// hours in the denominator, so including today would quietly depress utilisation.
+function dashPresetRange(v){
+  const t=todayISO(), y=addDaysISO(t,-1);
+  if(v==='thismonth'){ const f=t.slice(0,8)+'01'; return [f, y<f ? t : y]; }
+  if(v==='lastmonth'){ const e=addDaysISO(t.slice(0,8)+'01',-1); return [e.slice(0,8)+'01', e]; }
+  const n=Math.max(1,+v||30);
+  return [addDaysISO(y,-(n-1)), y];
+}
+function dashSetRange(from,to){ $('#dash-from').value=from; $('#dash-to').value=to; dpSync('#dash-from'); dpSync('#dash-to'); }
+function dashBusy(on){ DASH.busy=!!on; $('#dash-wrap').classList.toggle('dash-busy',!!on); $('#dash-refresh').disabled=!!on; }
+
+$('#dash-preset').addEventListener('change', ()=>{
+  const v=$('#dash-preset').value;
+  if(v==='custom') return;                       // custom = leave the dates alone, the operator sets them
+  const r=dashPresetRange(v); dashSetRange(r[0],r[1]); dashLoad();
+});
+['#dash-from','#dash-to'].forEach(sel=>$(sel).addEventListener('change', ()=>{
+  const p=$('#dash-preset'); p.value='custom'; if(p._csSync) p._csSync();
+  dashLoad();
+}));
+$('#dash-refresh').onclick = ()=>dashLoad(true);
+// The toggle only re-picks which of the two already-computed windows headlines the page.
+$('#dash-window').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  DASH_WINDOW=b.dataset.w;
+  $('#dash-window').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  if(DASH.metrics) dashRender();
+});
+// Moving the prime window changes the split, so recompute — but from the cached rows, no refetch.
+['#dash-prime-from','#dash-prime-to'].forEach(sel=>$(sel).addEventListener('change', ()=>{ if(DASH.facts) dashCompute(); }));
+$('#dash-vol-metric').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  DASH_VOL=b.dataset.m;
+  $('#dash-vol-metric').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  if(DASH.metrics) dashRenderVolume();
+});
+
+/* ----- load + compute ----- */
+
+async function loadDashboardTab(){
+  if(!window.InvictusAnalytics){
+    $('#dash-range-label').textContent='Unavailable';
+    $('#dash-stats').innerHTML='';
+    $('#dash-wrap').innerHTML='<div class="card"><div class="empty">The analytics module didn\'t load, so there is nothing to compute from.<br />Reload the page — if it keeps happening, check that <b>/assets/analytics.js</b> is being served.</div></div>';
+    return;
+  }
+  if(!$('#dash-prime-from').options.length){
+    $('#dash-prime-from').innerHTML=hourOptions(DASH_PRIME_DEFAULT.from);
+    $('#dash-prime-to').innerHTML=hourOptions(DASH_PRIME_DEFAULT.to);
+    syncSelects($('#tab-dashboard'));
+  }
+  if(!$('#dash-from').value){ const r=dashPresetRange($('#dash-preset').value); dashSetRange(r[0],r[1]); }
+  await dashLoad();
+}
+
+async function dashLoad(force){
+  if(DASH.busy) return;
+  const from=$('#dash-from').value, to=$('#dash-to').value;
+  if(!from || !to){ toast('Pick a start and an end date','err'); return; }
+  if(to<from){ toast('The end date is before the start date','err'); return; }
+  if(force || !DASH.facts || DASH.from!==from || DASH.to!==to){
+    dashBusy(true);
+    $('#dash-range-label').textContent='Loading…';
+    try{
+      const res = await Promise.all([
+        InvictusAnalytics.fetchFacts(sb,{from,to}),
+        InvictusAnalytics.fetchOverrides(sb,{from,to}),
+        InvictusAnalytics.fetchCustomerKeysBefore(sb,{from}),
+      ]);
+      DASH.from=from; DASH.to=to; DASH.facts=res[0]; DASH.overrides=res[1]; DASH.prior=res[2];
+    }catch(e){
+      dashBusy(false);
+      const msg=String((e&&e.message)||e);
+      $('#dash-range-label').textContent='Could not load';
+      if(!isAuthError({message:msg})) toast('Could not load the dashboard: '+msg,'err');
+      return;
+    }
+    dashBusy(false);
+  }
+  const days=InvictusAnalytics.datesBetween(from,to).length;
+  DASH.bucket = days<=45 ? 'day' : days<=210 ? 'week' : 'month';
+  dashCompute();
+}
+
+function dashCompute(){
+  DASH.metrics = InvictusAnalytics.computeMetrics({
+    facts:DASH.facts, settings:SETTINGS, overrides:DASH.overrides,
+    from:DASH.from, to:DASH.to, prime:dashPrimeWindow(), todayISO:todayISO(),
+    priorCustomerKeys:DASH.prior, bucket:DASH.bucket,
+  });
+  dashRender();
+}
+
+/* ----- render ----- */
+
+function dashRender(){
+  const m=DASH.metrics; if(!m) return;
+  const u=m.utilisation[DASH_WINDOW];
+  const bucketWord={day:'daily',week:'weekly',month:'monthly'}[m.range.bucket];
+  $('#dash-range-label').textContent = dashLongDate(m.range.from)+' – '+dashLongDate(m.range.to)
+    +' · '+dashNum(m.range.days)+' day'+(m.range.days===1?'':'s')+' · '+bucketWord+' buckets';
+
+  const notes=['Utilisation and revenue per bay-hour below are measured over '+dashWindowName()+'.'];
+  if(DASH_WINDOW==='allDay') notes.push('Invictus is open 24 hours, so the whole-day figure is measured against roughly '
+    + dashNum(Math.round(u.availableMin/60/Math.max(1,m.range.days))) + ' sellable bay-hours a day — it is honest, and it is not comparable to a 12-hour venue.');
+  if(m.range.to>=todayISO()) notes.push(m.range.from>todayISO()
+    ? 'This range has not happened yet: every day in it contributes its full opening hours to the denominator, against whatever has been booked ahead so far.'
+    : 'The range runs past the end of yesterday, and a day that has not finished still counts all of its opening hours — so it drags utilisation down.');
+  $('#dash-window-note').textContent = notes.join(' ');
+
+  $('#dash-stats').innerHTML = [
+    ['Bookings', dashNum(m.totals.bookings),
+      dashNum(m.totals.cancelled)+' cancelled · '+dashNum(m.totals.blocks)+' manager block'+(m.totals.blocks===1?'':'s')],
+    ['Revenue recorded', dashMoney(m.totals.revenueCents),
+      m.totals.bookings ? 'Averages '+dashMoney(m.totals.avgBookingCents)+' a booking' : 'Nothing booked in this range'],
+    ['Utilisation', dashPct(u.utilisationPct),
+      dashHrs(u.bookedMin)+' booked of '+dashHrs(u.availableMin)+' sellable bay-hours'],
+    ['Revenue / bay-hour', dashMoney(u.revPerAvailableBayHourCents),
+      'Per sellable bay-hour, over '+dashWindowName()],
+    ['No-show rate', m.noShow.settled ? dashPct(m.noShow.ratePct) : '—',
+      m.noShow.settled ? dashNum(m.noShow.noShows)+' of '+dashNum(m.noShow.settled)+' finished sessions'
+        +(m.noShow.settled<30?' — small sample, read it as a hint':'') : 'No finished sessions in this range'],
+    ['Repeat customers', m.repeat.customers ? dashPct(m.repeat.ratePct) : '—',
+      m.repeat.customers ? dashNum(m.repeat.repeatCustomers)+' of '+dashNum(m.repeat.customers)+' booked more than once'
+        : 'Nobody booked in this range'],
+  ].map(r=>'<div class="stat"><div class="stat-n">'+esc(r[1])+'</div><div class="stat-l">'+esc(r[0])+'</div><div class="stat-s">'+esc(r[2])+'</div></div>').join('');
+
+  dashRenderVolume(); dashRenderBays(); dashRenderSplit(); dashRenderMix(); dashRenderRetention();
+}
+
+function dashRenderVolume(){
+  const m=DASH.metrics, rows=m.volume||[];
+  const bucketWord={day:'day',week:'week',month:'month'}[m.range.bucket];
+  const spec={
+    bookings:      { y:'Bookings',    v:r=>r.bookings,          tick:v=>dashNum(Math.round(v)),
+                     tip:r=>dashNum(r.bookings)+' booking'+(r.bookings===1?'':'s')+(r.cancelled?' · '+dashNum(r.cancelled)+' cancelled':''), note:'' },
+    minutes:       { y:'Bay-hours',   v:r=>r.minutes/60,        tick:v=>dashNum(Math.round(v)),
+                     tip:r=>dashHrs(r.minutes)+' bay-hours booked', note:'' },
+    revenueCents:  { y:'Revenue',     v:r=>r.revenueCents/100,  tick:v=>'$'+dashNum(Math.round(v)),
+                     tip:r=>dashMoney(r.revenueCents), note:' · what each booking recorded — a session paid with hours or points records nothing' },
+    utilisationPct:{ y:'Utilisation', v:r=>r.utilisationPct,    tick:v=>Math.round(v)+'%',
+                     tip:r=>dashPct(r.utilisationPct)+' of '+dashHrs(r.availableMin)+' sellable bay-hours', note:' · over the whole opening day, not just prime time' },
+  }[DASH_VOL];
+  $('#dash-vol-sub').textContent='Confirmed sessions by '+bucketWord+spec.note+'. Cancellations and manager blocks are excluded.';
+  $('#dash-volume').innerHTML = rows.length
+    ? dashBarChartSVG(rows,{ valueOf:spec.v, fmtTick:spec.tick, labelOf:r=>dashBucketLabel(r.bucket),
+        tip:r=>dashBucketLabel(r.bucket,true)+' — '+spec.tip(r), yLabel:spec.y,
+        xLabel:{day:'Day',week:'Week beginning',month:'Month'}[m.range.bucket] })
+    : '<div class="empty">Nothing in this range.</div>';
+}
+
+function dashRenderBays(){
+  const u=DASH.metrics.utilisation[DASH_WINDOW];
+  const rows=(u.perBay||[]).filter(b=>b.availableMin>0||b.bookedMin>0).map(b=>({
+    label: dashTrunc(bayName(b.bay_id),28), full: bayName(b.bay_id), pct: b.utilisationPct,
+    tip: bayName(b.bay_id)+' — '+dashHrs(b.bookedMin)+' booked of '+dashHrs(b.availableMin)+' sellable bay-hours',
+  }));
+  $('#dash-bays-sub').textContent='Over '+dashWindowName()+'.';
+  $('#dash-bays').innerHTML = rows.length
+    ? dashPctBarsSVG(rows,{ xLabel:'Share of sellable bay-hours booked' })
+    : '<div class="empty">No sellable hours in this range.</div>';
+}
+
+function dashRenderSplit(){
+  const p=DASH.metrics.peakSplit, prime=dashPrimeLabel();
+  $('#dash-split-sub').textContent='Prime time is '+prime+'. Everything outside it is off-peak.';
+  const total=p.prime.minutes+p.offPeak.minutes;
+  if(!(total>0)){ $('#dash-split').innerHTML='<div class="empty">Nothing booked in this range.</div>'; return; }
+  const seg=(a,b,fa,fb)=>[
+    { name:'Prime time', value:a, color:CHART_C.orange, fmt:fa },
+    { name:'Off-peak',   value:b, color:CHART_C.blue,   fmt:fb },
+  ];
+  $('#dash-split').innerHTML = dashShareBarsSVG([
+    { label:'Bay-hours', segs: seg(p.prime.minutes, p.offPeak.minutes, dashHrs(p.prime.minutes)+' h', dashHrs(p.offPeak.minutes)+' h') },
+    { label:'Revenue',   segs: seg(p.prime.revenueCents, p.offPeak.revenueCents, dashMoney(p.prime.revenueCents), dashMoney(p.offPeak.revenueCents)) },
+  ], { xLabel:'Share of the range' }) + dashLegend([
+    { color:CHART_C.orange, text:'Prime time '+prime+' — '+dashHrs(p.prime.minutes)+' h · '+dashMoney(p.prime.revenueCents) },
+    { color:CHART_C.blue,   text:'Off-peak — '+dashHrs(p.offPeak.minutes)+' h · '+dashMoney(p.offPeak.revenueCents) },
+  ]);
+}
+
+function dashRenderMix(){
+  const mix=DASH.metrics.mix, mm=mix.membership, ch=mix.channel;
+  const live=mm.member+mm.guest;
+  $('#dash-mix-sub').textContent='Confirmed sessions in this range, by who booked them.';
+  if(!live){ $('#dash-mix').innerHTML='<div class="empty">Nothing booked in this range.</div>'; $('#dash-channel').innerHTML=''; return; }
+  $('#dash-mix').innerHTML = dashShareBarsSVG([
+    { label:'Membership', segs:[
+      { name:'Member', value:mm.member, color:CHART_C.orange, fmt:dashNum(mm.member)+' bookings' },
+      { name:'Guest',  value:mm.guest,  color:CHART_C.grey,   fmt:dashNum(mm.guest)+' bookings' },
+    ] },
+  ], { xLabel:'Share of confirmed bookings' }) + dashLegend([
+    { color:CHART_C.orange, text:'Member — '+dashNum(mm.member)+' bookings · '+dashMoney(mm.memberRevenueCents) },
+    { color:CHART_C.grey,   text:'Guest — '+dashNum(mm.guest)+' bookings' },
+  ]);
+  const share=n=>dashNum(n)+'  ·  '+dashPct(live?n*100/live:0);
+  $('#dash-channel').innerHTML = dashKv([
+    { k:'Booked online',        note:'Through the booking site', v:share(ch.online) },
+    { k:'Booked at the desk',   note:'Added from this manager portal', v:share(ch.walkIn) },
+    { k:'Paid with hours or points', note:'Redeemed against a card or a points balance', v:share(ch.prepaid) },
+    { k:'Other',                note:'Anything with a source we do not recognise', v:share(ch.other) },
+  ]);
+}
+
+function dashRenderRetention(){
+  const m=DASH.metrics, rep=m.repeat, ns=m.noShow;
+  const attempted=m.totals.bookings+m.totals.cancelled;
+  $('#dash-ret-sub').textContent='How much of this range came back, and how much of it never turned up.';
+  $('#dash-retention').innerHTML = dashKv([
+    { k:'Distinct customers', note:'Matched on phone, then email', v:dashNum(rep.customers) },
+    { k:'Booked more than once', note:'Inside this range', v:rep.customers? dashNum(rep.repeatCustomers)+'  ·  '+dashPct(rep.ratePct) : '—' },
+    { k:'Seen before this range', note:'Also booked in the 365 days before it',
+      v: (rep.returningCustomers==null || !rep.customers) ? '—' : dashNum(rep.returningCustomers)+'  ·  '+dashPct(rep.returningPct) },
+    { k:'Bookings per customer', v: rep.customers? rep.bookingsPerCustomer.toFixed(2) : '—' },
+    { k:'No-shows', note:'Sessions whose date has passed and were marked No Show',
+      v: ns.settled? dashNum(ns.noShows)+'  ·  '+dashPct(ns.ratePct) : '—' },
+    { k:'Cancellations', note:'Share of everything that was ever booked for this range',
+      v: attempted? dashNum(m.totals.cancelled)+'  ·  '+dashPct(m.totals.cancelled*100/attempted) : '—' },
+  ]);
+  const bits=['A customer with no record on file is identified by the phone number typed at booking, so one person who types their number two different ways counts twice.'];
+  if(ns.settled && ns.settled<30) bits.push('Only '+dashNum(ns.settled)+' sessions have finished in this range — the no-show rate moves by '
+    + dashPct(100/ns.settled) + ' per session, so treat it as a hint rather than a measurement.');
+  $('#dash-ret-note').textContent = bits.join(' ');
 }
 
 /* ---------- Custom date picker (replaces native OS calendar on every date field) ---------- */
