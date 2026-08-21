@@ -1,5 +1,7 @@
 import { stripeStatus, stripeClient, normalizeSettings, pointsEarned } from '../lib/booking.js';
-import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingExistsForPI, adjustPoints, awardBookingPoints } from '../lib/db.js';
+import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingExistsForPI, adjustPoints, awardBookingPoints,
+  recordStripeEvent, forgetStripeEvent } from '../lib/db.js';
+import { notifyBookingConfirmed } from '../lib/notify.js';
 
 function readRaw(req) {
   return new Promise((resolve, reject) => {
@@ -35,6 +37,34 @@ export default async function handler(req, res) {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  // Global idempotency. Stripe retries until it gets a 2xx and can also deliver the same event
+  // twice on purpose, so claim the event id before doing any work: a duplicate delivery loses the
+  // insert with a unique violation and is acknowledged without repeating the fulfilment. This sits
+  // ALONGSIDE bookingExistsForPI rather than replacing it — the client-side confirm path doesn't
+  // go through here at all, and a database still on migration 0017 has no stripe_events table, in
+  // which case this reports unsupported and the per-booking guard carries the load on its own.
+  const claim = await recordStripeEvent(event.id);
+  if (claim.duplicate) {
+    console.log(`↩︎ Webhook ${event.id} already handled — skipping.`);
+    return res.status(200).json({ received: true, duplicate: true });
+  }
+
+  try {
+    await fulfil(event, stripe);
+  } catch (err) {
+    // The claim is only valid if the work behind it finished. Release it so Stripe's retry is
+    // treated as a first attempt instead of a duplicate of an attempt that never completed.
+    if (claim.recorded) await forgetStripeEvent(event.id);
+    console.error('Webhook fulfilment failed:', err && err.message ? err.message : err);
+    return res.status(500).json({ received: false });
+  }
+  res.status(200).json({ received: true });
+}
+
+// Everything a successful payment causes: the booking row, the customer, loyalty points and the
+// confirmation message. Split out of the handler so a failure anywhere in it can release the
+// event claim above.
+async function fulfil(event, stripe) {
   if (event.type === 'payment_intent.succeeded') {
     const pi = event.data.object;
     const md = pi.metadata || {};
@@ -52,7 +82,7 @@ export default async function handler(req, res) {
       } catch (_) { /* best-effort */ }
 
       // The client-side confirm usually saved this already — the webhook is the backup path.
-      if (await bookingExistsForPI(pi.id)) { res.status(200).json({ received: true }); return; }
+      if (await bookingExistsForPI(pi.id)) return;
 
       const settings = normalizeSettings(await getSettings());
       const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
@@ -87,7 +117,16 @@ export default async function handler(req, res) {
       if (!error && up.id && bookingId) {
         await awardBookingPoints({ customerId: up.id, bookingId, points: pointsEarned(settings, slot.endMin - slot.startMin) });
       }
+      // Tell the customer. Queued in the outbox keyed on the booking, so the client-side confirm
+      // enqueuing the same receipt cannot produce a second one; delivery is best-effort and can
+      // never fail a payment that has already been taken (see lib/notify.js).
+      if (!error) {
+        await notifyBookingConfirmed({
+          bookingId, dateISO: slot.dateISO, bayId: slot.bayId, bayName: md.bayName,
+          startMin: slot.startMin, endMin: slot.endMin, players: Number(md.players) || null,
+          amountCents: pi.amount, name, email, phone, customerId: up.id || null,
+        });
+      }
     }
   }
-  res.status(200).json({ received: true });
 }
