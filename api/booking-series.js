@@ -1,7 +1,8 @@
 import {
   normalizeSettings, bayName, fmtMin, winnipegTodayISO, quoteGroup, SERIES_FREQS,
-  overrideEffects, overrideConflicts, weeklyStatusConflicts,
+  overrideEffects, overrideConflicts, weeklyStatusConflicts, stripeStatus, stripeClient,
 } from '../lib/booking.js';
+import { issueRefund } from '../lib/refunds.js';
 import {
   getSettings, getOverridesForDate, staffContext,
   createSeries, seriesById, updateSeries, seriesNeedingHorizon, seriesOccurrences, seriesDatesPreview,
@@ -18,6 +19,13 @@ import {
 //   cancel    POST   cancel an occurrence, or some of its bays, and record what is owed back
 //   end       POST   stop a recurrence: cancel what is still ahead, leave the past alone
 //   move      POST   put one occurrence somewhere else without breaking the recurrence
+//   refund    POST   actually send money back through Stripe, for ONE booking (see below)
+//
+// WHY `refund` LIVES HERE AND NOT IN A FILE OF ITS OWN. Two reasons, and the second is the real
+// one. Vercel's Hobby plan allows 12 Serverless Functions and api/ holds exactly 12 — a thirteenth
+// file means the project stops deploying. And this file already owns `public.refunds`: ?action=
+// cancel writes the obligations, so the thing that pays them belongs beside it, sharing the same
+// staff gate and the same money.write rule. It refunds any booking, group or not.
 //
 // A GROUP IS A SERIES OF ONE. There is no separate "group" endpoint and no separate group table
 // hierarchy, because `booking_groups.series_id` and `booking_series` were the same idea invented
@@ -62,6 +70,7 @@ export default async function handler(req, res) {
   if (action === 'cancel') return cancel(req, res);
   if (action === 'end') return end(req, res);
   if (action === 'move') return move(req, res);
+  if (action === 'refund') return refund(req, res);
   return res.status(400).json({ ok: false, error: 'Unknown action' });
 }
 
@@ -520,6 +529,80 @@ async function cancel(req, res) {
     refundNote: refunds.length
       ? 'Recorded what is owed. No money has moved — issue these refunds in Stripe.'
       : undefined,
+  });
+}
+
+// ----- refund -------------------------------------------------------------------------------
+//
+// THE ONE THAT ACTUALLY MOVES MONEY. ?action=cancel above writes what is owed; this pays it.
+//
+//   POST /api/booking-series?action=refund
+//   Authorization: Bearer <the manager's Supabase access token>
+//   { "bookingId": "<uuid>", "amountCents": 2500, "reason": "cancelled by phone", "ref": "<uuid>" }
+//
+//   amountCents  optional — leave it out to refund everything still refundable on that booking.
+//   ref          optional but recommended — the idempotency key. The SAME ref twice moves money
+//                ONCE. Generate one per button press (crypto.randomUUID()) and reuse it on retry.
+//                Omitted, it falls back to `refund:<bookingId>:<amountCents>`, which still stops a
+//                double-click paying twice.
+//
+// money.write, not booking.write: this is the Money permission in migration 0024, the same one
+// ?action=cancel demands before it will even write a refund NOTE. An employee who may cancel a
+// booking still may not send the customer's money back unless an admin has turned Money on.
+//
+// The answer always carries `moneyMoved`. Never tell a customer they have been refunded on the
+// strength of anything else.
+async function refund(req, res) {
+  const who = await staff(req, res, 'money.write');
+  if (!who) return;
+
+  const b = req.body || {};
+  const bookingId = String(b.bookingId || b.id || '');
+  if (!isUuid(bookingId)) return res.status(400).json({ ok: false, error: 'Which booking? Send a bookingId.' });
+
+  let amountCents = null;
+  if (b.amountCents != null && b.amountCents !== '') {
+    amountCents = Math.round(Number(b.amountCents));
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      return res.status(400).json({ ok: false, error: 'Enter a refund amount greater than zero.' });
+    }
+  }
+
+  // Stripe off (no keys, or a live key this prototype refuses to use) is a 503, not a silent
+  // "recorded". Staff must not be told a refund is on its way when nothing can send it.
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) {
+    return res.status(503).json({ ok: false, moneyMoved: false, code: 'stripe_off',
+      error: 'Stripe is not configured on this deployment, so no refund can be sent. Set STRIPE_SECRET_KEY '
+        + '(a test key with Refunds: write and Charges: read) and try again.' });
+  }
+
+  const out = await issueRefund({
+    stripe: stripeClient(process.env),
+    bookingId,
+    amountCents,
+    reason: b.reason || 'refunded by staff',
+    ref: b.ref ? String(b.ref).slice(0, 120) : null,
+    by: (who.user && who.user.email) || (who.staff && who.staff.email) || 'manager',
+    note: b.note || null,
+  });
+  if (!out.ok) {
+    return res.status(out.code || 400).json({
+      ok: false, moneyMoved: false, code: out.reason, error: out.error,
+      refundId: out.refundId, missingPermissions: out.missingPermissions,
+      paidCents: out.paidCents, refundedCents: out.refundedCents, refundableCents: out.refundableCents,
+    });
+  }
+  return res.status(200).json({
+    ok: true,
+    refundId: out.refundId,
+    stripeRefundId: out.stripeRefundId || null,
+    amountCents: out.amountCents,
+    status: out.status,
+    moneyMoved: !!out.moneyMoved,
+    already: !!out.already,
+    message: out.message,
+    ledgerWarning: out.ledgerWarning,
   });
 }
 

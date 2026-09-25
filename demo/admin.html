@@ -1067,9 +1067,11 @@
           <div>
             <div class="card">
               <h3 class="card-h">Processor</h3>
-              <div class="sub">This prototype uses Stripe in test mode — no real cards are ever charged.</div>
+              <!-- Both of these are filled in by loadPaySettings() from what /api/config actually
+                   reports, so "test mode" disappears of its own accord once live keys are in use. -->
+              <div class="sub" id="pay-proc-note">Card payments are handled by Stripe.</div>
               <div class="row" style="align-items:center;gap:10px">
-                <span class="pill confirmed" id="pay-proc-pill">Stripe · test mode</span>
+                <span class="pill confirmed" id="pay-proc-pill">Stripe</span>
                 <label class="switch" style="margin-left:auto"><input type="checkbox" id="p-accept" /><span class="track"></span></label>
                 <span class="muted" style="font-size:13px">Accept payments</span>
               </div>
@@ -1245,6 +1247,7 @@ const $ = s => document.querySelector(s);
 const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 let sb = null;          // supabase client
 let DEMO_MODE = false;  // true when running on the in-memory stand-in (no account, nothing saved)
+let STRIPE_TEST_MODE = false;  // set in boot() from /api/config — never assumed
 let SETTINGS = null;    // current settings row
 let CATEGORIES = [];    // bay_categories
 let STATUSES = [];      // booking_statuses
@@ -1267,8 +1270,17 @@ async function boot(){
   // still browsable with no account — edits react like the real thing, but nothing persists.
   // Add ?demo=1 to force the demo backend even when a database is configured. Every employee
   // has their own login, so localhost signs in exactly like the live site.
-  const wantsDemo = new URLSearchParams(location.search).has('demo');
-  if(!cfg.supabase || wantsDemo){
+  // LOCALHOST ONLY: on a deployed site ?demo=1 would open the whole portal with no login at all,
+  // so it is gated on the same host check as the dev auto sign-in below and simply ignored there.
+  const wantsDemo = DEV_HOST && new URLSearchParams(location.search).has('demo');
+  // What the server is really running, for the payment screen's "test mode" wording. Stripe is
+  // only ever enabled on test keys (lib/booking.js stripeStatus), and the key it hands back says
+  // which kind it is — so with live keys there is nothing here to claim.
+  STRIPE_TEST_MODE = !!(cfg.stripeEnabled && /^pk_test_/.test(cfg.publishableKey||''));
+  // A deployed site with no database configured used to fall into the in-memory demo backend —
+  // a browsable "manager portal", no login, for anyone who found the URL. Off this machine that
+  // is a misconfiguration to report, not a mode to enter.
+  if((!cfg.supabase && DEV_HOST) || wantsDemo){
     const loaded = await new Promise(res=>{
       const s=document.createElement('script'); s.src='/assets/demo-mode.js';
       s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s);
@@ -1282,7 +1294,7 @@ async function boot(){
       await showApp({ user:{ email:'Demo data — nothing is saved' } });
       return;
     }
-    if(!cfg.supabase){
+    if(!cfg.supabase){   // deployed, misconfigured: say so, show nothing
       $('#app-loading').innerHTML='<div class="login"><h1>Not configured</h1><div class="sub">Supabase isn\'t set up on the server yet.</div></div>';
       return;
     }
@@ -2105,7 +2117,13 @@ function loadPaySettings(){
   $('#p-priority').value = p.priorityCapture||'No Payment';
   $('#p-hold').value = p.holdDisclaimer||'';
   $('#p-pay').value = p.paymentDisclaimer||'';
-  $('#pay-proc-pill').textContent = (p.processor||'Stripe')+' · test mode';
+  // Never claim test mode on the portal's say-so: STRIPE_TEST_MODE comes from the publishable
+  // key the server is really running, so live keys silently drop the wording.
+  const proc = p.processor||'Stripe';
+  $('#pay-proc-pill').textContent = STRIPE_TEST_MODE ? proc+' · test mode' : proc;
+  $('#pay-proc-note').textContent = STRIPE_TEST_MODE
+    ? proc+' is running on test keys — no real cards are charged.'
+    : 'Card payments are handled by '+proc+'.';
   syncSelects();
 }
 $('#save-pay').onclick = async () => {
@@ -4289,7 +4307,6 @@ function openManage(id){
       ? `<div class="kv"><span class="k">Deposit held</span><span>${fmt(held)} <span class="dim">(${pay.chargeAmount?'flat':((pay.chargePercent||0)+'%')})</span></span></div>`
       : `<div class="kv"><span class="k">Payment</span><span class="dim">No payment collected</span></div>`;
   const cardLine = `<div class="kv" style="border:none"><span class="k">Card</span><span class="dim">${onlinePaid?'On file · charged':'No card on file'}</span></div>`;
-  const showHoldBtns = !lgRound && (onlinePaid || acceptDep) && can('money.write');
   const txn = lgRound
     ? `<div class="dim" style="font-size:13px;padding:6px 0">Nothing to collect — the team paid for the season.</div>`
     : onlinePaid
@@ -4323,11 +4340,9 @@ function openManage(id){
 
     <div class="sec-h">Payments</div>
     <div class="pay-box">${payLine}${cardLine}</div>
-    ${showHoldBtns?`<div class="row" style="margin-top:10px;flex-wrap:nowrap;gap:8px">
-      <button class="btn btn-ghost btn-sm" id="cap-hold" style="flex:1">Capture held funds</button>
-      <button class="btn btn-ghost btn-sm" id="cancel-hold" style="flex:1">Cancel hold</button>
-    </div>
-    <button class="btn btn-ghost btn-sm" id="cap-total" style="width:100%;margin-top:8px">Capture total balance</button>`:''}
+    <!-- "Capture held funds" / "Cancel hold" / "Capture total balance" used to sit here. They only
+         ever raised a toast — no money was captured or released — while appearing on genuinely paid
+         bookings, so staff read them as having moved real funds. Removed rather than faked. -->
 
     <div class="sec-h">Transactions</div>
     <div class="txn">${txn}</div>
@@ -4401,11 +4416,6 @@ function openManage(id){
     };
   })(); }
   {
-    if(showHoldBtns){
-      $('#cap-hold').onclick=()=>toast('Demo only — no real funds are captured','ok');
-      $('#cancel-hold').onclick=()=>toast('Demo only — the hold is unchanged','ok');
-      if($('#cap-total')) $('#cap-total').onclick=()=>toast('Demo only — no real funds are captured','ok');
-    }
     $('#m-tags').querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{
       const name=ch.dataset.tag; if(selTags.has(name)){ selTags.delete(name); ch.classList.remove('on'); ch.style.cssText=''; }
       else { selTags.add(name); ch.classList.add('on'); const col=(TAGS.find(t=>t.name===name)||{}).color||'#555C68'; ch.style.cssText=`border-color:${col};color:${col}`; }

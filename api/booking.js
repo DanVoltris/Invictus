@@ -1,12 +1,14 @@
 import { admin, getSettings, getBookingsForDate, getOverridesForDate, accountCustomerForRequest,
          teamMembershipFor, teamRoundForWeek, insertLeagueRound } from '../lib/db.js';
 import { normalizeSettings, bayName, fmtMin, hoursUntilBooking, winnipegTodayISO,
-         bookingWindowError, overrideEffects, overrideConflicts, weeklyStatusConflicts } from '../lib/booking.js';
+         bookingWindowError, overrideEffects, overrideConflicts, weeklyStatusConflicts,
+         stripeStatus, stripeClient } from '../lib/booking.js';
+import { issueRefund } from '../lib/refunds.js';
 import '../demo/assets/leagues.js';   // side effect: globalThis.InvictusLeagues (the week maths)
 
 // Customer self-service, one function (keeps the deployment under Vercel's function cap):
 //   GET  ?id=…                    → read-only lookup of a booking (customer-safe fields only)
-//   POST {id}                     → cancel the booking (24-hour policy enforced server-side)
+//   POST {id}                     → cancel the booking AND refund it (24-hour policy, server-side)
 //   POST ?action=league-round     → a team's free weekly league round (migration 0031)
 // The old GET ?phone=… account summary is gone: it handed out a customer's name, balances and
 // bookings to anyone who typed their number. My Account (migration 0025) needs a sign-in instead.
@@ -25,7 +27,7 @@ async function lookup(req, res) {
 
   const { data, error } = await db
     .from('bookings')
-    .select('id,bay_id,booking_date,start_min,end_min,status,customer_name')
+    .select('id,bay_id,booking_date,start_min,end_min,status,customer_name,amount_cents,refunded_cents')
     .eq('id', id)
     .maybeSingle();
   if (error || !data) return res.status(404).json({ ok: false, error: 'Booking not found.' });
@@ -44,10 +46,40 @@ async function lookup(req, res) {
       customerName: data.customer_name || null,
       hoursUntil,
       canCancel: data.status === 'confirmed' && hoursUntil >= 24,
+      // What cancelling now would send back, so the page can say the number before the customer
+      // commits rather than after. Customer-safe: it is their own booking and their own money.
+      paidCents: Math.max(0, Number(data.amount_cents) || 0),
+      refundableCents: Math.max(0, (Number(data.amount_cents) || 0) - (Number(data.refunded_cents) || 0)),
     },
   });
 }
 
+// ----- customer self-cancellation ------------------------------------------------------------
+//
+// WHAT THIS USED TO DO, AND WHY IT WAS WRONG. It flipped the booking to 'cancelled', answered
+// `{ ok: true }`, and kept the money — silently. Meanwhile /manage told the customer "Free
+// cancellation up to 24 hours before your tee time" and settings.pay.paymentDisclaimer promised
+// "Refunds will be issued if cancellation notice is provided at least 24 hours prior". Two
+// promises, no refund path, and a customer with no way to know the difference.
+//
+// THE CHOICE MADE HERE: it refunds. Not because a refund is always right, but because THE GATE
+// THIS FUNCTION ALREADY ENFORCES IS THE REFUND POLICY. The 24-hour rule below is not a booking
+// rule that happens to sit near a money rule — it is the venue's cancellation policy, and it
+// already refuses every cancellation the policy would not refund ("please call the shop"). So
+// every cancellation that gets past it is, by the venue's own published terms, a refundable one.
+// Cancelling it without paying it back would mean enforcing the half of the policy that protects
+// the venue and ignoring the half that protects the customer. The alternative — keep cancelling
+// and merely warn "no refund" — would have meant changing the promise on three pages and giving
+// the customer a worse deal than the one they booked under.
+//
+// WHAT IT NEVER DOES: fail the cancellation because the refund failed. The customer asked to
+// cancel; that part is theirs and it is done first. If Stripe is off, misconfigured, or the
+// booking was not paid by card, the obligation is still RECORDED (method 'manual') and the answer
+// says plainly that the money has not moved yet and who will move it. The response's `refund`
+// object is the only thing a page should believe — `moneyMoved` in particular.
+//
+// The refund is the full remaining balance and the amount is never taken from the request body:
+// the caller supplies a booking id and nothing else, exactly as before.
 async function cancel(req, res) {
   const id = (req.body && req.body.id) || '';
   if (!/^[0-9a-fA-F-]{10,}$/.test(id)) return res.status(400).json({ ok: false, error: 'Invalid request.' });
@@ -80,7 +112,57 @@ async function cancel(req, res) {
     upd = await db.from('bookings').update({ status: 'cancelled' }).eq('id', id);
   }
   if (upd.error) return res.status(500).json({ ok: false, error: upd.error.message });
-  res.status(200).json({ ok: true });
+
+  res.status(200).json({ ok: true, refund: await refundOnSelfCancel(id) });
+}
+
+// The refund half of the cancellation above. Returns a small object a page can show verbatim —
+// it never throws, and it never reports money moved unless Stripe said so.
+async function refundOnSelfCancel(bookingId) {
+  const { enabled } = stripeStatus(process.env);
+  let out;
+  try {
+    out = await issueRefund({
+      stripe: enabled ? stripeClient(process.env) : null,
+      bookingId,
+      amountCents: null,                       // everything still refundable — never from the body
+      reason: 'cancelled online (24-hour policy)',
+      // One key per booking: a customer who double-clicks Cancel, or retries after a dropped
+      // connection, gets one refund. A second cancellation of the same booking is impossible
+      // anyway (the status check above), but the key is what makes that true of the money.
+      ref: `self-cancel:${bookingId}`,
+      by: 'customer',
+      allowManual: true,                       // no card on file → record the obligation, don't drop it
+    });
+  } catch (err) {
+    console.error('self-cancel refund:', err && err.message);
+    return { moneyMoved: false, status: 'pending', amountCents: null,
+      message: 'Your booking is cancelled. Your refund could not be sent automatically — please call the shop and we will issue it.' };
+  }
+
+  if (out.nothingToRefund) {
+    return { moneyMoved: false, status: 'none', amountCents: 0,
+      message: 'There was nothing to pay for this booking, so there is nothing to refund.' };
+  }
+  if (!out.ok) {
+    // Recorded-but-not-sent, or refused outright. Either way the customer is told the truth and
+    // given the next step; staff see the obligation in the refunds table.
+    console.warn(`self-cancel refund for ${bookingId}: ${out.error}`);
+    return { moneyMoved: false, status: 'pending', refundId: out.refundId || null, amountCents: out.amountCents || null,
+      message: 'Your booking is cancelled. Your refund has not gone through automatically — the shop has been notified '
+        + 'and will issue it. Please call us if it has not arrived within 10 business days.' };
+  }
+  return {
+    moneyMoved: !!out.moneyMoved,
+    status: out.status,
+    amountCents: out.amountCents,
+    refundId: out.refundId,
+    message: out.moneyMoved
+      ? out.message
+      : (out.method === 'manual'
+        ? 'Your booking is cancelled. This one was not paid by card, so the shop will put the money back the way you paid it.'
+        : out.message),
+  };
 }
 
 // ----- A team's weekly league round (migration 0031) -----------------------------------

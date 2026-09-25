@@ -44,6 +44,15 @@ mock.module(url('lib', 'db.js'), { namedExports: {
   confirmLeagueTeamCheckout: rec('confirmLeagueTeamCheckout', {}),
   recordStripeEvent: rec('recordStripeEvent', { recorded: true }),
   forgetStripeEvent: rec('forgetStripeEvent', {}),
+  // Reached through lib/refunds.js when api/webhook.js handles charge.refunded. Nothing in this
+  // file fires that event; the refund path has its own suite in tests/refunds.test.mjs.
+  recordRefund: rec('recordRefund', { ok: true, refundId: 'rf_1' }),
+  settleRefund: rec('settleRefund', { ok: true }),
+  refundById: async () => null,
+  refundByStripeId: async () => null,
+  pendingRefundFor: async () => null,
+  bookingForRefund: async () => null,
+  bookingByPaymentIntent: async () => null,
 } });
 mock.module(url('lib', 'notify.js'), { namedExports: {
   notifyBookingConfirmed: rec('notifyBookingConfirmed', {}),

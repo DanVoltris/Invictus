@@ -3,6 +3,7 @@ import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingExistsF
          redeemGiftCard, redeemPromo, confirmLeagueCheckout, confirmLeagueTeamCheckout,
   recordStripeEvent, forgetStripeEvent } from '../lib/db.js';
 import { notifyBookingConfirmed } from '../lib/notify.js';
+import { applyChargeRefunded } from '../lib/refunds.js';
 
 function readRaw(req) {
   return new Promise((resolve, reject) => {
@@ -13,7 +14,8 @@ function readRaw(req) {
   });
 }
 
-// Source of truth: only record a confirmed booking here, never on the client redirect.
+// Source of truth: only record a confirmed booking here, never on the client redirect — and the
+// only place a refund issued OUTSIDE this app (the Stripe dashboard) gets written down.
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const { enabled } = stripeStatus(process.env);
@@ -107,6 +109,25 @@ async function fulfil(event, stripe) {
     else console.log(`✅ League sign-up saved — ${r.league && r.league.name}${r.already ? ' (already on roster)' : ''}`);
     return;
   }
+  // A refund. Two different things arrive as the same event and both matter:
+  //   · somebody refunded a booking from the STRIPE DASHBOARD — nothing in this app knows about it,
+  //     so refunded_cents would stay at zero and the portal would happily refund it a second time;
+  //   · a refund WE issued reaching its final state, which is how our own rows settle to
+  //     'succeeded' when the payment method settles later than the API call returned.
+  // applyChargeRefunded tells them apart by the Stripe refund id and records only what is missing.
+  // It throws nothing it can help: a booking it cannot find is logged, not failed, because Stripe
+  // would retry forever over a gift-card purchase that was never in this ledger.
+  if (event.type === 'charge.refunded') {
+    const charge = event.data.object;
+    const { results } = await applyChargeRefunded({ stripe, charge });
+    for (const r of results) {
+      if (r.error) throw new Error(`refund not recorded: ${r.error}`);     // 500 → Stripe retries
+      if (r.recorded) console.log(`✅ Refund ${r.stripeRefundId || ''} recorded from Stripe — booking ${r.bookingId}`);
+      else if (r.ours) console.log(`✅ Refund settled to ${r.status}${r.attached ? ' (attached to the pending record)' : ''}`);
+    }
+    return;
+  }
+
   if (event.type === 'payment_intent.succeeded') {
     const pi = event.data.object;
     const md = pi.metadata || {};
