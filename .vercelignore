@@ -1,2 +1,18 @@
+# What Vercel must NOT receive. Anything here is absent from the deployment, so it can be neither
+# served nor imported — which is why lib/ is NOT listed: api/*.js import it at runtime.
 .env
+.env.*
 node_modules
+
+# The database: schema, every RLS policy, and the one-file installer. No credentials, but no
+# reason to publish the shape of the business either.
+supabase/
+
+# Tests, verification scripts and the local dev server. None of it runs on Vercel.
+tests/
+scripts/
+server.js
+
+# Planning and working notes.
+*.md
+.claude/
