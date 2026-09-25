@@ -1,6 +1,30 @@
 {
   "rewrites": [
     {
+      "source": "/api/config",
+      "destination": "/api/public?action=config"
+    },
+    {
+      "source": "/api/availability",
+      "destination": "/api/public?action=availability"
+    },
+    {
+      "source": "/api/create-payment-intent",
+      "destination": "/api/checkout?action=create-payment-intent"
+    },
+    {
+      "source": "/api/confirm-booking",
+      "destination": "/api/checkout?action=confirm-booking"
+    },
+    {
+      "source": "/api/release-hold",
+      "destination": "/api/checkout?action=release-hold"
+    },
+    {
+      "source": "/api/sign-waiver",
+      "destination": "/api/account?action=waiver"
+    },
+    {
       "source": "/assets/:path*",
       "destination": "/demo/assets/:path*"
     },

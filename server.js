@@ -7,30 +7,32 @@ import {
   stripeStatus, normalizeSettings, fmtMin, hoursUntilBooking,
   overrideEffects, weeklyStatusBlocked,
 } from './lib/booking.js';
-import { getSettings, getBookingsForDate, getOverridesForDate, dbEnabled, admin,
-  releaseHold, cleanupExpiredHolds, customerHoursByContact, normPhone, upsertCustomer, saveBookingFeedback,
+import { getSettings, dbEnabled, admin,
+  customerHoursByContact, normPhone, upsertCustomer, saveBookingFeedback,
   leaguesForCustomer, isLeaguePlayer } from './lib/db.js';
-import signWaiver from './api/sign-waiver.js';
-import confirmBooking from './api/confirm-booking.js';
 import leagues from './api/leagues.js';
 import hourCards from './api/hour-cards.js';
 import giftCards from './api/gift-cards.js';
 import promos from './api/promos.js';
-import availability from './api/availability.js';
 import waitlist from './api/waitlist.js';
 import bookingSeries from './api/booking-series.js';
 import bookingSelfService from './api/booking.js';
 import account from './api/account.js';
 import staff from './api/staff.js';
-import createPaymentIntent from './api/create-payment-intent.js';
+// The two merged handlers. api/public.js answers /api/config and /api/availability; api/checkout.js
+// answers /api/create-payment-intent, /api/confirm-booking and /api/release-hold; the waiver is an
+// action on api/account.js. Vercel reaches them through the rewrites in vercel.json; this file
+// reaches the SAME dispatcher by naming the action in a third argument. Nothing is copied here.
+import publicApi from './api/public.js';
+import checkout from './api/checkout.js';
 import webhook from './api/webhook.js';
 
 // Local dev server. On Vercel the same logic runs as serverless functions in /api.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { PORT = 4242, SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
+const { PORT = 4242 } = process.env;
 
-// Startup banner + /api/config only. The Stripe client itself lives in the api/ handlers.
-const { enabled: stripeEnabled, hasLive, publishableKey } = stripeStatus(process.env);
+// Startup banner only. The Stripe client, and the answer /api/config gives, both live in api/.
+const { enabled: stripeEnabled, hasLive } = stripeStatus(process.env);
 
 if (hasLive) {
   console.error('\n⛔  LIVE Stripe keys detected in .env — refusing to start Stripe.');
@@ -83,8 +85,10 @@ app.use(['/api/hour-cards', '/api/gift-cards', '/api/waitlist', '/api/leagues', 
 });
 
 // Waiver signing + booking confirmation + league purchases (same handlers the Vercel functions use).
-app.all('/api/sign-waiver', (req, res) => signWaiver(req, res));
-app.all('/api/confirm-booking', (req, res) => confirmBooking(req, res));
+// The waiver now lives inside api/account.js and confirmation inside api/checkout.js; both are
+// reached here by the same ?action= the vercel.json rewrite uses, so the URL is all that's shared.
+app.all('/api/sign-waiver', (req, res) => account(req, res, 'waiver'));
+app.all('/api/confirm-booking', (req, res) => checkout(req, res, 'confirm-booking'));
 // Leagues: buy a team, invite a friend, claim an invite, my teams — dispatches on ?action=.
 app.all('/api/leagues', (req, res) => leagues(req, res));
 app.all('/api/hour-cards', (req, res) => hourCards(req, res));
@@ -115,20 +119,22 @@ app.all('/api/staff', (req, res) => staff(req, res));
 app.all('/api/booking', (req, res) => bookingSelfService(req, res));
 app.post('/api/cancel-booking', (req, res) => bookingSelfService(req, res));   // legacy path
 
-app.get('/api/config', (_req, res) => {
-  res.json({
-    stripeEnabled,
-    publishableKey: stripeEnabled ? publishableKey : null,
-    dbEnabled,
-    supabase: SUPABASE_URL && SUPABASE_ANON_KEY ? { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } : null,
-  });
-});
+// What the browser needs to boot (Stripe + public Supabase config). This route used to hold its
+// own copy of that JSON; it now delegates to api/public.js, the same code Vercel runs.
+app.all('/api/config', (req, res) => publicApi(req, res, 'config'));
 
-// Public availability. Delegates to the SAME handler Vercel runs (api/availability.js) instead of
-// keeping a second copy here: this route used to be duplicated, and the copies drifted — the
-// shared one learned to tell customers why a time is unavailable while this one silently did not,
-// so the feature worked in tests and not in the browser.
-app.get('/api/availability', (req, res) => availability(req, res));
+// Public availability. Delegates to the SAME handler Vercel runs (api/public.js ?action=availability)
+// instead of keeping a second copy here: this route used to be duplicated, and the copies drifted —
+// the shared one learned to tell customers why a time is unavailable while this one silently did
+// not, so the feature worked in tests and not in the browser.
+app.all('/api/availability', (req, res) => publicApi(req, res, 'availability'));
+
+// The merged handlers on their OWN paths too, so this server answers everything Vercel answers.
+// On Vercel these two files ARE /api/public and /api/checkout; the old paths above are rewrites
+// onto them (vercel.json). Mounting them here keeps the dev server and production identical and
+// exercises the same ?action= dispatch the rewrites use.
+app.all('/api/public', (req, res) => publicApi(req, res));
+app.all('/api/checkout', (req, res) => checkout(req, res));
 
 // PaymentIntent creation (pricing, availability, cart hold, promo + gift card) — shared module handler.
 app.all('/api/create-payment-intent', (req, res) => {
@@ -136,15 +142,13 @@ app.all('/api/create-payment-intent', (req, res) => {
   // so its saved cards show. Vercel never runs this file; req.devAccountPhone is set nowhere else.
   const devPhone = devAccountPhone(req);
   if (devPhone && req.get('x-dev-account') === '1') req.devAccountPhone = process.env.DEV_ACCOUNT_PHONE;
-  return createPaymentIntent(req, res);
+  return checkout(req, res, 'create-payment-intent');
 });
 
-// Release a cart hold (checkout closed/abandoned before payment). Best-effort — the 5-min TTL is the backstop.
-app.post('/api/release-hold', async (req, res) => {
-  const { dateISO, bayId, startMin, endMin } = req.body || {};
-  if (dateISO && bayId) await releaseHold({ dateISO, bayId, startMin: Number(startMin), endMin: Number(endMin) });
-  res.json({ ok: true });
-});
+// Release a cart hold (checkout closed/abandoned before payment). Best-effort — the 5-min TTL is
+// the backstop. This route used to hold its own copy of that logic; it now delegates to
+// api/checkout.js, so local and production cannot drift apart.
+app.all('/api/release-hold', (req, res) => checkout(req, res, 'release-hold'));
 
 // LOCAL ONLY: "My Account" without signing in, always as the customer in DEV_ACCOUNT_PHONE.
 // This route exists only in this dev server. Vercel runs the /api/*.js functions and never this

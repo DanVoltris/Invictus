@@ -1,8 +1,59 @@
 import { getSettings, getBookingsForDate, getOverridesForDate, cleanupExpiredHolds } from '../lib/db.js';
-import { normalizeSettings, overrideEffects, weeklyStatusBlocked } from '../lib/booking.js';
+import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked } from '../lib/booking.js';
 
+// The two anonymous reads every visitor makes before they can do anything — what this install is
+// wired up to, and what is free on a given day. Dispatch on ?action=, the same shape as
+// api/gift-cards.js, api/leagues.js and api/waitlist.js:
+//
+//   GET ?action=config         Stripe on/off (+ publishable key) and the PUBLIC Supabase config
+//   GET ?action=availability   live settings + busy ranges for ?date=YYYY-MM-DD
+//
+// WHY THESE TWO SHARE A FILE. Vercel's Hobby plan allows 12 Serverless Functions and api/ held 16,
+// so the project could not deploy at all. Both of these are anonymous reads with no customer data
+// in them, so they cost one slot between them instead of two. Nothing about either answer changed.
+//
+// THE OLD URLS ARE UNCHANGED. /api/config and /api/availability still work: vercel.json rewrites
+// each onto this file with the right ?action=, and server.js mounts the same two paths on the same
+// dispatcher below. No page in demo/ was edited.
+
+// Which of the two is being asked for. Normally ?action=, set by the rewrite. `forced` is how
+// server.js names the action for a path it mounts directly — Vercel only ever passes (req, res),
+// so the default applies there.
+export default async function handler(req, res, forced) {
+  const action = forced || actionOf(req, ['config', 'availability']);
+  if (action === 'config') return config(req, res);
+  if (action === 'availability') return availability(req, res);
+  return res.status(400).json({ error: 'Unknown action' });
+}
+
+// A rewrite MERGES the incoming query string with the destination's, so if a caller ever sent its
+// own ?action= to one of the old paths the key arrives twice, as an array. Pick the first value
+// this file actually recognises rather than whichever end happened to win.
+function actionOf(req, known) {
+  const raw = (req.query && req.query.action);
+  const list = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v == null ? '' : v));
+  return list.find((v) => known.includes(v)) || list[0] || '';
+}
+
+// ---- ?action=config (was api/config.js) -----------------------------------------------
+// Tells the browser whether Stripe is live (+ publishable key) and hands the admin page
+// the PUBLIC Supabase config (URL + anon key) for email/password login.
+export function config(req, res) {
+  const { enabled, publishableKey } = stripeStatus(process.env);
+  const url = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  const dbEnabled = Boolean(url && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  res.status(200).json({
+    stripeEnabled: enabled,
+    publishableKey: enabled ? publishableKey : null,
+    dbEnabled,
+    supabase: url && anonKey ? { url, anonKey } : null,
+  });
+}
+
+// ---- ?action=availability (was api/availability.js) ------------------------------------
 // Public availability: live settings + busy time ranges per bay for a date (no customer data).
-export default async function handler(req, res) {
+export async function availability(req, res) {
   const row = await getSettings();
   if (!row) return res.status(200).json({ dbEnabled: false });
 

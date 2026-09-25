@@ -1,0 +1,256 @@
+import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, winnipegTodayISO, bookingWindowError } from '../lib/booking.js';
+import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
+         checkoutStripeCustomer, paymentElementSession,
+         confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
+         releaseHold } from '../lib/db.js';
+
+// One customer checkout, start to finish. Dispatch on ?action=, the same shape as
+// api/gift-cards.js, api/leagues.js and api/waitlist.js:
+//
+//   create-payment-intent  POST   price the slot, hold it, and open a PaymentIntent
+//   confirm-booking        POST   the payment succeeded — turn the hold into a real booking
+//   release-hold           POST   checkout was closed before paying — give the slot back
+//
+// WHY THESE THREE SHARE A FILE. Vercel's Hobby plan allows 12 Serverless Functions and api/ held
+// 16, so the project could not deploy at all. These three are the single flow one customer walks
+// through in one sitting — price, pay, or walk away — so they cost one slot between them instead
+// of three. Nothing about any of the three answers changed.
+//
+// THE OLD URLS ARE UNCHANGED. /api/create-payment-intent, /api/confirm-booking and
+// /api/release-hold still work: vercel.json rewrites each onto this file with the right ?action=,
+// and server.js mounts the same three paths on the same dispatcher below. Stripe's success URLs,
+// demo/index.html and anything else pointing at the old paths keep working untouched.
+//
+// Each section below keeps its OWN method check, so an old path answers a GET exactly as its own
+// file used to — the three did not agree on the shape of that 405 and this is not the place to
+// start changing answers.
+
+// Which of the three is being asked for. Normally ?action=, set by the rewrite. `forced` is how
+// server.js names the action for a path it mounts directly — Vercel only ever passes (req, res),
+// so the default applies there.
+const ACTIONS = ['create-payment-intent', 'confirm-booking', 'release-hold'];
+export default async function handler(req, res, forced) {
+  const action = forced || actionOf(req, ACTIONS);
+  if (action === 'create-payment-intent') return createPaymentIntent(req, res);
+  if (action === 'confirm-booking') return confirmBooking(req, res);
+  if (action === 'release-hold') return releaseHoldAction(req, res);
+  return res.status(400).json({ error: 'Unknown action' });
+}
+
+// A rewrite MERGES the incoming query string with the destination's, so if a caller ever sent its
+// own ?action= to one of the old paths the key arrives twice, as an array. Pick the first value
+// this file actually recognises rather than whichever end happened to win.
+function actionOf(req, known) {
+  const raw = (req.query && req.query.action);
+  const list = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v == null ? '' : v));
+  return list.find((v) => known.includes(v)) || list[0] || '';
+}
+
+// ---- ?action=create-payment-intent (was api/create-payment-intent.js) -------------------
+// Creates a PaymentIntent for a booking. Price + availability are validated server-side.
+export async function createPaymentIntent(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) return res.status(503).json({ error: 'Stripe not configured' });
+
+  try {
+    const stripe = stripeClient(process.env);
+    const { dateISO, bayId, startMin, endMin, party, hold, email, phone,
+            promoCode, giftCode, promoReservationId } = req.body || {};
+
+    const settings = normalizeSettings(await getSettings());
+    // How far ahead this customer may book: further for league players (migration 0028).
+    const leaguePlayer = await leaguePlayerForRequest(req);
+    const tooFar = bookingWindowError({ settings, dateISO, league: leaguePlayer });
+    if (tooFar) return res.status(400).json({ error: tooFar, code: 'booking_window' });
+    const overrides = await getOverridesForDate(dateISO);
+    // Resolve schedule overrides up front: dateHours lets priceForBooking accept widened
+    // special hours; overrideConflicts rejects blocked/closed slots.
+    const fx = overrideEffects(overrides, settings, dateISO);
+    const amount = priceForBooking({ settings, dateISO, bayId, startMin, endMin, dateHours: fx.dateHours });
+    const players = Math.min(Math.max(parseInt(party, 10) || 1, 1), settings.maxParty);
+
+    // Reject if the slot is really taken (confirmed booking / manager block). Cart holds are handled
+    // by createHold below — its atomic insert is the real guard, so they don't count here.
+    const conflict = (await getBookingsForDate(dateISO))
+      .some((b) => b.status !== 'held' && b.bay_id === bayId && Number(startMin) < b.end_min && Number(endMin) > b.start_min);
+    if (conflict) return res.status(409).json({ error: 'That time was just booked — pick another slot.' });
+
+    if (overrideConflicts(fx, settings, dateISO, bayId, Number(startMin), Number(endMin)) ||
+        weeklyStatusConflicts(settings, overrides, dateISO, bayId, Number(startMin), Number(endMin))) {
+      return res.status(409).json({ error: 'That time is unavailable — pick another slot.' });
+    }
+
+    // Cart hold: lock the slot for ~5 min while the customer checks out (see lib/db.js createHold).
+    let expiresAt = null;
+    if (hold) {
+      const h = await createHold({ dateISO, bayId, startMin: Number(startMin), endMin: Number(endMin) });
+      if (h.conflict) return res.status(409).json({ error: 'That time was just taken — pick another slot.' });
+      if (h.error) return res.status(500).json({ error: h.error });
+      expiresAt = h.expiresAt;
+    }
+
+    // Promo code and gift card. The browser sends these; until now this handler destructured
+    // neither, so quoteBooking() never saw them and the card was charged the undiscounted price
+    // while /api/promos and /api/gift-cards quoted a lower one. Three answers, one of them the
+    // one that actually took the money.
+    //
+    // Both are looked up server-side from the code alone — the browser sends a string, never an
+    // amount. An unknown or exhausted code is simply not applied; it is not an error, because the
+    // customer must still be able to pay. What was applied comes back in the response and in the
+    // PaymentIntent metadata, so the client shows the same figure the card is charged and the
+    // webhook can settle it (see api/webhook.js fulfil()).
+    const promo = promoCode ? await promoByCode(String(promoCode)) : null;
+    const giftCard = giftCode ? await giftCardByCode(String(giftCode)) : null;
+    const giftBalanceCents = giftCard ? await giftCardAvailable(giftCard.id) : 0;
+
+    const q = quoteBooking({
+      settings, amountCents: amount, plan: null,   // memberships retired (0028): leagues carry no discount
+      todayISO: winnipegTodayISO(),                // loyalty points retired: no stage for them here
+      promo,
+      promoContext: {
+        dateISO, bayId, startMin: Number(startMin), endMin: Number(endMin),
+        leaguePlayer,
+      },
+      giftBalanceCents, applyGift: !!giftCard,
+    });
+    const charge = q.charge;
+
+    // A signed-in customer's saved cards and wallets (migration 0029). Null for everyone else.
+    const stripeCustomerId = await checkoutStripeCustomer(stripe, req);
+
+    const pi = await stripe.paymentIntents.create({
+      ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
+      amount: charge,
+      currency: settings.currency,
+      automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
+      description: `${bayName(settings, bayId)} — simulator session`,
+      metadata: {
+        bayId,
+        bayName: bayName(settings, bayId),
+        dateISO,
+        startMin: String(startMin),
+        endMin: String(endMin),
+        players: String(players),
+        summary: summaryFor({ dateISO, startMin, endMin, players }),
+        promoId: (q.promoDiscountCents > 0 && promo) ? String(promo.id) : '',
+        promoReservationId: (q.promoDiscountCents > 0 && promoReservationId) ? String(promoReservationId) : '',
+        promoDiscountCents: String(q.promoDiscountCents || 0),
+        giftCardId: (q.giftUsedCents > 0 && giftCard) ? String(giftCard.id) : '',
+        giftUsedCents: String(q.giftUsedCents || 0),
+        memberDiscountPct: String(q.memberPct),
+        memberDiscountCents: String(q.memberDiscountCents),
+      },
+    });
+
+    let customerSessionClientSecret = null;
+    if (stripeCustomerId) {
+      try { customerSessionClientSecret = await paymentElementSession(stripe, stripeCustomerId); }
+      catch (err) { console.warn('create-payment-intent: saved cards unavailable —', err.message); }
+    }
+
+    res.status(200).json({ clientSecret: pi.client_secret, customerSessionClientSecret, amount: charge, fullAmount: amount,
+      memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
+      promoDiscountCents: q.promoDiscountCents || 0, promoBlocked: q.promoBlocked || null,
+      giftUsedCents: q.giftUsedCents || 0, expiresAt });
+  } catch (err) {
+    console.error('create-payment-intent:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+}
+
+// ---- ?action=confirm-booking (was api/confirm-booking.js) -------------------------------
+// Called by the booking site the moment a payment succeeds. It re-verifies the PaymentIntent with
+// Stripe (so it can't be spoofed), then turns the customer's live cart hold into a confirmed booking
+// and saves the customer. This makes bookings work without relying on a Stripe webhook; if a webhook
+// IS configured it stays a backup — bookingExistsForPI keeps the two from double-booking.
+export async function confirmBooking(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) return res.status(503).json({ ok: false, error: 'Stripe not configured' });
+
+  // note: typed at checkout, after the PaymentIntent already existed — so it arrives here, not in its metadata.
+  // smsConsent: the express-consent tick box on the checkout form (migration 0019). `sms` beside it
+  // is the old UI preference, which defaults to true and is NOT consent — the two are kept apart.
+  const { paymentIntentId, name, email, phone, sms, smsConsent, note } = req.body || {};
+  if (!paymentIntentId) return res.status(400).json({ ok: false, error: 'Missing payment reference.' });
+
+  const stripe = stripeClient(process.env);
+  let pi;
+  try { pi = await stripe.paymentIntents.retrieve(paymentIntentId); }
+  catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
+  if (pi.status !== 'succeeded') return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
+
+  const md = pi.metadata || {};
+  if (!md.dateISO || !md.bayId) return res.status(400).json({ ok: false, error: 'Booking details missing on the payment.' });
+
+  // Already saved (webhook or a retry got here first)? Nothing more to do.
+  if (await bookingExistsForPI(pi.id)) {
+    await upsertCustomer({ name, email, phone, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+    await saveSmsConsent(req, { name, email, phone, smsConsent });
+    await setCustomerNote({ paymentIntentId: pi.id, note, onlyIfEmpty: true });   // the webhook saved it without the note
+    return res.status(200).json({ ok: true, already: true });
+  }
+
+  // Prefer what the customer typed; fall back to the card's billing details.
+  let n = name, e = email, p = phone;
+  try {
+    if (pi.latest_charge) {
+      const ch = await stripe.charges.retrieve(pi.latest_charge);
+      const bd = ch.billing_details || {};
+      n = n || bd.name; e = e || pi.receipt_email || bd.email; p = p || bd.phone;
+    }
+  } catch (_) { /* best-effort */ }
+
+  const settings = normalizeSettings(await getSettings());
+  const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
+  const patch = {
+    status_label: settings.onlineStatusLabel || null, customer_name: n || null, customer_email: e || null, customer_phone: p || null,
+    amount_cents: pi.amount, stripe_payment_intent: pi.id, source: 'online',
+  };
+
+  const flip = await confirmHold({ ...slot, patch });
+  let bookingId = flip.id;
+  if (!flip.updated) {
+    const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
+    if (ins.error) return res.status(409).json({ ok: false, error: 'That slot is no longer available — please contact the shop; your payment went through.' });
+    bookingId = ins.id;
+  }
+  await setCustomerNote({ bookingId, note });
+  await upsertCustomer({ name: n, email: e, phone: p, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+  await saveSmsConsent(req, { name: n, email: e, phone: p, smsConsent });
+
+  // Loyalty points are retired: nothing is spent and nothing is earned here any more. Gift cards
+  // and promo codes are still settled by api/webhook.js, exactly as before.
+  return res.status(200).json({ ok: true });
+}
+
+// The consent tick, written where lib/notify.js looks for it. Three rules, all of them here:
+//   • no smsConsent in the request → nothing is written, ever. Silence is not consent, and a
+//     client that has not been updated must not be read as one that sent `false`.
+//   • true  → sms_consent, with the time, the IP and source 'checkout' (CASL's point-of-collection
+//     record), and sms_unsub_at cleared.
+//   • false → recorded as a NO, not skipped: the box starts empty, so the customer has looked at
+//     it and chosen to leave it that way. That withdraws any earlier yes rather than leaving the
+//     old one standing, which is why recordConsent() stamps sms_unsub_at on a false.
+// Best-effort, like the note and the receipt: a paid booking is never failed over a preference.
+async function saveSmsConsent(req, { name, email, phone, smsConsent }) {
+  if (typeof smsConsent !== 'boolean') return;
+  try {
+    await recordConsent({ name, email, phone, smsConsent, ip: clientIp(req), source: 'checkout' });
+  } catch (err) {
+    console.error('confirm-booking: consent not recorded —', err && err.message ? err.message : err);
+  }
+}
+
+// ---- ?action=release-hold (was api/release-hold.js) -------------------------------------
+// Release a cart hold when checkout is closed/abandoned before payment.
+// Best-effort — the 5-minute TTL (cleanupExpiredHolds) is the real backstop.
+// Named releaseHoldAction because lib/db.js already exports releaseHold, which is what it calls.
+export async function releaseHoldAction(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const { dateISO, bayId, startMin, endMin } = req.body || {};
+  if (dateISO && bayId) await releaseHold({ dateISO, bayId, startMin: Number(startMin), endMin: Number(endMin) });
+  res.status(200).json({ ok: true });
+}

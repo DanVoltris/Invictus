@@ -218,7 +218,7 @@ async function release(req, res) {
 // Safe to expose publicly because it proves the payment rather than trusting the caller: the
 // PaymentIntent is re-read from Stripe and must be `succeeded`. redeem_promo is idempotent, so the
 // client-side confirm and a Stripe webhook may both call this — which is how this repo already
-// double-covers booking confirmation, deliberately (see api/confirm-booking.js).
+// double-covers booking confirmation, deliberately (see api/checkout.js ?action=confirm-booking).
 //
 // A reservation whose TTL lapsed while the customer sat on a 3-D Secure challenge is honoured
 // anyway; migration 0021 §7 explains why that is the cheapest of the three bad options.

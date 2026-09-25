@@ -8,7 +8,8 @@
 //      this proves our own record stops with it, and that a stranger who can reach the public
 //      webhook URL cannot unsubscribe — or re-subscribe — anybody.
 //
-// The real api/confirm-booking.js, api/hour-cards.js, api/waitlist.js and lib/db.js all run.
+// The real api/checkout.js (?action=confirm-booking, formerly api/confirm-booking.js),
+// api/hour-cards.js, api/waitlist.js and lib/db.js all run.
 // Only Supabase and the Stripe SDK are fake.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -60,7 +61,7 @@ class FakeStripe {
 }
 mock.module(ROOT + 'node_modules/stripe/esm/stripe.esm.node.js', { defaultExport: FakeStripe });
 
-const { default: confirmBooking } = await import(ROOT + 'api/confirm-booking.js');
+const { confirmBooking } = await import(ROOT + 'api/checkout.js');
 const { default: hourCards } = await import(ROOT + 'api/hour-cards.js');
 const { default: waitlist } = await import(ROOT + 'api/waitlist.js');
 

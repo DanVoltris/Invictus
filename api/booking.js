@@ -138,8 +138,9 @@ async function leagueRound(req, res) {
   const tooFar = bookingWindowError({ settings, dateISO, league: true });
   if (tooFar) return res.status(400).json({ ok: false, code: 'booking_window', error: tooFar });
 
-  // 4. Is the slot free? Exactly the checks api/create-payment-intent.js makes before charging a
-  // card: a real booking or manager block, a schedule override, or a closed weekly band.
+  // 4. Is the slot free? Exactly the checks api/checkout.js ?action=create-payment-intent makes
+  // before charging a card: a real booking or manager block, a schedule override, or a closed
+  // weekly band.
   const overrides = await getOverridesForDate(dateISO);
   const fx = overrideEffects(overrides, settings, dateISO);
   const taken = (await getBookingsForDate(dateISO))

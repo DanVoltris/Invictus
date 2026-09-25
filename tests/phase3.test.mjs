@@ -1,4 +1,5 @@
-// Phase 3: saved cards. The real lib/db.js, lib/booking.js, api/account.js and api/create-payment-intent.js
+// Phase 3: saved cards. The real lib/db.js, lib/booking.js, api/account.js and api/checkout.js
+// (?action=create-payment-intent, formerly api/create-payment-intent.js)
 // run end to end; only the Stripe SDK and the Supabase client underneath are fake and record every call.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -59,7 +60,7 @@ mock.module(ROOT + 'node_modules/stripe/esm/stripe.esm.node.js', { defaultExport
 
 const db = await import(ROOT + 'lib/db.js');
 const { default: accountApi } = await import(ROOT + 'api/account.js');
-const { default: createPI } = await import(ROOT + 'api/create-payment-intent.js');
+const { createPaymentIntent: createPI } = await import(ROOT + 'api/checkout.js');
 const { winnipegTodayISO } = await import(ROOT + 'lib/booking.js');
 
 const BAYS = [{ id: 'B1', name: 'Bay 1' }];
