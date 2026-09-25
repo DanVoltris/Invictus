@@ -226,12 +226,14 @@
 
   /* ---------- facts --------------------------------------------------------
      One flat row per booking, with the two things the bookings table can't tell
-     you on its own: was this a member, and is this the same person as that other
+     you on its own: was this a league player, and is this the same person as that other
      booking. Shaped exactly like the `v_booking_facts` view we chose not to build,
      so swapping to one later is a change of source, not of consumers.
      ---------------------------------------------------------------------- */
 
-  function factsFrom(bookings, customers) {
+  // leaguePlayerIds: customer ids on a current league roster (migration 0028). Leagues replaced
+  // memberships, so "member" in the facts below means a league player.
+  function factsFrom(bookings, customers, leaguePlayerIds = new Set()) {
     const byPhone = new Map(), byEmail = new Map();
     for (const c of customers || []) {
       const pk = phoneKey(c.phone);
@@ -246,7 +248,6 @@
       // Phone first, email as the fallback — the same identity order lib/db.js uses.
       const cust = (pk && byPhone.get(pk)) || (ek && byEmail.get(ek)) || null;
       const minutes = Math.max(0, (Number(b.end_min) || 0) - (Number(b.start_min) || 0));
-      const expires = cust && cust.membership_expires;
       return {
         id: b.id,
         booking_date: b.booking_date,
@@ -262,11 +263,10 @@
         is_cancelled: b.status === 'cancelled',
         is_no_show: isNoShowLabel(b.status_label),
         customer_id: cust ? cust.id : null,
-        // Membership as it stands today, checked against the booking date. There is no
-        // historical membership stamp on a booking yet (the build plan's 0019 adds
-        // membership_id_at_booking), so a lapsed member's old bookings read as guest.
-        is_member: !!(cust && cust.membership_id && (!expires || String(expires) >= String(b.booking_date))),
-        membership_id: cust ? (cust.membership_id || null) : null,
+        // League status as it stands today. There is no stamp on the booking of whether the
+        // player was in a league when they booked, so a current league player's older sessions
+        // count as league sessions too (the dashboard foot-note says so).
+        is_member: !!(cust && leaguePlayerIds.has(cust.id)),
         // Stable identity for the repeat-customer rate. Falls back to the typed contact
         // details when no customer record exists, and finally to the booking id so two
         // anonymous rows never merge into one "repeat" customer.
@@ -285,7 +285,7 @@
   const SOURCE_CHANNEL = {
     online: 'online', web: 'online',
     manager: 'walkIn', admin: 'walkIn', walkin: 'walkIn', 'walk-in': 'walkIn',
-    points: 'prepaid', hours: 'prepaid',
+    hours: 'prepaid',
   };
 
   function bucketOf(iso, bucket) {
@@ -494,8 +494,8 @@
 
   const BOOKING_COLS = 'id,bay_id,booking_date,start_min,end_min,status,status_label,source,amount_cents,customer_email,customer_phone,created_at';
   const BOOKING_COLS_BASE = 'id,bay_id,booking_date,start_min,end_min,status,source,amount_cents,customer_email,customer_phone,created_at';
-  const CUSTOMER_COLS = 'id,email,phone,membership_id,membership_expires';
-  const CUSTOMER_COLS_BASE = 'id,email,phone,membership_id';
+  const CUSTOMER_COLS = 'id,email,phone';
+  const CUSTOMER_COLS_BASE = 'id,email,phone';
 
   // One page of a select, with the reduced-column retry.
   async function selectPage(sb, table, cols, fallbackCols, build, offset, pageSize) {
@@ -526,12 +526,24 @@
     return out;
   }
 
+  // Customer ids on a current league roster. Empty (everyone a regular) until migration 0028.
+  async function fetchLeaguePlayerIds(sb, todayISO) {
+    const [l, m] = await Promise.all([
+      sb.from('leagues').select('id,is_active,season_end'),
+      sb.from('league_members').select('customer_id,league_id,status').eq('status', 'active'),
+    ]);
+    if (l.error || m.error) return new Set();
+    const current = new Set((l.data || []).filter((x) => x.is_active !== false && (!x.season_end || x.season_end >= todayISO)).map((x) => x.id));
+    return new Set((m.data || []).filter((r) => current.has(r.league_id)).map((r) => r.customer_id));
+  }
+
   // Everything computeMetrics needs out of Supabase for one date range.
   async function fetchFacts(sb, { from, to } = {}) {
     const bookings = await selectAll(sb, 'bookings', BOOKING_COLS, BOOKING_COLS_BASE,
       (q) => q.gte('booking_date', from).lte('booking_date', to).neq('status', 'held'));
     const customers = await selectAll(sb, 'customers', CUSTOMER_COLS, CUSTOMER_COLS_BASE, (q) => q);
-    return factsFrom(bookings, customers);
+    const leaguePlayers = await fetchLeaguePlayerIds(sb, isoOf(new Date()));
+    return factsFrom(bookings, customers, leaguePlayers);
   }
 
   // Schedule overrides that could touch the range (same filter admin.html uses).
