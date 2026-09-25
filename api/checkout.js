@@ -1,4 +1,4 @@
-import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, winnipegTodayISO, bookingWindowError, holdPlan } from '../lib/booking.js';
+import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, taxPctOf, winnipegTodayISO, bookingWindowError, holdPlan } from '../lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
          confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
          releaseHold } from '../lib/db.js';
@@ -114,6 +114,7 @@ export async function createPaymentIntent(req, res) {
         leaguePlayer,
       },
       giftBalanceCents, applyGift: !!giftCard,
+      taxPct: taxPctOf(settings),                  // sales tax on top, from Payment Settings
     });
     const charge = q.charge;
 
@@ -157,6 +158,9 @@ export async function createPaymentIntent(req, res) {
         giftUsedCents: String(q.giftUsedCents || 0),
         memberDiscountPct: String(q.memberPct),
         memberDiscountCents: String(q.memberDiscountCents),
+        subtotalCents: String(q.subtotalCents),
+        taxPct: String(q.taxPct),
+        taxCents: String(q.taxCents),
       },
     });
 
@@ -164,6 +168,7 @@ export async function createPaymentIntent(req, res) {
       memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
       promoDiscountCents: q.promoDiscountCents || 0, promoBlocked: q.promoBlocked || null,
       giftUsedCents: q.giftUsedCents || 0, expiresAt,
+      subtotalCents: q.subtotalCents, taxPct: q.taxPct, taxCents: q.taxCents, totalCents: q.totalCents,
       // WHAT THE CUSTOMER MUST BE TOLD BEFORE THEY CONFIRM. `mode` is 'hold' or 'charge';
       // `message` is a sentence ready to put on the screen; `captureBy` is when a hold dies if
       // nobody captures it. A checkout page that shows nothing from here is telling a customer

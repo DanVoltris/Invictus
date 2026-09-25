@@ -786,7 +786,10 @@ function applySettings(s){
   CONFIG.minMins = s.minMins; CONFIG.maxParty = s.maxParty;
   CONFIG.peakStartHour = s.peakStartHour; CONFIG.rates = s.rates;
   CONFIG.bayRates = s.bayRates || {};
+  CONFIG.taxPct = Number(s.taxPct) || 0;
 }
+// Tax on a dollar price, rounded to the cent the way the server rounds it (lib/booking.js quoteBooking).
+const taxOn = (dollars) => Math.round(dollars * 100 * (CONFIG.taxPct || 0) / 100) / 100;
 
 /* Time-block pricing: each band {start,wd,we}; the band covering an hour is the greatest start ≤ hour. */
 function bandsOf(r){
@@ -1183,7 +1186,7 @@ function renderCheckbar(){
     <div class="cb-item"><div class="k">Start</div><div class="v">${fmtFull(state.startMin)}</div></div>
     <div class="cb-item"><div class="k">End time</div>${cbSelectHTML('end', state.endMin, endOpts)}</div>
     <div class="cb-item"><div class="k">Group size</div>${cbSelectHTML('party', state.party, partyOpts)}</div>
-    <div class="cb-item cb-total"><div class="k">Total</div><div class="v">${money(price)}</div></div>`;
+    <div class="cb-item cb-total"><div class="k">Total${CONFIG.taxPct ? ' incl. tax' : ''}</div><div class="v">${money(price + taxOn(price))}</div></div>`;
   bar.classList.add('show');
   wireCbSelects();
 }
@@ -1222,7 +1225,24 @@ function recapHTML(){
     ${LG.armed
       ? `<div class="row"><span class="k">League round</span><span class="v">${escHtml(LG.armed.teamName)} · week ${LG.armed.week.number} of ${LG.armed.weeksTotal}</span></div>
          <div class="row tot"><span class="k">Total</span><span class="v">Free — $0.00</span></div>`
-      : `<div class="row tot"><span class="k">Total</span><span class="v">${money(price)}</span></div>`}`;
+      : priceRowsHTML(price)}`;
+}
+// Subtotal / discounts / tax / total. Before checkout starts this is worked out here from the rate;
+// once the server has priced this exact booking (piCache), its figures are shown instead, so the
+// total always matches what the card is charged. A gift card is a way of paying, not a discount,
+// so it is not in here — it shows in the credit strip and on the Pay button.
+function priceRowsHTML(price){
+  const q=(piCache && piCache.key===bookingKey() && piCache.subtotalCents!=null) ? piCache : null;
+  const full=q ? q.fullAmount/100 : price;
+  const off=q ? ((q.memberDiscountCents||0)+(q.promoDiscountCents||0))/100 : 0;
+  const pct=q ? q.taxPct : CONFIG.taxPct;
+  const tax=q ? q.taxCents/100 : taxOn(price);
+  const total=q ? q.totalCents/100 : price+tax;
+  if(!pct) return `<div class="row tot"><span class="k">Total</span><span class="v">${money(total)}</span></div>`;
+  return `<div class="row"><span class="k">Subtotal</span><span class="v">${money(full)}</span></div>`
+    + (off>0 ? `<div class="row"><span class="k">Discounts</span><span class="v">−${money(off)}</span></div>` : '')
+    + `<div class="row"><span class="k">Tax (${pct}%)</span><span class="v">${money(tax)}</span></div>`
+    + `<div class="row tot"><span class="k">Total</span><span class="v">${money(total)}</span></div>`;
 }
 /* ---------- Stripe wiring (Payment Element, dark theme) ---------- */
 let STRIPE=null, stripeReady=false, elements=null, paying=false;
@@ -1377,9 +1397,13 @@ async function createPI(){
             // not, they stay 0 — so nothing is displayed and nothing is reserved. See applyPromo
             // and applyGift, which refuse to claim a code the charge does not reflect.
             promoDiscountCents:data.promoDiscountCents||0,
-            giftUsedCents:data.giftUsedCents||0 };
+            giftUsedCents:data.giftUsedCents||0,
+            // Tax as the server charged it (undefined from an older server — the recap then keeps
+            // its own estimate).
+            subtotalCents:data.subtotalCents, taxPct:data.taxPct, taxCents:data.taxCents, totalCents:data.totalCents };
   if(needHold) HELD={ ...slot };
   renderCredits();
+  if($('#pay-recap') && !LG.armed) $('#pay-recap').innerHTML=recapHTML();
   if(data.expiresAt) startHoldTimer(data.expiresAt);
   return piCache;
 }

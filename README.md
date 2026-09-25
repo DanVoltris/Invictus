@@ -56,7 +56,8 @@ booking page is the static file in `/demo`, and `vercel.json` serves it at `/`.
 5. Redeploy (Deployments → ⋯ → Redeploy) so the new env vars take effect.
 
 > Keys live only in Vercel's env vars — never commit `.env` (it's gitignored).
-> Live keys are refused by design; this prototype runs in Stripe **test mode** only.
+> Test or live keys both work, but the pair must match (both `_test_` or both `_live_`) or Stripe
+> stays off. Live keys charge real cards, and need a **live-mode** webhook endpoint and its `whsec_…`.
 
 ## What's real vs. placeholder
 

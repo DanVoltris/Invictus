@@ -4426,8 +4426,11 @@ function openManage(id){
   // A team's league round costs nothing: the season was paid for up front, so the rate card
   // doesn't apply to it and the charges below must not invent a price.
   const lgRound=isLeagueRound(b);
-  const sub = lgRound ? 0 : (onlinePaid ? b.amount_cents : bookingPriceCents(b));
-  const taxAmt=Math.round(sub*taxPct/100), total=sub+taxAmt;
+  // An online payment's amount_cents is what the card was charged, and checkout adds tax on top —
+  // so it is the TOTAL, with the tax inside it. Anything else is priced from the rate, tax added.
+  const total = lgRound ? 0 : (onlinePaid ? b.amount_cents : Math.round(bookingPriceCents(b)*(1+taxPct/100)));
+  const sub = lgRound ? 0 : (onlinePaid ? Math.round(total*100/(100+taxPct)) : bookingPriceCents(b));
+  const taxAmt = total - sub;
   const acceptDep = pay.acceptDeposit!==false && pay.captureMethod!=='No Payment';
   const held = pay.chargeAmount ? Math.round(pay.chargeAmount*100) : Math.round(sub*(pay.chargePercent||0)/100);
   const baySim=(SETTINGS.bays.find(x=>x.id===b.bay_id)||{}).sim;
@@ -4471,7 +4474,7 @@ function openManage(id){
     : isCaptured(b)
     ? `<div class="kv"><span class="k">Charged</span><span class="pill confirmed">Paid ${fmt(b.amount_cents||0)}</span></div>`
     : onlinePaid
-    ? `<div class="kv"><span class="k">Paid online</span><span class="pill confirmed">Paid ${fmt(sub)}</span></div>`
+    ? `<div class="kv"><span class="k">Paid online</span><span class="pill confirmed">Paid ${fmt(total)}</span></div>`
     : acceptDep
       ? `<div class="kv"><span class="k">Deposit held</span><span>${fmt(held)} <span class="dim">(${pay.chargeAmount?'flat':((pay.chargePercent||0)+'%')})</span></span></div>`
       : `<div class="kv"><span class="k">Payment</span><span class="dim">No payment collected</span></div>`;

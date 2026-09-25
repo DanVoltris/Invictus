@@ -212,7 +212,29 @@ test('(d) tampered body with a valid signature for the original fails', async ()
   assert.deepEqual(writes, []);
 });
 
-test('signed livemode event is acknowledged but not fulfilled', async () => {
+test('LIVE keys: a signed live event is fulfilled — a real payment becomes a real booking', async () => {
+  quiet();
+  process.env.STRIPE_SECRET_KEY = 'sk_live_realistic123';
+  process.env.STRIPE_PUBLISHABLE_KEY = 'pk_live_realistic123';
+  const raw = JSON.stringify(evt({ livemode: true }));
+  const res = await call(expressReq(raw, { 'stripe-signature': sign(raw) }));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { received: true });
+  assert.ok(writes.map((w) => w.name).includes('insertBooking'));
+});
+
+test('LIVE keys: a signed TEST event is acknowledged but not fulfilled', async () => {
+  quiet();
+  process.env.STRIPE_SECRET_KEY = 'sk_live_realistic123';
+  process.env.STRIPE_PUBLISHABLE_KEY = 'pk_live_realistic123';
+  const raw = JSON.stringify(evt({ livemode: false }));
+  const res = await call(expressReq(raw, { 'stripe-signature': sign(raw) }));
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ignored, 'livemode');
+  assert.deepEqual(writes, []);
+});
+
+test('TEST keys: a signed livemode event is acknowledged but not fulfilled', async () => {
   quiet();
   const raw = JSON.stringify(evt({ livemode: true }));
   const res = await call(expressReq(raw, { 'stripe-signature': sign(raw) }));

@@ -1,7 +1,7 @@
 import {
   stripeStatus, stripeClient, normalizeSettings, giftConfig,
   priceForBooking, overrideEffects, overrideConflicts, weeklyStatusConflicts,
-  quoteBooking, winnipegTodayISO, bookingWindowError
+  quoteBooking, taxPctOf, winnipegTodayISO, bookingWindowError
 } from '../lib/booking.js';
 import {
   getSettings, getOverridesForDate, getBookingsForDate,
@@ -287,7 +287,7 @@ async function quoteFor({ dateISO, bayId, startMin, endMin, email, phone, code, 
   const promo = promoCode ? await promoByCode(promoCode) : null;
 
   const q = quoteBooking({
-    settings, amountCents: amount, plan: null, todayISO: winnipegTodayISO(),
+    settings, amountCents: amount, plan: null, todayISO: winnipegTodayISO(), taxPct: taxPctOf(settings),
     giftBalanceCents: availableCents, applyGift: !!card, giftPartialOnly: partialOnly !== false,
     promo,
     promoContext: {

@@ -1,5 +1,5 @@
 import { getSettings, getBookingsForDate, getOverridesForDate, cleanupExpiredHolds } from '../lib/db.js';
-import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked } from '../lib/booking.js';
+import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked, taxPctOf } from '../lib/booking.js';
 
 // The two anonymous reads every visitor makes before they can do anything — what this install is
 // wired up to, and what is free on a given day. Dispatch on ?action=, the same shape as
@@ -107,6 +107,7 @@ export async function availability(req, res) {
       peakStartHour: settings.peakStartHour,
       rates: settings.rates,
       bayRates: settings.bayRates,
+      taxPct: taxPctOf(settings),     // so the page can show the tax the card will be charged
     },
     dateHours,
     booked,

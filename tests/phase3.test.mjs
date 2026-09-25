@@ -146,7 +146,8 @@ test('checkout, signed out: a client secret, the right price, no Stripe Customer
   assert.equal(r.out.clientSecret, 'pi_1_secret_x');
   const pi = S.stripe.find((c) => c[0] === 'paymentIntents.create')[1];
   assert.equal(pi.amount, r.out.amount);
-  assert.ok([2000, 2500].includes(pi.amount), `one hour at the configured rate, got ${pi.amount}`);
+  // Plus 12% tax — the default when Payment Settings has no Tax % saved (lib/booking.js taxPctOf).
+  assert.ok([2240, 2800].includes(pi.amount), `one hour at the configured rate plus 12% tax, got ${pi.amount}`);
   assert.equal(pi.customer, undefined);
   assert.equal('customerSessionClientSecret' in r.out, false, 'the field is gone from the answer');
   assert.deepEqual(names(), ['paymentIntents.create'], 'the only Stripe call checkout makes');

@@ -19,7 +19,7 @@ function readRaw(req) {
 // only place a refund issued OUTSIDE this app (the Stripe dashboard) gets written down.
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-  const { enabled } = stripeStatus(process.env);
+  const { enabled, live } = stripeStatus(process.env);
   if (!enabled) return res.status(200).json({ received: true });
 
   // Every event must be signed. Without the secret there is no way to tell Stripe from anyone
@@ -50,11 +50,11 @@ export default async function handler(req, res) {
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // stripeStatus() only enables Stripe on test keys, so a genuine event here is always test mode.
-  // A signed livemode event means a live endpoint's secret is configured against test keys —
-  // acknowledge it (so Stripe stops retrying) but never fulfil a live payment on this prototype.
-  if (event.livemode) {
-    console.error(`Webhook ${event.id} ignored: livemode event received while running on test keys.`);
+  // The event's mode must match the keys'. A mismatch means the webhook secret belongs to the other
+  // mode's endpoint — the payment it describes does not exist in the account these keys reach, so
+  // acknowledge it (so Stripe stops retrying) but never fulfil it.
+  if (!!event.livemode !== live) {
+    console.error(`Webhook ${event.id} ignored: ${event.livemode ? 'live' : 'test'} event received while running on ${live ? 'live' : 'test'} keys.`);
     return res.status(200).json({ received: true, ignored: 'livemode' });
   }
 
