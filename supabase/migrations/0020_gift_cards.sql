@@ -272,7 +272,10 @@ create or replace function public.redeem_gift_card(
   p_card uuid, p_ref text, p_charged integer default null,
   p_booking uuid default null, p_note text default null)
 returns jsonb language plpgsql as $$
-declare res record; bal integer; done integer;
+declare res record; bal integer; done uuid;   -- `done` receives gift_card_transactions.id, which is a UUID.
+                                             -- Declared integer, the idempotency lookup below raised 22P02 on the
+                                             -- SECOND redeem of a ref, so the "already redeemed" no-op branch and the
+                                             -- unique_violation handler under it were both unreachable.
 begin
   select id into done from public.gift_card_transactions
    where gift_card_id = p_card and ref = p_ref and kind = 'redeem' limit 1;

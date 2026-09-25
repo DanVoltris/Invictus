@@ -69,9 +69,17 @@ const header = `${rule(77)}
 -- This is the base schema plus all ${migrations.length} migrations, in the order they were
 -- written, followed by nothing else you need to run separately.
 --
--- SAFE TO RE-RUN. Every statement uses "if not exists", "add column if not
--- exists", or "drop policy if exists", and the settings seed uses "on conflict
--- do nothing" - so running it twice changes nothing and never overwrites data.
+-- SAFE TO RE-RUN, AND SAFE ON A DATABASE THAT ALREADY HAS YOUR DATA. Every
+-- statement uses "if not exists", "add column if not exists" or "drop policy if
+-- exists", and every seed uses "on conflict do nothing" - so a second run adds
+-- only what is missing. It never overwrites your settings, bays, prices,
+-- bookings, customers or staff, and never deletes anything.
+--
+-- Two things worth knowing before you run it on a live database:
+--   * Customers' own logins are never turned into staff logins. Only accounts
+--     that are already staff keep portal access.
+--   * It re-asserts every security policy, so anything changed by hand in the
+--     Supabase dashboard goes back to what this file says.
 --
 -- AFTER RUNNING, create the manager login:
 --   Supabase -> Authentication -> Users -> Add user (email + password).

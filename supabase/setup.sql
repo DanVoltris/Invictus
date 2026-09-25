@@ -4,12 +4,20 @@
 -- HOW TO RUN
 --   Supabase -> SQL Editor -> New query -> paste this whole file -> Run.
 --
--- This is the base schema plus all 19 migrations, in the order they were
+-- This is the base schema plus all 32 migrations, in the order they were
 -- written, followed by nothing else you need to run separately.
 --
--- SAFE TO RE-RUN. Every statement uses "if not exists", "add column if not
--- exists", or "drop policy if exists", and the settings seed uses "on conflict
--- do nothing" - so running it twice changes nothing and never overwrites data.
+-- SAFE TO RE-RUN, AND SAFE ON A DATABASE THAT ALREADY HAS YOUR DATA. Every
+-- statement uses "if not exists", "add column if not exists" or "drop policy if
+-- exists", and every seed uses "on conflict do nothing" - so a second run adds
+-- only what is missing. It never overwrites your settings, bays, prices,
+-- bookings, customers or staff, and never deletes anything.
+--
+-- Two things worth knowing before you run it on a live database:
+--   * Customers' own logins are never turned into staff logins. Only accounts
+--     that are already staff keep portal access.
+--   * It re-asserts every security policy, so anything changed by hand in the
+--     Supabase dashboard goes back to what this file says.
 --
 -- AFTER RUNNING, create the manager login:
 --   Supabase -> Authentication -> Users -> Add user (email + password).
@@ -871,3 +879,3779 @@ create table if not exists public.stripe_events (
 create index if not exists stripe_events_received on public.stripe_events (received_at);
 alter table public.stripe_events enable row level security;
 drop policy if exists stripe_events_write on public.stripe_events;
+
+
+-- ==========================================================================
+-- MIGRATION 0020 - GIFT CARDS
+-- ==========================================================================
+
+-- Invictus Golf — gift cards
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- WHAT THIS IS
+-- A gift card is stored value the venue owes to whoever holds the code. That makes it different
+-- from every other balance in this database: prepaid hours and loyalty points belong to a known
+-- customer row, but a gift card belongs to a bearer, is transferable, and (see the legal note at
+-- the bottom) is a permanent liability on the venue's books rather than something that expires.
+--
+-- The shape deliberately mirrors hour cards (0015) and points (0016) so there is one thing to
+-- learn: a balance, an append-only ledger beside it, and ONE atomic function that changes both
+-- together. What is new here is the RESERVATION table, and the reason for it is in section 3.
+
+-- ============================================================================
+-- 1) GIFT CARDS — the balance.
+-- ============================================================================
+--
+-- THE CODE IS NOT STORED. Only sha256(normalized code) is, plus the last four characters so a
+-- human can tell two cards apart on a screen. Three consequences, all intended:
+--   · a leaked database dump is not a stack of spendable cards;
+--   · lookup is still a single indexed equality (hash the typed code, select by hash);
+--   · nobody — including the owner — can recover a lost code. Staff re-issue instead: disable
+--     the old card and create a new one for the remaining balance, which the ledger records.
+--
+-- Codes are generated in the application (lib/db.js: newGiftCode) as 16 Crockford-base32
+-- characters — 80 bits of randomness, no I/L/O/U so nothing is misread off a printed card.
+-- Guessing one is not feasible; gift_card_attempts in section 4 makes trying cheap to stop.
+create table if not exists public.gift_cards (
+  id            uuid primary key default gen_random_uuid(),
+  code_hash     text not null,                  -- sha256 of the normalized code (never the code)
+  code_hint     text,                           -- last 4 characters, for staff display only
+  balance_cents integer not null default 0 check (balance_cents >= 0),
+  initial_cents integer not null default 0,
+  currency      text not null default 'cad',
+  status        text not null default 'active' check (status in ('active','disabled','void')),
+
+  -- EXPIRY: null = never expires, and that is the default for every card this app issues.
+  -- Deliberately a nullable column and NOT a check constraint — see the legal note at the end.
+  expires_at    timestamptz,
+
+  -- Who bought it, who it is for, and what the giver wanted to say.
+  purchaser_customer_id uuid references public.customers(id) on delete set null,
+  purchaser_name  text,
+  purchaser_email text,
+  purchaser_phone text,
+  recipient_name  text,
+  recipient_email text,
+  recipient_phone text,
+  message         text,
+
+  -- Delivery (the notifications outbox from 0019 does the sending).
+  deliver_at   timestamptz,                     -- null = send as soon as it is paid for
+  delivered_at timestamptz,
+
+  -- Provenance. stripe_session_id is what makes an online purchase idempotent: a refresh of the
+  -- success page finds the card that was already created instead of minting a second one.
+  issued_by         text not null default 'online',   -- online | staff
+  stripe_session_id text,
+  stripe_payment_intent text,
+  note        text,
+  created_at  timestamptz not null default now()
+);
+create unique index if not exists gift_cards_code_hash on public.gift_cards (code_hash);
+create unique index if not exists gift_cards_session on public.gift_cards (stripe_session_id) where stripe_session_id is not null;
+create index if not exists gift_cards_purchaser on public.gift_cards (purchaser_email);
+create index if not exists gift_cards_recipient on public.gift_cards (recipient_email);
+
+-- ============================================================================
+-- 2) LEDGER — append-only, one row per movement of money.
+-- ============================================================================
+--
+-- Same columns as hour_transactions / point_transactions, same meaning: + credit, − debit.
+-- kind: issue | redeem | refund | adjust | fee | void.
+--
+-- IDEMPOTENCY IS KEYED ON (gift_card_id, ref), NOT ON ref ALONE. Migration 0016 made the points
+-- ledger's guard a GLOBAL unique index on (ref); copying that here would be a bug, because `ref`
+-- at redemption is a Stripe PaymentIntent id and one booking may legitimately be settled against
+-- two different gift cards. A global index would let the first card redeem and then reject the
+-- second — the customer's money gone from one card and the venue short. Per-card is the correct
+-- scope: the same card may only ever move once against the same payment.
+create table if not exists public.gift_card_transactions (
+  id           uuid primary key default gen_random_uuid(),
+  gift_card_id uuid not null references public.gift_cards(id) on delete cascade,
+  cents        integer not null,                 -- + issue/refund/adjust up, − redeem/fee/adjust down
+  kind         text not null default 'adjust',
+  note         text,
+  booking_id   uuid,
+  ref          text,                             -- Stripe PaymentIntent / Checkout Session id
+  created_at   timestamptz not null default now()
+);
+create index if not exists gift_card_tx_card on public.gift_card_transactions (gift_card_id, created_at desc);
+create unique index if not exists gift_card_tx_ref_once on public.gift_card_transactions (gift_card_id, ref) where ref is not null;
+
+-- ============================================================================
+-- 3) RESERVATIONS — why the balance is not debited when a PaymentIntent is created.
+-- ============================================================================
+--
+-- demo/index.html creates a PaymentIntent speculatively: every slot change, and every apply or
+-- remove of loyalty points, builds a new one and abandons the last. If applying a gift card
+-- debited the balance at that moment, a customer who changed their mind twice would watch a
+-- $100 card drain to $40 without ever paying for anything. Real money must not ride on a
+-- prefetch.
+--
+-- So an applied gift card takes a RESERVATION instead: a short-lived row that lowers the card's
+-- available balance without touching balance_cents. It carries the same 5-minute TTL as the cart
+-- hold in lib/db.js (HOLD_MINUTES), and it is swept the same way — expired rows are deleted
+-- inside reserve_gift_card before availability is computed, so a lapsed reservation can never
+-- hold value hostage even if no cleanup job ever runs.
+--
+-- expected_charge_cents is a safety rail, not bookkeeping. It records what the customer was
+-- quoted to pay on their card AFTER this gift card was applied. Settlement refuses to redeem
+-- unless the PaymentIntent actually charged that amount, which means a reservation created
+-- against a PaymentIntent that was never discounted is discarded rather than spent — the
+-- customer is never charged full price and debited as well.
+create table if not exists public.gift_card_reservations (
+  id           uuid primary key default gen_random_uuid(),
+  gift_card_id uuid not null references public.gift_cards(id) on delete cascade,
+  amount_cents integer not null check (amount_cents > 0),
+  expected_charge_cents integer,                 -- what the card is due to be charged alongside
+  ref          text not null,                    -- the Stripe PaymentIntent id this belongs to
+  booking_id   uuid,
+  expires_at   timestamptz not null,
+  created_at   timestamptz not null default now()
+);
+-- One reservation per card per payment: re-applying the same card to the same PaymentIntent
+-- updates the existing row rather than stacking a second claim on the balance.
+create unique index if not exists gift_card_res_ref on public.gift_card_reservations (gift_card_id, ref);
+create index if not exists gift_card_res_expiry on public.gift_card_reservations (expires_at);
+
+-- ============================================================================
+-- 4) ATTEMPTS — rate limiting the "check my balance" form.
+-- ============================================================================
+--
+-- 80 bits of entropy is not guessable, but it is still worth making a scripted sweep expensive
+-- and visible. One row per code lookup; the API refuses an IP that has produced too many misses
+-- in the last quarter hour. Prune it periodically — it is the only table here that is pure noise.
+create table if not exists public.gift_card_attempts (
+  id         uuid primary key default gen_random_uuid(),
+  ip         text,
+  code_hint  text,                               -- last 4 typed characters; never the whole code
+  ok         boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists gift_card_attempts_ip on public.gift_card_attempts (ip, created_at desc);
+
+-- ============================================================================
+-- 5) SETTINGS.GIFT — what the owner can change without a deploy.
+-- ============================================================================
+--
+-- Shape (all optional, api/gift-cards.js supplies the defaults shown):
+--   { "minCents": 2500, "maxCents": 50000, "presetsCents": [2500,5000,10000,15000],
+--     "expiryMonths": null, "dormancyFeeCents": 0 }
+--
+-- expiryMonths and dormancyFeeCents exist so the two levers are configurable rather than
+-- compiled in. Both ship OFF. See the legal note at the end before either is turned on.
+alter table public.settings add column if not exists gift jsonb not null default '{}'::jsonb;
+
+-- ============================================================================
+-- 6) FUNCTIONS.
+-- ============================================================================
+
+-- The atomic one, exactly like adjust_hours (0015) and adjust_points (0016): change the balance
+-- and write the ledger row in one statement, or do neither. Everything else below calls this.
+--
+-- Debits carry two extra guards a points balance does not need, because a gift card is a bearer
+-- instrument: the card must be active, and it must not have passed an expiry date if one was set.
+create or replace function public.adjust_gift_card(p_card uuid, p_delta integer, p_kind text, p_note text, p_booking uuid, p_ref text default null)
+returns integer language plpgsql as $$
+declare new_bal integer; st text; exp timestamptz;
+begin
+  select status, expires_at into st, exp from public.gift_cards where id = p_card for update;
+  if st is null then raise exception 'gift card not found'; end if;
+  if p_delta < 0 then
+    if st <> 'active' then raise exception 'gift card is %', st; end if;
+    if exp is not null and exp <= now() then raise exception 'gift card expired'; end if;
+  end if;
+
+  update public.gift_cards
+     set balance_cents = coalesce(balance_cents, 0) + p_delta
+   where id = p_card
+   returning balance_cents into new_bal;
+  if new_bal < 0 then raise exception 'insufficient gift card balance'; end if;
+
+  insert into public.gift_card_transactions (gift_card_id, cents, kind, note, booking_id, ref)
+    values (p_card, p_delta, coalesce(p_kind, 'adjust'), p_note, p_booking, p_ref);
+  return new_bal;
+end $$;
+
+-- Delete every reservation whose time has run out. Returns how many were freed, so a cron job
+-- (or a script, or an opportunistic call from the API) has something to log.
+create or replace function public.sweep_gift_card_reservations()
+returns integer language plpgsql as $$
+declare n integer;
+begin
+  delete from public.gift_card_reservations where expires_at < now();
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+-- Spendable right now: the balance, less everything currently reserved against it. Expired
+-- reservations are excluded by the where clause, so this is correct even before a sweep runs.
+create or replace function public.gift_card_available(p_card uuid)
+returns integer language sql stable as $$
+  select greatest(0, coalesce((select balance_cents from public.gift_cards where id = p_card), 0)
+    - coalesce((select sum(amount_cents) from public.gift_card_reservations
+                 where gift_card_id = p_card and expires_at > now()), 0))::integer;
+$$;
+
+-- Claim part of a balance for p_ttl_seconds against one PaymentIntent. Nothing is debited.
+--
+-- The card row is locked first so two checkouts racing on the same code cannot both be told
+-- there is enough; the loser sees the smaller availability and reserves less (or nothing).
+-- Re-reserving the same (card, payment) combination REPLACES the previous claim rather than
+-- adding to it, which is what makes it safe to call on every re-quote.
+--
+-- Returns jsonb: { reserved, requested, available, balance, expiresAt, error }.
+create or replace function public.reserve_gift_card(
+  p_card uuid, p_amount integer, p_ref text,
+  p_charge integer default null, p_booking uuid default null, p_ttl_seconds integer default 300)
+returns jsonb language plpgsql as $$
+declare st text; exp timestamptz; bal integer; avail integer; take integer; until timestamptz;
+begin
+  select status, expires_at, balance_cents into st, exp, bal from public.gift_cards where id = p_card for update;
+  if st is null then return jsonb_build_object('error', 'not_found'); end if;
+  if st <> 'active' then return jsonb_build_object('error', st, 'balance', bal); end if;
+  if exp is not null and exp <= now() then return jsonb_build_object('error', 'expired', 'balance', bal); end if;
+
+  -- Free this card's lapsed claims before measuring, and drop our own previous claim so the
+  -- amount below is recomputed from scratch instead of stacking on top of it.
+  delete from public.gift_card_reservations where gift_card_id = p_card and (expires_at < now() or ref = p_ref);
+
+  avail := public.gift_card_available(p_card);
+  take := least(greatest(coalesce(p_amount, 0), 0), avail);
+  if take <= 0 then
+    return jsonb_build_object('reserved', 0, 'requested', coalesce(p_amount, 0), 'available', avail, 'balance', bal);
+  end if;
+
+  until := now() + make_interval(secs => greatest(coalesce(p_ttl_seconds, 300), 30));
+  insert into public.gift_card_reservations (gift_card_id, amount_cents, expected_charge_cents, ref, booking_id, expires_at)
+    values (p_card, take, p_charge, p_ref, p_booking, until);
+
+  return jsonb_build_object('reserved', take, 'requested', coalesce(p_amount, 0),
+    'available', avail - take, 'balance', bal, 'expiresAt', until);
+end $$;
+
+-- Give a claim back (checkout closed, gift card removed, slot changed). Best-effort by design:
+-- releasing something that is already gone is success, because the TTL would have done it anyway.
+create or replace function public.release_gift_card(p_card uuid, p_ref text)
+returns integer language plpgsql as $$
+declare n integer;
+begin
+  delete from public.gift_card_reservations where gift_card_id = p_card and ref = p_ref;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+-- Settle: turn a reservation into a real debit, once the payment beside it has actually
+-- succeeded. This is the ONLY place a booking spends a gift card.
+--
+-- p_charged is what Stripe reports the customer was charged. It must match what the reservation
+-- said the customer would be charged; a mismatch means the PaymentIntent was not built with this
+-- gift card applied, so the reservation is dropped and nothing is debited. Without that check, a
+-- gift card applied against a PaymentIntent created before the discount wiring existed would be
+-- spent on a booking the customer had already paid for in full.
+--
+-- Idempotent through the (gift_card_id, ref) unique index on the ledger: a retry of the confirm
+-- call, or the Stripe webhook arriving after the client already settled, comes back as
+-- { already: true } instead of debiting twice.
+--
+-- Returns jsonb: { redeemed, balance, already, error }.
+create or replace function public.redeem_gift_card(
+  p_card uuid, p_ref text, p_charged integer default null,
+  p_booking uuid default null, p_note text default null)
+returns jsonb language plpgsql as $$
+declare res record; bal integer; done uuid;   -- `done` receives gift_card_transactions.id, which is a UUID.
+                                             -- Declared integer, the idempotency lookup below raised 22P02 on the
+                                             -- SECOND redeem of a ref, so the "already redeemed" no-op branch and the
+                                             -- unique_violation handler under it were both unreachable.
+begin
+  select id into done from public.gift_card_transactions
+   where gift_card_id = p_card and ref = p_ref and kind = 'redeem' limit 1;
+  if found then
+    delete from public.gift_card_reservations where gift_card_id = p_card and ref = p_ref;
+    select balance_cents into bal from public.gift_cards where id = p_card;
+    return jsonb_build_object('already', true, 'balance', bal);
+  end if;
+
+  select * into res from public.gift_card_reservations
+   where gift_card_id = p_card and ref = p_ref for update;
+  if not found then return jsonb_build_object('error', 'no_reservation'); end if;
+
+  if res.expected_charge_cents is not null and p_charged is not null
+     and res.expected_charge_cents <> p_charged then
+    delete from public.gift_card_reservations where id = res.id;
+    return jsonb_build_object('error', 'charge_mismatch',
+      'expected', res.expected_charge_cents, 'charged', p_charged);
+  end if;
+
+  bal := public.adjust_gift_card(p_card, -res.amount_cents, 'redeem',
+           coalesce(p_note, 'Booking'), coalesce(p_booking, res.booking_id), p_ref);
+  delete from public.gift_card_reservations where id = res.id;
+  return jsonb_build_object('redeemed', res.amount_cents, 'balance', bal);
+exception when unique_violation then
+  -- Lost a race with the other settlement path; that path did the debit.
+  delete from public.gift_card_reservations where gift_card_id = p_card and ref = p_ref;
+  select balance_cents into bal from public.gift_cards where id = p_card;
+  return jsonb_build_object('already', true, 'balance', bal);
+end $$;
+
+-- ============================================================================
+-- 7) ROW LEVEL SECURITY.
+-- ============================================================================
+--
+-- Every one of these tables is customer data or spendable value, so SELECT is narrowed to
+-- `authenticated` (the manager portal) exactly as migration 0018 did for the other ledgers —
+-- never to `anon`, which /api/config hands to every visitor of the site. Customers reach their
+-- own card through /api/gift-cards, which runs on the service-role key and returns only the
+-- balance for a code they already hold.
+do $$
+declare t text;
+begin
+  foreach t in array array['gift_cards','gift_card_transactions','gift_card_reservations','gift_card_attempts']
+  loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('drop policy if exists %I_read on public.%I', t, t);
+    execute format('create policy %I_read on public.%I for select to authenticated using (true)', t, t);
+    execute format('drop policy if exists %I_write on public.%I', t, t);
+    execute format('create policy %I_write on public.%I for all to authenticated using (true) with check (true)', t, t);
+  end loop;
+end $$;
+
+-- ============================================================================
+-- LEGAL NOTE — Manitoba expiry and fees. READ BEFORE CHANGING THE DEFAULTS.
+-- ============================================================================
+--
+-- Manitoba's Consumer Protection Act and the Prepaid Purchase Cards Regulation restrict expiry
+-- dates and fees on prepaid purchase cards. The SAFEST reading — the one this migration encodes —
+-- is that a gift card sold for general use at this venue must not expire and must not carry
+-- dormancy, maintenance or activation fees. So:
+--
+--   · gift_cards.expires_at defaults to NULL and the application never sets it;
+--   · settings.gift.expiryMonths defaults to null and settings.gift.dormancyFeeCents to 0;
+--   · the ledger has a 'fee' kind, and nothing in the codebase ever writes one.
+--
+-- It is encoded as DEFAULTS AND CONFIGURATION, not as a CHECK constraint, on purpose. A check
+-- constraint is an awful place to be wrong about the law: the exemptions (promotional cards
+-- given away at no charge, cards for a single named service, some multi-merchant arrangements)
+-- are real, and if any of them applies the fix should be an owner changing a setting, not a
+-- migration to drop a constraint from a table full of live liabilities.
+--
+-- ACTION REQUIRED: the venue's counsel should confirm this reading — in particular whether any
+-- promotional or comped card the shop hands out is exempt — before the owner is told the
+-- no-expiry behaviour is a legal guarantee rather than a conservative default.
+--
+-- Related and also unresolved: settings.pay.taxPct is displayed on receipts and never charged.
+-- Whether GST/PST applies at the sale of a gift card or at its redemption is an accountant's
+-- decision, not a developer's, and it is worth more on a $150 card than on a $20 booking.
+
+
+-- ==========================================================================
+-- MIGRATION 0021 - PROMO CODES
+-- ==========================================================================
+
+-- Invictus Golf — promo codes / coupons
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- WHY OUR OWN AND NOT STRIPE COUPONS
+-- Stripe Coupons only exist on a Stripe payment. Three of this venue's four booking paths never
+-- create one: a points-covered booking (api/points.js ?action=book), an hour-card booking
+-- (api/hour-cards.js ?action=book) and a manager's manual booking in the tee sheet are all
+-- $0 to Stripe. A Stripe Coupon on the card path would mean "PROMO20 works online but the shop
+-- can't honour it at the counter", which is not a coupon system, it is a Stripe feature.
+-- The server already recomputes every price from saved settings and never trusts the browser
+-- (lib/booking.js quoteBooking), so the discount belongs in that same waterfall, once, for all
+-- four paths. Stripe also cannot express the restrictions an operator actually wants — this bay,
+-- these weekdays, this time window, members only — nor "release the reservation when the cart is
+-- abandoned", because a Stripe Coupon is only consumed at payment and has no reserved state.
+--
+-- WHAT THIS MIGRATION IS AND IS NOT RESPONSIBLE FOR
+--   This file is the authority on REDEMPTION LIMITS and the VALIDITY WINDOW: the counters are
+--   enforced under a row lock on the promo, so no amount of concurrency can over-redeem a code.
+--   It is NOT the authority on the discount AMOUNT — the server computes that in quoteBooking
+--   and passes it in. That split is safe because every function below runs only through the
+--   service-role key from api/*; the browser has no route to them (see the RLS section).
+
+-- 1) PROMOS — the codes themselves. ---------------------------------------------------------
+--
+-- Deliberately NOT seeded. A migration that ships a working discount code is a migration that
+-- gives money away on every fresh install; the operator creates codes in the manager portal.
+create table if not exists public.promos (
+  id                     uuid primary key default gen_random_uuid(),
+  code                   text not null,
+  kind                   text not null default 'percent' check (kind in ('percent','amount')),
+  percent_off            numeric(5,2) not null default 0 check (percent_off >= 0 and percent_off <= 100),
+  amount_off_cents       integer not null default 0 check (amount_off_cents >= 0),
+  -- Cap on a percentage code, so "50% off" on a six-hour private-room booking can't run away.
+  max_discount_cents     integer check (max_discount_cents is null or max_discount_cents > 0),
+  -- Minimum spend, measured on the post-membership subtotal — the number the discount is
+  -- actually taken off, so a member cannot clear a threshold they never paid.
+  min_subtotal_cents     integer not null default 0 check (min_subtotal_cents >= 0),
+
+  -- Validity window. Null on either side = open-ended.
+  starts_at              timestamptz,
+  ends_at                timestamptz,
+
+  -- Redemption limits. max_redemptions null = unlimited globally; max_per_customer is per
+  -- customer_key (see promo_redemptions) and is 1 unless the operator says otherwise.
+  max_redemptions        integer check (max_redemptions is null or max_redemptions > 0),
+  max_per_customer       integer not null default 1 check (max_per_customer > 0),
+  -- Live count of reservations + completed redemptions. Only ever changed inside the functions
+  -- below, all of which hold "select … for update" on this row first, so it cannot drift.
+  redeemed_count         integer not null default 0 check (redeemed_count >= 0),
+
+  -- Restrictions. An empty array means "no restriction", matching how bay_ids already works on
+  -- schedule_overrides (migration 0007), so the manager UI can reuse the same control.
+  bay_ids                text[]   not null default '{}',
+  weekdays               smallint[] not null default '{}',   -- 0=Sun … 6=Sat
+  start_min              smallint,          -- time-of-day window, minutes from midnight
+  end_min                smallint,
+  membership_scope       text not null default 'any' check (membership_scope in ('any','members','non_members')),
+  membership_ids         uuid[]   not null default '{}',     -- when scope='members': these plans only
+
+  -- Stacking, per code. See the STACKING section in lib/booking.js — these two flags are the
+  -- only knobs, and quoteBooking enforces them identically on every booking path.
+  stacks_with_membership boolean not null default true,
+  stacks_with_points     boolean not null default true,
+
+  active                 boolean not null default true,
+  note                   text,
+  created_at             timestamptz not null default now()
+);
+
+-- Codes are case- and whitespace-insensitive to the customer, so uniqueness has to be too:
+-- "promo20", "PROMO20 " and "Promo20" are one code, not three. upper() and btrim() are both
+-- immutable, so they are legal in an index expression.
+create unique index if not exists promos_code_key on public.promos (upper(btrim(code)));
+
+-- 2) PROMO_REDEMPTIONS — the ledger, and the reservation. ------------------------------------
+--
+-- A row is created 'reserved' when the customer applies the code at checkout, and becomes
+-- 'redeemed' when the payment succeeds or 'released' when the cart is abandoned or lapses.
+-- This mirrors the cart-hold lifecycle in migration 0012 exactly, including the TTL, because
+-- it is the same problem: something is locked while a customer decides.
+--
+-- customer_key is who the per-customer limit counts. It is the normalized phone (or lowercased
+-- email) the customer typed, NOT customers.id — a first-time booker has no customer row yet,
+-- and a limit that only binds registered customers is not a limit.
+create table if not exists public.promo_redemptions (
+  id             uuid primary key default gen_random_uuid(),
+  promo_id       uuid not null references public.promos(id) on delete cascade,
+  customer_key   text not null,
+  customer_id    uuid references public.customers(id) on delete set null,
+  booking_id     uuid,
+  ref            text,                      -- Stripe PaymentIntent id at redeem time (idempotency)
+  status         text not null default 'reserved' check (status in ('reserved','redeemed','released')),
+  discount_cents integer not null default 0 check (discount_cents >= 0),
+  expires_at     timestamptz,               -- set while 'reserved'; cleared on redeem
+  created_at     timestamptz not null default now(),
+  redeemed_at    timestamptz,
+  released_at    timestamptz
+);
+create index if not exists promo_redemptions_promo on public.promo_redemptions (promo_id, status);
+-- The per-customer limit count, and the "does this customer already hold a live reservation?"
+-- lookup that stops an abandoned-checkout replay from burning a code repeatedly.
+create index if not exists promo_redemptions_customer on public.promo_redemptions (promo_id, customer_key) where status <> 'released';
+create index if not exists promo_redemptions_expiry on public.promo_redemptions (expires_at) where status = 'reserved';
+-- Idempotency, in the shape the other three ledgers standardised on: (parent_id, ref) rather
+-- than a global (ref). Two different codes could never share a PaymentIntent today — only one
+-- code applies per booking — but a global index here would silently block that forever, which
+-- is the bug migration 0016's global point_tx_ref_once index already has.
+create unique index if not exists promo_redemptions_ref_once on public.promo_redemptions (promo_id, ref) where ref is not null and status <> 'released';
+
+-- 3) PROMO_ATTEMPTS — brute-force protection. ------------------------------------------------
+--
+-- A promo code is a short shared secret typed into a public form, so it is enumerable by
+-- definition: without a limiter an attacker walks the keyspace until something validates.
+-- Every validate call lands here, and the count of recent FAILED attempts per key is what
+-- api/promos.js gates on. Successes are recorded too, for the operator's own diagnostics.
+create table if not exists public.promo_attempts (
+  id          bigserial primary key,
+  attempt_key text not null,                 -- normalized contact when known, else the client IP
+  code        text,
+  ok          boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+create index if not exists promo_attempts_key on public.promo_attempts (attempt_key, created_at desc);
+
+-- 4) SETTINGS.PROMO — operator-tunable knobs, same shape as settings.points (migration 0016).
+--    { "ttlSeconds": 300, "maxFailed": 10, "windowSeconds": 3600 }
+--    ttlSeconds defaults to 300 to match HOLD_MINUTES = 5 in lib/db.js: the promo reservation
+--    and the cart hold must lapse together, or one outlives the booking it belonged to.
+alter table public.settings add column if not exists promo jsonb not null default '{}'::jsonb;
+
+-- 5) RESERVE — the atomic claim. -------------------------------------------------------------
+--
+-- Everything that can over-redeem a code happens here, so everything is done under one lock:
+-- "select … from promos … for update" serializes every concurrent reserver of the SAME code
+-- (and only that code, so two different codes never wait on each other). Under that lock, in
+-- order: sweep this code's lapsed reservations, fold back this customer's own live one, check
+-- the window, check the global limit, check the per-customer limit, insert, increment.
+--
+-- LOCK ORDER, EVERYWHERE IN THIS FILE: promos first, then promo_redemptions. release_promo and
+-- redeem_promo take the promo lock even when they only need the redemption row, purely so the
+-- order is the same in all four functions and they cannot deadlock against each other.
+--
+-- p_discount_cents is recorded, not verified — the server computed it in quoteBooking and the
+-- browser cannot reach this function (service-role only). See the header.
+create or replace function public.reserve_promo(
+  p_code text,
+  p_customer_key text,
+  p_customer uuid default null,
+  p_discount_cents integer default 0,
+  p_ttl_seconds integer default 300,
+  p_ref text default null
+) returns jsonb language plpgsql as $$
+declare
+  v         public.promos%rowtype;
+  v_row     public.promo_redemptions%rowtype;
+  v_now     timestamptz := now();
+  v_freed   integer := 0;
+  v_n       integer := 0;
+begin
+  if coalesce(btrim(p_customer_key), '') = '' then raise exception 'promo_no_customer_key'; end if;
+
+  select * into v from public.promos
+   where upper(btrim(code)) = upper(btrim(coalesce(p_code, '')))
+   for update;
+  if not found  then raise exception 'promo_not_found'; end if;
+  if not v.active then raise exception 'promo_inactive'; end if;
+  if v.starts_at is not null and v_now < v.starts_at then raise exception 'promo_not_started'; end if;
+  if v.ends_at   is not null and v_now > v.ends_at   then raise exception 'promo_expired'; end if;
+
+  -- (a) Abandoned carts belonging to anyone: reservations whose TTL has passed are not holds.
+  update public.promo_redemptions
+     set status = 'released', released_at = v_now
+   where promo_id = v.id and status = 'reserved' and expires_at is not null and expires_at < v_now;
+  get diagnostics v_freed = row_count;
+
+  -- (b) This customer's own live reservation. demo/index.html creates a fresh PaymentIntent on
+  --     every slot change and every points apply/remove, abandoning the previous one, so the
+  --     same person re-applying the same code is the NORMAL case, not an attack — and without
+  --     this, one indecisive customer could exhaust a 50-use code by themselves. One live
+  --     reservation per (code, customer), always: the old one is released, the new one replaces
+  --     it, and the counter nets to zero.
+  update public.promo_redemptions
+     set status = 'released', released_at = v_now
+   where promo_id = v.id and status = 'reserved' and customer_key = p_customer_key;
+  get diagnostics v_n = row_count;
+  v_freed := v_freed + v_n;
+
+  if v_freed > 0 then
+    update public.promos set redeemed_count = greatest(0, redeemed_count - v_freed)
+     where id = v.id returning * into v;
+  end if;
+
+  if v.max_redemptions is not null and v.redeemed_count >= v.max_redemptions then
+    raise exception 'promo_exhausted';
+  end if;
+
+  -- Per-customer: what is left after (b) is this customer's COMPLETED redemptions, plus any
+  -- reservation of theirs that has already been paid. Live reservations were just folded back.
+  select count(*) into v_n from public.promo_redemptions
+   where promo_id = v.id and customer_key = p_customer_key and status <> 'released';
+  if v_n >= v.max_per_customer then raise exception 'promo_already_used'; end if;
+
+  insert into public.promo_redemptions (promo_id, customer_key, customer_id, ref, status, discount_cents, expires_at)
+  values (v.id, p_customer_key, p_customer, p_ref, 'reserved', greatest(0, coalesce(p_discount_cents, 0)),
+          v_now + make_interval(secs => greatest(30, least(3600, coalesce(p_ttl_seconds, 300)))))
+  returning * into v_row;
+
+  update public.promos set redeemed_count = redeemed_count + 1 where id = v.id;
+
+  return jsonb_build_object(
+    'reservationId', v_row.id,
+    'promoId',       v.id,
+    'code',          v.code,
+    'expiresAt',     v_row.expires_at,
+    'discountCents', v_row.discount_cents,
+    'redeemedCount', v.redeemed_count + 1
+  );
+end $$;
+
+-- 6) RELEASE — the other half of the pair. ---------------------------------------------------
+-- Idempotent by design: releasing a reservation that is already released, already redeemed, or
+-- simply gone returns false rather than raising, because the callers are a beacon from a closing
+-- browser tab and a TTL sweeper, neither of which can handle an error usefully.
+create or replace function public.release_promo(p_reservation uuid)
+returns boolean language plpgsql as $$
+declare
+  v_promo uuid;
+  v_stat  text;
+begin
+  select promo_id into v_promo from public.promo_redemptions where id = p_reservation;
+  if v_promo is null then return false; end if;
+  perform 1 from public.promos where id = v_promo for update;     -- promos first: see LOCK ORDER
+
+  select status into v_stat from public.promo_redemptions where id = p_reservation;
+  if v_stat is distinct from 'reserved' then return false; end if;
+
+  update public.promo_redemptions set status = 'released', released_at = now() where id = p_reservation;
+  update public.promos set redeemed_count = greatest(0, redeemed_count - 1) where id = v_promo;
+  return true;
+end $$;
+
+-- 7) REDEEM — reserved → redeemed, at payment success. ---------------------------------------
+--
+-- Idempotent on (reservation, ref): the client-side confirm and the Stripe webhook both call
+-- this for the same payment, on purpose (see api/confirm-booking.js), and the second one must
+-- be a no-op rather than a second redemption.
+--
+-- THE LAPSED-RESERVATION CASE, stated explicitly because it is a money decision, not a
+-- technical one: if the customer sat on a 3-D Secure challenge for longer than the TTL, the
+-- reservation is already 'released' by the time the payment succeeds. We resurrect it and
+-- redeem it anyway — even if that pushes redeemed_count one past max_redemptions. The
+-- alternative is charging a customer the discounted amount and then not honouring the
+-- discount, or failing a booking that is already paid for. Over-redeeming a marketing code by
+-- one is the cheapest of the three, and it is bounded: this path is reachable only from a
+-- succeeded PaymentIntent carrying a reservation id the server itself stamped.
+create or replace function public.redeem_promo(p_reservation uuid, p_booking uuid default null, p_ref text default null)
+returns boolean language plpgsql as $$
+declare
+  v_promo uuid;
+  v_stat  text;
+  v_ref   text;
+begin
+  select promo_id into v_promo from public.promo_redemptions where id = p_reservation;
+  if v_promo is null then return false; end if;
+  perform 1 from public.promos where id = v_promo for update;     -- promos first: see LOCK ORDER
+
+  select status, ref into v_stat, v_ref from public.promo_redemptions where id = p_reservation;
+  if v_stat = 'redeemed' then
+    -- Already done. Backfill the booking id if the first caller didn't have one yet.
+    if p_booking is not null then
+      update public.promo_redemptions set booking_id = coalesce(booking_id, p_booking) where id = p_reservation;
+    end if;
+    return true;
+  end if;
+
+  if v_stat = 'released' then
+    -- Resurrect: the TTL lapsed but the payment went through. See the note above.
+    raise warning 'redeem_promo: reservation % lapsed before payment — honouring it anyway', p_reservation;
+    update public.promos set redeemed_count = redeemed_count + 1 where id = v_promo;
+  end if;
+
+  update public.promo_redemptions
+     set status = 'redeemed', redeemed_at = now(), expires_at = null, released_at = null,
+         booking_id = coalesce(p_booking, booking_id), ref = coalesce(p_ref, ref)
+   where id = p_reservation;
+  return true;
+end $$;
+
+-- 8) SWEEP — the backstop, for codes nobody is currently reserving. ---------------------------
+-- reserve_promo already sweeps its own code on every call, which keeps the hot path honest.
+-- This exists so redeemed_count is also honest on the manager's promo list for a code whose
+-- last reservation was abandoned an hour ago. Locks promos in id order so two concurrent
+-- sweeps (or a sweep and a reserve) cannot deadlock.
+create or replace function public.sweep_promo_reservations()
+returns integer language plpgsql as $$
+declare
+  v_promo uuid;
+  v_n     integer;
+  v_total integer := 0;
+begin
+  for v_promo in
+    select distinct promo_id from public.promo_redemptions
+     where status = 'reserved' and expires_at is not null and expires_at < now()
+     order by 1
+  loop
+    perform 1 from public.promos where id = v_promo for update;
+    update public.promo_redemptions
+       set status = 'released', released_at = now()
+     where promo_id = v_promo and status = 'reserved' and expires_at is not null and expires_at < now();
+    get diagnostics v_n = row_count;
+    if v_n > 0 then
+      update public.promos set redeemed_count = greatest(0, redeemed_count - v_n) where id = v_promo;
+      v_total := v_total + v_n;
+    end if;
+  end loop;
+  return v_total;
+end $$;
+
+-- 9) RATE LIMIT helpers. ---------------------------------------------------------------------
+-- Split in two so a code that turns out to be invalid is counted, and a valid one is not held
+-- against the customer. Both are cheap; promo_log_attempt also prunes opportunistically so the
+-- table cannot grow without bound on a site that is being scanned.
+create or replace function public.promo_rate_ok(p_key text, p_window_seconds integer default 3600, p_max_failed integer default 10)
+returns boolean language sql stable as $$
+  select coalesce(count(*), 0) < greatest(1, coalesce(p_max_failed, 10))
+    from public.promo_attempts
+   where attempt_key = p_key
+     and not ok
+     and created_at > now() - make_interval(secs => greatest(60, coalesce(p_window_seconds, 3600)));
+$$;
+
+create or replace function public.promo_log_attempt(p_key text, p_code text, p_ok boolean)
+returns void language plpgsql as $$
+begin
+  insert into public.promo_attempts (attempt_key, code, ok) values (p_key, left(coalesce(p_code, ''), 64), coalesce(p_ok, false));
+  -- 1-in-50 prune. The rate window is at most an hour; a day of history is generous.
+  if random() < 0.02 then
+    delete from public.promo_attempts where created_at < now() - interval '1 day';
+  end if;
+end $$;
+
+-- 10) Row Level Security. --------------------------------------------------------------------
+-- The server reaches all of the above with SUPABASE_SERVICE_ROLE_KEY, which bypasses RLS
+-- entirely, so these policies exist only for the manager portal (demo/admin.html, which signs
+-- in first and holds an `authenticated` JWT). Reads are narrowed to `authenticated` per the
+-- policy migration 0018 established — a promo row is the discount structure of the business and
+-- promo_redemptions holds customer phone numbers in customer_key.
+--
+-- The anon role gets nothing anywhere in this migration. That is load-bearing: an anon SELECT on
+-- promos would let any visitor read every live code straight out of the database and skip the
+-- brute-force limiter entirely, which is the whole feature defeated in one query.
+alter table public.promos enable row level security;
+drop policy if exists promos_read on public.promos;
+create policy promos_read on public.promos for select to authenticated using (true);
+drop policy if exists promos_write on public.promos;
+create policy promos_write on public.promos for all to authenticated using (true) with check (true);
+
+alter table public.promo_redemptions enable row level security;
+drop policy if exists promo_redemptions_read on public.promo_redemptions;
+create policy promo_redemptions_read on public.promo_redemptions for select to authenticated using (true);
+drop policy if exists promo_redemptions_write on public.promo_redemptions;
+create policy promo_redemptions_write on public.promo_redemptions for all to authenticated using (true) with check (true);
+
+-- promo_attempts is server-only: RLS enabled with NO policies, which denies anon and
+-- authenticated everything. Same treatment migration 0019 settled on for stripe_events, and for
+-- the same reason — it is webhook/endpoint bookkeeping, not something the portal renders.
+alter table public.promo_attempts enable row level security;
+drop policy if exists promo_attempts_write on public.promo_attempts;
+
+
+-- ==========================================================================
+-- MIGRATION 0022 - WAITING LIST
+-- ==========================================================================
+
+-- Invictus Golf — waiting list: entries, exclusive offers, and the triggers that fire them
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- WHAT THIS IS
+-- A customer asks for a time that is already taken. Instead of losing them, we record what they
+-- want (date, bay preference, time window, how long) and watch for that time to come free. Three
+-- things free a slot in this system and all three are covered here by database triggers, because
+-- two of them never pass through an API route at all:
+--
+--   1. a booking is CANCELLED          — api/booking.js, or a manager in demo/admin.html
+--   2. a cart HOLD EXPIRES or is released — lib/db.js cleanupExpiredHolds() / releaseHold()
+--   3. a schedule OVERRIDE IS REMOVED   — a manager deleting a closure/maintenance block, which
+--                                         is a direct PostgREST delete from the manager portal
+--
+-- A trigger on each writes a row into waitlist_wakeups: "this exact slot may now be free". The
+-- sweep (waitlist_process) drains that queue.
+--
+-- THE ONE RULE THAT MAKES THIS A FEATURE RATHER THAN A STAMPEDE
+-- When a slot frees, exactly ONE waiting customer is told, and they get an EXCLUSIVE window
+-- (default 15 minutes) to take it before anybody else on the list hears about it. Texting six
+-- people about one bay produces five people who feel cheated and one booking that would probably
+-- have happened anyway. Three separate mechanisms enforce the exclusivity, deliberately
+-- overlapping, because this is the part that cannot be allowed to fail:
+--
+--   (a) a partial UNIQUE INDEX on (date, bay, start, end) where status = 'offered' — the database
+--       physically cannot hold two live offers for the same slot;
+--   (b) a real 'held' row in public.bookings for the length of the claim window (settings knob
+--       waitlist.holdSlot, on by default), so the slot is genuinely reserved — the existing
+--       bookings_no_overlap exclusion constraint makes that insert the atomic proof that the slot
+--       was free, and availability already renders 'held' as busy;
+--   (c) pg_try_advisory_xact_lock around the whole sweep, so two overlapping cron runs cannot
+--       both offer the same slot — the second run finds the lock taken and returns immediately.
+--
+-- QUIET HOURS. The venue is open 24 hours. A text message at 3am is not a courtesy, and a claim
+-- window that opens while the customer is asleep wastes the slot as well as the goodwill. During
+-- quiet hours the sweep processes nothing and LEAVES the wakeups queued, so the slot is offered
+-- the moment the window opens. Configurable in settings.waitlist — never hardcoded (§2).
+--
+-- SCHEDULING. Vercel Hobby cron is daily-only, which is useless for a claim window measured in
+-- minutes, so the sweep is driven by pg_cron + pg_net inside Postgres — see §10 and the helper
+-- public.waitlist_schedule_sweep(). Any external cron hitting POST /api/waitlist?action=sweep
+-- works just as well; nothing below depends on which one you use.
+
+-- 1) THE THREE TABLES. ----------------------------------------------------------------------
+
+-- (a) ENTRIES — who is waiting, and for what.
+--
+-- customer_key is the dedupe identity: the normalized phone (or lowercased email) the customer
+-- typed, the same key promo_redemptions uses (migration 0021), NOT customers.id — somebody
+-- joining a waiting list may never have booked before and so has no customer row yet.
+--
+-- email_ok / sms_ok are CASL EXPRESS CONSENT for this specific purpose, captured at the point of
+-- collection along with consent_at + consent_ip. An entry with neither flag set is never offered
+-- anything: there would be no way to tell them, and an offer nobody is told about silently burns
+-- the slot for the length of the claim window. api/waitlist.js also mirrors the consent onto
+-- public.customers (migration 0019), which is where lib/notify.js enforces it at send time.
+create table if not exists public.waitlist_entries (
+  id               uuid primary key default gen_random_uuid(),
+  -- The secret in the customer's own "you're on the list / take me off it" link. Random so it
+  -- cannot be guessed or walked, exactly like customers.unsub_token in migration 0019.
+  token            uuid not null default gen_random_uuid(),
+  customer_id      uuid references public.customers(id) on delete set null,
+  customer_key     text not null,
+  name             text,
+  email            text,
+  phone            text,
+  email_ok         boolean not null default false,
+  sms_ok           boolean not null default false,
+  consent_at       timestamptz,
+  consent_ip       text,
+
+  booking_date     date not null,
+  -- Bay preference. Empty array = "any bay", matching how bay_ids already works on
+  -- schedule_overrides (0007) and promos (0021), so the manager UI can reuse the same control.
+  bay_ids          text[]   not null default '{}',
+  -- The window they are available in, and how long they actually want. A 7am–11am window with a
+  -- 60-minute duration means "any hour in there" — the offer is one duration-long slot inside it,
+  -- never the whole window, or a four-hour cancellation would hold four hours for one player.
+  window_start_min smallint not null default 0,
+  window_end_min   smallint not null default 1440,
+  duration_min     smallint not null default 60,
+  players          smallint,
+  note             text,
+
+  status           text not null default 'active'
+                     check (status in ('active','offered','claimed','cancelled','expired')),
+  offers_sent      smallint not null default 0,
+  last_offer_at    timestamptz,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+
+  constraint waitlist_entries_window  check (window_end_min > window_start_min),
+  constraint waitlist_entries_bounds  check (window_start_min >= 0 and window_end_min <= 1440),
+  constraint waitlist_entries_duration check (duration_min >= 15 and duration_min <= window_end_min - window_start_min)
+);
+create unique index if not exists waitlist_entries_token on public.waitlist_entries (token);
+-- The queue order is first-come, first-served, per day.
+create index if not exists waitlist_entries_match on public.waitlist_entries (booking_date, status, created_at);
+-- One live entry per customer per day+window: re-submitting the same request returns the entry
+-- they already have instead of quietly putting them on the list twice and offering them the same
+-- slot twice. A different window on the same day is a different request and is allowed.
+create unique index if not exists waitlist_entries_live
+  on public.waitlist_entries (customer_key, booking_date, window_start_min, window_end_min)
+  where status in ('active','offered');
+
+-- (b) OFFERS — one slot, offered to one entry, with a deadline.
+create table if not exists public.waitlist_offers (
+  id              uuid primary key default gen_random_uuid(),
+  entry_id        uuid not null references public.waitlist_entries(id) on delete cascade,
+  -- The secret in the claim link. This is the only thing standing between the offer and whoever
+  -- else has the URL, so it is a uuid, it is never logged, and it dies with the offer.
+  claim_token     uuid not null default gen_random_uuid(),
+  booking_date    date     not null,
+  bay_id          text     not null,
+  start_min       smallint not null,
+  end_min         smallint not null,
+  status          text not null default 'offered'
+                    check (status in ('offered','claimed','declined','expired','cancelled')),
+  reason          text,                    -- what freed the slot: booking_cancelled | hold_expired | …
+  -- The 'held' bookings row reserving the slot for the length of the claim window, when
+  -- settings.waitlist.holdSlot is on. Null means the slot was offered without being held.
+  hold_booking_id uuid,
+  expires_at      timestamptz not null,    -- the end of the exclusive claim window
+  offered_at      timestamptz not null default now(),
+  -- Set by the sweep endpoint once the customer has actually been told. An offer that was created
+  -- but never delivered (provider down, endpoint unreachable) is retried on the next sweep rather
+  -- than sitting there silently expiring — see api/waitlist.js.
+  notified_at     timestamptz,
+  notify_channels text[] not null default '{}',
+  claimed_at      timestamptz,
+  closed_at       timestamptz,
+  booking_id      uuid
+);
+create unique index if not exists waitlist_offers_claim_token on public.waitlist_offers (claim_token);
+-- (a) from the header: one live offer per slot, enforced by the database rather than by the code
+-- that happens to be running. This is the anti-stampede guarantee.
+create unique index if not exists waitlist_offers_one_per_slot
+  on public.waitlist_offers (booking_date, bay_id, start_min, end_min) where status = 'offered';
+-- And one live offer per person: nobody is asked to decide about two slots at once.
+create unique index if not exists waitlist_offers_one_per_entry
+  on public.waitlist_offers (entry_id) where status = 'offered';
+create index if not exists waitlist_offers_due on public.waitlist_offers (expires_at) where status = 'offered';
+create index if not exists waitlist_offers_entry on public.waitlist_offers (entry_id, offered_at desc);
+
+-- (c) WAKEUPS — the work queue the triggers write to.
+--
+-- A row means "this slot may have come free"; it is a hint, never a fact. The sweep re-checks the
+-- slot against live bookings and schedule overrides before it offers anything, because by the time
+-- it looks, a walk-in may already have taken it.
+--
+-- The partial unique index is what makes the whole thing idempotent: a cancellation and a lapsed
+-- hold on the same slot, or the same trigger firing twice, collapse into ONE pending row, and
+-- every insert below is "on conflict do nothing". Two overlapping sweeps therefore cannot find two
+-- copies of the same work.
+create table if not exists public.waitlist_wakeups (
+  id           bigserial primary key,
+  booking_date date     not null,
+  bay_id       text     not null,
+  start_min    smallint not null,
+  end_min      smallint not null,
+  reason       text,
+  created_at   timestamptz not null default now(),
+  processed_at timestamptz,
+  offer_id     uuid
+);
+create unique index if not exists waitlist_wakeups_pending
+  on public.waitlist_wakeups (booking_date, bay_id, start_min, end_min) where processed_at is null;
+create index if not exists waitlist_wakeups_queue on public.waitlist_wakeups (created_at) where processed_at is null;
+
+-- 2) SETTINGS.WAITLIST — every knob, none of them hardcoded. ---------------------------------
+--
+--   claimMinutes      how long the exclusive claim window lasts (minutes)
+--   checkoutMinutes   grace after a claim, during which the slot is not re-offered to anyone else
+--   maxOffersPerEntry stop pestering somebody who has ignored this many offers
+--   minLeadMinutes    never offer a slot starting sooner than this — nobody can drive there in 10 min
+--   quietStartMin /   quiet hours in venue-local minutes from midnight. 21:00 → 08:00 by default.
+--   quietEndMin       Set them equal to switch quiet hours off entirely.
+--   timezone          the venue's wall clock; the rest of the app uses America/Winnipeg
+--   holdSlot          reserve the slot with a real 'held' bookings row for the claim window
+--   sweepLimit        max wakeups processed per run
+--   lookaheadDays     how far ahead an override deletion is allowed to generate wakeups
+--
+-- The defaults live in waitlist_config() below and are mirrored in lib/db.js (WAITLIST_DEFAULTS).
+alter table public.settings add column if not exists waitlist jsonb not null default '{}'::jsonb;
+
+-- Defaults merged with whatever the operator has set. jsonb || jsonb is right-biased, so a key
+-- present in settings.waitlist wins and everything else falls back.
+create or replace function public.waitlist_config()
+returns jsonb language sql stable as $$
+  select jsonb_build_object(
+           'claimMinutes',      15,
+           'checkoutMinutes',   10,
+           'maxOffersPerEntry',  3,
+           'minLeadMinutes',    60,
+           'quietStartMin',   1260,
+           'quietEndMin',      480,
+           'timezone',        'America/Winnipeg',
+           'holdSlot',        true,
+           'sweepLimit',        25,
+           'lookaheadDays',     14
+         ) || coalesce((select waitlist from public.settings where id = 1), '{}'::jsonb);
+$$;
+
+-- Are we inside quiet hours right now? Wraps midnight when start > end (21:00 → 08:00), and is
+-- off entirely when the two are equal.
+create or replace function public.waitlist_quiet_now()
+returns boolean language plpgsql stable as $$
+declare
+  cfg jsonb := public.waitlist_config();
+  s   int   := (cfg->>'quietStartMin')::int;
+  e   int   := (cfg->>'quietEndMin')::int;
+  m   int;
+begin
+  if s = e then return false; end if;                 -- equal = quiet hours switched off
+  select (extract(hour from t) * 60 + extract(minute from t))::int
+    into m
+    from (select (now() at time zone (cfg->>'timezone'))::time as t) x;
+  if s < e then return m >= s and m < e; end if;      -- a window inside one day
+  return m >= s or m < e;                             -- a window that wraps midnight (21:00 → 08:00)
+end $$;
+
+-- 3) IS THIS SLOT ACTUALLY FREE? --------------------------------------------------------------
+--
+-- Mirrors lib/booking.js overrideEffects() in SQL: a closure, a bay-specific closure, a timed
+-- maintenance block, or narrowed special hours all make a slot unofferable. An "Open" status
+-- (status_open) paints the tee sheet without blocking, exactly as it does in JS.
+--
+-- settings.weekly_status is deliberately NOT consulted: a wakeup only ever fires for a slot that
+-- was occupied a moment ago, and a slot cannot have been booked inside a weekly closed band.
+create or replace function public.waitlist_slot_blocked(p_date date, p_bay text, p_start int, p_end int)
+returns boolean language sql stable as $$
+  select exists (
+    select 1 from public.schedule_overrides o
+     where o.is_active is not false
+       and p_date >= o.override_date
+       and p_date <= coalesce(o.end_date, o.override_date)
+       and (cardinality(o.bay_ids) = 0 or p_bay = any (o.bay_ids))
+       and (
+            (o.start_min is null and o.is_closed)
+         or (o.start_min is not null and o.end_min is not null and o.end_min > o.start_min
+             and not coalesce(o.status_open, false)
+             and int4range(o.start_min, o.end_min) && int4range(p_start, p_end))
+         or (o.start_min is null and not o.is_closed and o.open_hour is not null
+             and (p_start < o.open_hour * 60 or p_end > coalesce(o.close_hour, 24) * 60))
+       )
+  );
+$$;
+
+-- Anything occupying the slot right now: a confirmed booking, a manager block, or somebody else's
+-- live cart hold. Lapsed holds do not count — they are rows nobody has swept yet.
+create or replace function public.waitlist_slot_taken(p_date date, p_bay text, p_start int, p_end int)
+returns boolean language sql stable as $$
+  select exists (
+    select 1 from public.bookings b
+     where b.booking_date = p_date
+       and b.bay_id = p_bay
+       and b.status <> 'cancelled'
+       and (b.status <> 'held' or (b.expires_at is not null and b.expires_at > now()))
+       and int4range(b.start_min, b.end_min) && int4range(p_start, p_end)
+  )
+  or exists (
+    -- Somebody else's live offer, for the holdSlot = false configuration where there is no
+    -- bookings row to collide with.
+    select 1 from public.waitlist_offers o
+     where o.status = 'offered' and o.booking_date = p_date and o.bay_id = p_bay
+       and int4range(o.start_min, o.end_min) && int4range(p_start, p_end)
+  );
+$$;
+
+-- 4) THE TRIGGERS. ----------------------------------------------------------------------------
+
+-- One place that queues a wakeup, so every trigger agrees on the rules: nothing for a past date,
+-- nothing while a customer who just claimed this slot is still at the checkout (their own claim
+-- deletes the hold row, and without this guard that deletion would immediately offer the slot
+-- they are paying for to the next person on the list), and duplicates collapse.
+--
+-- SECURITY DEFINER, and this is load-bearing: waitlist_wakeups has RLS on with no policies, so a
+-- manager deleting a booking or a closure in the portal (role `authenticated`) could not insert
+-- the wakeup, and the trigger would turn their delete into a permission error. Running as the
+-- owner keeps the queue server-only AND keeps the portal working. search_path is pinned, as it
+-- must be on any definer function.
+create or replace function public.waitlist_note_free_slot(
+  p_date date, p_bay text, p_start int, p_end int, p_reason text
+) returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  cfg   jsonb := public.waitlist_config();
+  v_now date  := (now() at time zone (cfg->>'timezone'))::date;
+begin
+  if p_date is null or p_bay is null or p_start is null or p_end is null then return; end if;
+  if p_date < v_now then return; end if;
+  if p_end <= p_start then return; end if;
+
+  if exists (
+    select 1 from public.waitlist_offers o
+     where o.status = 'claimed' and o.booking_date = p_date and o.bay_id = p_bay
+       and int4range(o.start_min, o.end_min) && int4range(p_start, p_end)
+       and o.claimed_at > now() - make_interval(mins => (cfg->>'checkoutMinutes')::int)
+  ) then
+    return;
+  end if;
+
+  insert into public.waitlist_wakeups (booking_date, bay_id, start_min, end_min, reason)
+  values (p_date, p_bay, p_start, p_end, p_reason)
+  on conflict do nothing;
+exception when others then
+  -- This runs inside somebody else's DELETE or UPDATE. A waiting list that cannot queue a wakeup
+  -- — a mistyped settings.waitlist value, a table that has been dropped — must never turn a
+  -- manager cancelling a booking into an error. Complain in the log and let their write commit.
+  raise warning 'waitlist: wakeup not queued for % % %-% (%)', p_date, p_bay, p_start, p_end, sqlerrm;
+end $$;
+
+-- (a) BOOKINGS: a cancellation, a deleted booking, or a cart hold that expired or was released.
+--     cleanupExpiredHolds() in lib/db.js deletes lapsed 'held' rows in bulk; every one of those
+--     deletions is a slot coming back, which is one of the three triggers this feature promises.
+create or replace function public.waitlist_booking_freed() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'UPDATE' then
+    if new.status = 'cancelled' and old.status is distinct from 'cancelled' then
+      perform public.waitlist_note_free_slot(old.booking_date, old.bay_id, old.start_min, old.end_min, 'booking_cancelled');
+    end if;
+  elsif tg_op = 'DELETE' then
+    if old.status is distinct from 'cancelled' then
+      perform public.waitlist_note_free_slot(old.booking_date, old.bay_id, old.start_min, old.end_min,
+        case when old.status = 'held' then 'hold_expired' else 'booking_deleted' end);
+    end if;
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists waitlist_bookings_freed on public.bookings;
+create trigger waitlist_bookings_freed
+  after update or delete on public.bookings
+  for each row execute function public.waitlist_booking_freed();
+
+-- (b) SCHEDULE OVERRIDES: a closure or maintenance block being removed hands back every slot it
+--     was covering. The manager portal deletes these straight through PostgREST, so there is no
+--     API route to hook — this has to be a trigger or it does not happen at all.
+--
+--     Bounded on purpose: dates are clamped to today … today + lookaheadDays, and an override with
+--     no bay_ids expands to the bays in settings, so deleting a year-long closure queues a few
+--     dozen wakeups rather than a few thousand.
+create or replace function public.waitlist_note_override(o public.schedule_overrides, p_reason text)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  cfg    jsonb := public.waitlist_config();
+  v_today date := (now() at time zone (cfg->>'timezone'))::date;
+  v_from date;
+  v_to   date;
+  v_s    int  := coalesce(o.start_min, 0);
+  v_e    int  := coalesce(o.end_min, 1440);
+  v_bays text[];
+  d      date;
+  b      text;
+begin
+  -- Only a blocking override frees anything when it goes away. An "Open" status (Happy Hour)
+  -- never blocked booking in the first place — lib/booking.js overrideEffects() skips it too.
+  if o.is_active is false then return; end if;
+  if not (o.is_closed
+          or o.open_hour is not null
+          or (o.start_min is not null and not coalesce(o.status_open, false))) then
+    return;
+  end if;
+  if v_e <= v_s then return; end if;
+
+  v_from := greatest(o.override_date, v_today);
+  v_to   := least(coalesce(o.end_date, o.override_date), v_today + (cfg->>'lookaheadDays')::int);
+  if v_to < v_from then return; end if;
+
+  -- No bay_ids means the override covered every real bay; "holding" bays are not bookable,
+  -- so they are excluded here exactly as normalizeSettings() excludes them in lib/booking.js.
+  if cardinality(o.bay_ids) > 0 then
+    v_bays := o.bay_ids;
+  else
+    select coalesce(array_agg(x->>'id'), '{}')
+      into v_bays
+      from jsonb_array_elements(coalesce((select bays from public.settings where id = 1), '[]'::jsonb)) x
+     where coalesce((x->>'holding')::boolean, false) = false
+       and coalesce(x->>'id', '') <> '';
+  end if;
+
+  for d in select generate_series(v_from, v_to, interval '1 day')::date loop
+    foreach b in array coalesce(v_bays, '{}') loop
+      perform public.waitlist_note_free_slot(d, b, v_s, v_e, p_reason);
+    end loop;
+  end loop;
+exception when others then
+  -- Same rule as above: removing a closure must succeed whether or not the waiting list can
+  -- work out what it freed.
+  raise warning 'waitlist: override wakeups not queued for % (%)', o.id, sqlerrm;
+end $$;
+
+create or replace function public.waitlist_override_freed() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'DELETE' then
+    perform public.waitlist_note_override(old, 'override_removed');
+  elsif tg_op = 'UPDATE' then
+    -- Deactivating it, opening it up, or moving its window all hand back the time it used to
+    -- cover. The sweep re-checks availability anyway, so a wakeup that turns out to still be
+    -- blocked costs one row and nothing else.
+    if (old.is_active, old.is_closed, old.start_min, old.end_min, old.open_hour, old.close_hour,
+        old.status_open, old.bay_ids, old.override_date, old.end_date)
+       is distinct from
+       (new.is_active, new.is_closed, new.start_min, new.end_min, new.open_hour, new.close_hour,
+        new.status_open, new.bay_ids, new.override_date, new.end_date)
+    then
+      perform public.waitlist_note_override(old, 'override_changed');
+    end if;
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists waitlist_overrides_freed on public.schedule_overrides;
+create trigger waitlist_overrides_freed
+  after update or delete on public.schedule_overrides
+  for each row execute function public.waitlist_override_freed();
+
+-- 5) THE SWEEP. -------------------------------------------------------------------------------
+--
+-- Idempotent by construction, which is the requirement for anything a cron job runs:
+--
+--   * pg_try_advisory_xact_lock — a second concurrent run returns {"skipped":"locked"} instead of
+--     racing the first one. The lock is released when the transaction ends, always.
+--   * every wakeup it looks at is marked processed in the same transaction as the offer it
+--     created, so a run that fails half way rolls both back together;
+--   * the offer insert is guarded by a unique index and the hold insert by the bookings exclusion
+--     constraint, so even without the lock the second run could not double-offer a slot;
+--   * it does not send anything. It creates offers; api/waitlist.js delivers them through the
+--     outbox (migration 0019), where dedupe_key stops a message going out twice.
+--
+-- Returns a jsonb tally, and the offers it created so the caller can notify them immediately.
+create or replace function public.waitlist_process(p_limit integer default null)
+returns jsonb language plpgsql as $$
+declare
+  cfg        jsonb := public.waitlist_config();
+  tz         text  := cfg->>'timezone';
+  v_today    date  := (now() at time zone tz)::date;
+  v_limit    int   := greatest(1, least(200, coalesce(p_limit, (cfg->>'sweepLimit')::int)));
+  v_expired  int   := 0;
+  v_closed   int   := 0;
+  v_seen     int   := 0;
+  v_made     int   := 0;
+  v_offers   jsonb := '[]'::jsonb;
+  o          record;
+  w          record;
+  e          record;
+  v_start    int;
+  v_end      int;
+  v_slot_at  timestamptz;
+  v_deadline timestamptz;
+  v_hold     uuid;
+  v_offer    uuid;
+  v_token    uuid;
+  v_placed   boolean;
+begin
+  if not pg_try_advisory_xact_lock(hashtext('invictus.waitlist.sweep')) then
+    return jsonb_build_object('skipped', 'locked');
+  end if;
+
+  -- (1) Lapsed claim windows. The customer was told and did not take it, so the slot goes back to
+  --     the pool and the NEXT person gets their turn — which is a fresh wakeup, queued here.
+  for o in select * from public.waitlist_offers where status = 'offered' and expires_at <= now() loop
+    update public.waitlist_offers set status = 'expired', closed_at = now() where id = o.id;
+    update public.waitlist_entries set status = 'active', updated_at = now()
+     where id = o.entry_id and status = 'offered';
+    if o.hold_booking_id is not null then
+      delete from public.bookings where id = o.hold_booking_id and status = 'held';
+    end if;
+    perform public.waitlist_note_free_slot(o.booking_date, o.bay_id, o.start_min, o.end_min, 'offer_expired');
+    v_expired := v_expired + 1;
+  end loop;
+
+  -- (2) Entries whose day has been and gone. Nothing to offer them ever again.
+  update public.waitlist_entries set status = 'expired', updated_at = now()
+   where status in ('active','offered') and booking_date < v_today;
+  get diagnostics v_closed = row_count;
+
+  -- (3) Quiet hours. Everything above is bookkeeping and is safe at any hour; everything below
+  --     ends in somebody's phone lighting up, so it waits. The wakeups stay queued.
+  if public.waitlist_quiet_now() then
+    return jsonb_build_object('quiet', true, 'expired', v_expired, 'entriesClosed', v_closed,
+                              'processed', 0, 'created', 0, 'offers', v_offers);
+  end if;
+
+  -- (4) Drain the queue.
+  for w in
+    select * from public.waitlist_wakeups
+     where processed_at is null
+     order by created_at, id
+     limit v_limit
+    for update skip locked
+  loop
+    v_seen := v_seen + 1;
+    v_placed := false;
+    v_offer  := null;
+
+    -- Too late to be worth anybody's time, or the slot is not actually free after all.
+    if (w.booking_date + make_interval(mins => w.start_min)) at time zone tz
+         > now() + make_interval(mins => (cfg->>'minLeadMinutes')::int)
+       and not public.waitlist_slot_blocked(w.booking_date, w.bay_id, w.start_min, w.end_min)
+    then
+      -- First matching entry wins: oldest first, and only entries we can actually reach.
+      for e in
+        select * from public.waitlist_entries en
+         where en.status = 'active'
+           and en.booking_date = w.booking_date
+           and (cardinality(en.bay_ids) = 0 or w.bay_id = any (en.bay_ids))
+           and greatest(en.window_start_min, w.start_min) + en.duration_min
+               <= least(en.window_end_min, w.end_min)
+           and en.offers_sent < (cfg->>'maxOffersPerEntry')::int
+           and ((en.email_ok and en.email is not null) or (en.sms_ok and en.phone is not null))
+           -- Don't offer somebody the same slot they already let lapse or turned down.
+           and not exists (
+             select 1 from public.waitlist_offers o2
+              where o2.entry_id = en.id and o2.booking_date = w.booking_date and o2.bay_id = w.bay_id
+                and o2.status in ('expired','declined','cancelled')
+                and int4range(o2.start_min, o2.end_min) && int4range(w.start_min, w.end_min))
+         order by en.created_at, en.id
+      loop
+        -- The offered slot is one duration-long block at the start of the overlap, never the
+        -- whole freed range.
+        v_start := greatest(e.window_start_min, w.start_min);
+        v_end   := v_start + e.duration_min;
+        if v_end > least(e.window_end_min, w.end_min) then continue; end if;
+
+        v_slot_at  := (w.booking_date + make_interval(mins => v_start)) at time zone tz;
+        -- The claim window never runs past the slot itself: a deadline after the tee time is not
+        -- a deadline. Skip the entry if what is left is too short to act on.
+        v_deadline := least(now() + make_interval(mins => (cfg->>'claimMinutes')::int),
+                            v_slot_at - interval '5 minutes');
+        if v_deadline <= now() + interval '2 minutes' then exit; end if;
+
+        if public.waitlist_slot_taken(w.booking_date, w.bay_id, v_start, v_end) then exit; end if;
+
+        v_hold := null;
+        if (cfg->>'holdSlot')::boolean then
+          -- The atomic proof that the slot is free. bookings_no_overlap turns a race into an
+          -- exception rather than a double booking; if we lose it, the slot was never ours.
+          begin
+            insert into public.bookings (bay_id, booking_date, start_min, end_min, status,
+                                         expires_at, source, customer_name, customer_email, customer_phone)
+            values (w.bay_id, w.booking_date, v_start, v_end, 'held',
+                    v_deadline, 'waitlist', e.name, e.email, e.phone)
+            returning id into v_hold;
+          exception when exclusion_violation or unique_violation then
+            v_hold := null;
+            exit;                              -- somebody got there first; nothing to offer
+          end;
+        end if;
+
+        begin
+          insert into public.waitlist_offers (entry_id, booking_date, bay_id, start_min, end_min,
+                                              reason, hold_booking_id, expires_at)
+          values (e.id, w.booking_date, w.bay_id, v_start, v_end, w.reason, v_hold, v_deadline)
+          returning id, claim_token into v_offer, v_token;
+        exception when unique_violation then
+          -- A live offer already exists for this slot or this entry. Give the hold back and stop.
+          if v_hold is not null then delete from public.bookings where id = v_hold and status = 'held'; end if;
+          exit;
+        end;
+
+        update public.waitlist_entries
+           set status = 'offered', offers_sent = offers_sent + 1, last_offer_at = now(), updated_at = now()
+         where id = e.id;
+
+        v_made   := v_made + 1;
+        v_placed := true;
+        v_offers := v_offers || jsonb_build_object(
+          'offerId', v_offer, 'entryId', e.id, 'claimToken', v_token,
+          'dateISO', w.booking_date, 'bayId', w.bay_id,
+          'startMin', v_start, 'endMin', v_end, 'expiresAt', v_deadline, 'reason', w.reason);
+        exit;
+      end loop;
+    end if;
+
+    update public.waitlist_wakeups
+       set processed_at = now(), offer_id = case when v_placed then v_offer else null end
+     where id = w.id;
+  end loop;
+
+  return jsonb_build_object('quiet', false, 'expired', v_expired, 'entriesClosed', v_closed,
+                            'processed', v_seen, 'created', v_made, 'offers', v_offers);
+end $$;
+
+-- 6) CLAIM — the customer says yes. -----------------------------------------------------------
+--
+-- Under a row lock on the offer, so two taps on the link in a text message cannot both claim.
+-- The hold row is RELEASED here rather than kept: the customer goes straight into the ordinary
+-- checkout, which creates its own cart hold (lib/db.js createHold), and a leftover waitlist hold
+-- would collide with it on the exclusion constraint and refuse the booking the customer was just
+-- promised. The slot is protected across that handover by waitlist_note_free_slot(), which
+-- suppresses wakeups for a slot claimed within the last checkoutMinutes.
+create or replace function public.waitlist_claim(p_token uuid)
+returns jsonb language plpgsql as $$
+declare
+  o   public.waitlist_offers%rowtype;
+  cfg jsonb := public.waitlist_config();
+begin
+  select * into o from public.waitlist_offers where claim_token = p_token for update;
+  if not found then return jsonb_build_object('ok', false, 'reason', 'not_found'); end if;
+
+  if o.status = 'claimed' then
+    return jsonb_build_object('ok', true, 'already', true, 'offerId', o.id, 'entryId', o.entry_id,
+                              'dateISO', o.booking_date, 'bayId', o.bay_id,
+                              'startMin', o.start_min, 'endMin', o.end_min,
+                              'checkoutBy', o.claimed_at + make_interval(mins => (cfg->>'checkoutMinutes')::int));
+  end if;
+  if o.status <> 'offered' then
+    return jsonb_build_object('ok', false, 'reason', o.status);
+  end if;
+  if o.expires_at <= now() then
+    -- Let the sweep do the tidying and the re-offering; just say no here.
+    return jsonb_build_object('ok', false, 'reason', 'expired');
+  end if;
+
+  update public.waitlist_offers
+     set status = 'claimed', claimed_at = now(), closed_at = now()
+   where id = o.id;
+  update public.waitlist_entries set status = 'claimed', updated_at = now() where id = o.entry_id;
+  if o.hold_booking_id is not null then
+    delete from public.bookings where id = o.hold_booking_id and status = 'held';
+  end if;
+
+  return jsonb_build_object('ok', true, 'offerId', o.id, 'entryId', o.entry_id,
+                            'dateISO', o.booking_date, 'bayId', o.bay_id,
+                            'startMin', o.start_min, 'endMin', o.end_min,
+                            'checkoutBy', now() + make_interval(mins => (cfg->>'checkoutMinutes')::int));
+end $$;
+
+-- 7) DECLINE — "no thanks", which is worth having because it hands the slot to the next person
+--    immediately instead of after the full claim window.
+create or replace function public.waitlist_decline(p_token uuid, p_leave boolean default false)
+returns jsonb language plpgsql as $$
+declare o public.waitlist_offers%rowtype;
+begin
+  select * into o from public.waitlist_offers where claim_token = p_token for update;
+  if not found then return jsonb_build_object('ok', false, 'reason', 'not_found'); end if;
+  if o.status <> 'offered' then return jsonb_build_object('ok', false, 'reason', o.status); end if;
+
+  update public.waitlist_offers set status = 'declined', closed_at = now() where id = o.id;
+  update public.waitlist_entries
+     set status = case when p_leave then 'cancelled' else 'active' end, updated_at = now()
+   where id = o.entry_id;
+  if o.hold_booking_id is not null then
+    delete from public.bookings where id = o.hold_booking_id and status = 'held';
+  end if;
+  perform public.waitlist_note_free_slot(o.booking_date, o.bay_id, o.start_min, o.end_min, 'offer_declined');
+  return jsonb_build_object('ok', true, 'left', coalesce(p_leave, false));
+end $$;
+
+-- 8) LEAVE — the customer takes themselves off the list, from their own link.
+create or replace function public.waitlist_leave(p_token uuid)
+returns jsonb language plpgsql as $$
+declare
+  e public.waitlist_entries%rowtype;
+  o public.waitlist_offers%rowtype;
+begin
+  select * into e from public.waitlist_entries where token = p_token for update;
+  if not found then return jsonb_build_object('ok', false, 'reason', 'not_found'); end if;
+  if e.status in ('cancelled','expired') then return jsonb_build_object('ok', true, 'already', true); end if;
+
+  update public.waitlist_entries set status = 'cancelled', updated_at = now() where id = e.id;
+  -- Any live offer of theirs is withdrawn, and the slot goes straight back to the pool so the
+  -- next person on the list gets it instead of waiting out a claim window nobody is using.
+  update public.waitlist_offers set status = 'cancelled', closed_at = now()
+   where entry_id = e.id and status = 'offered';
+  for o in select * from public.waitlist_offers
+            where entry_id = e.id and status = 'cancelled' and closed_at > now() - interval '1 minute' loop
+    if o.hold_booking_id is not null then
+      delete from public.bookings where id = o.hold_booking_id and status = 'held';
+    end if;
+    perform public.waitlist_note_free_slot(o.booking_date, o.bay_id, o.start_min, o.end_min, 'entry_left');
+  end loop;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- 9) ROW LEVEL SECURITY. -----------------------------------------------------------------------
+-- The server reaches all of this with SUPABASE_SERVICE_ROLE_KEY, which bypasses RLS entirely, so
+-- these policies exist for the manager portal alone (demo/admin.html signs in first and holds an
+-- `authenticated` JWT). Reads are narrowed to `authenticated`, per migration 0018 — entries and
+-- offers hold customer names, emails and phone numbers.
+--
+-- The anon role gets nothing. That is load-bearing twice over: an anon SELECT on waitlist_offers
+-- would hand every visitor the claim tokens for every live offer, and an anon SELECT on
+-- waitlist_entries is a customer contact list.
+alter table public.waitlist_entries enable row level security;
+drop policy if exists waitlist_entries_read on public.waitlist_entries;
+create policy waitlist_entries_read on public.waitlist_entries for select to authenticated using (true);
+drop policy if exists waitlist_entries_write on public.waitlist_entries;
+create policy waitlist_entries_write on public.waitlist_entries for all to authenticated using (true) with check (true);
+
+alter table public.waitlist_offers enable row level security;
+drop policy if exists waitlist_offers_read on public.waitlist_offers;
+create policy waitlist_offers_read on public.waitlist_offers for select to authenticated using (true);
+drop policy if exists waitlist_offers_write on public.waitlist_offers;
+create policy waitlist_offers_write on public.waitlist_offers for all to authenticated using (true) with check (true);
+
+-- The wakeup queue is server bookkeeping, not something the portal renders: RLS on with NO
+-- policies denies anon and authenticated everything, the same treatment stripe_events (0019) and
+-- promo_attempts (0021) get.
+alter table public.waitlist_wakeups enable row level security;
+drop policy if exists waitlist_wakeups_write on public.waitlist_wakeups;
+drop policy if exists waitlist_wakeups_read on public.waitlist_wakeups;
+
+-- 10) SCHEDULING — pg_cron + pg_net. -----------------------------------------------------------
+--
+-- Vercel Hobby cron runs once a day. A claim window is fifteen minutes. Those two facts cannot be
+-- reconciled, so the clock lives in Postgres instead: pg_cron ticks every minute and pg_net posts
+-- to the app, which runs the sweep and sends the messages. Both extensions ship with Supabase but
+-- are off until enabled — Dashboard → Database → Extensions, or the two statements below.
+do $$
+begin
+  begin
+    create extension if not exists pg_cron;
+  exception when others then
+    raise notice 'waitlist: could not create extension pg_cron (%). Enable it in Supabase → Database → Extensions.', sqlerrm;
+  end;
+  begin
+    create extension if not exists pg_net;
+  exception when others then
+    raise notice 'waitlist: could not create extension pg_net (%). Enable it in Supabase → Database → Extensions.', sqlerrm;
+  end;
+end $$;
+
+-- Schedule (or re-schedule) the sweep. Run it once with your deployment's URL and the value you
+-- put in WAITLIST_SWEEP_SECRET:
+--
+--   select public.waitlist_schedule_sweep(
+--     'https://<your-app>/api/waitlist?action=sweep', '<WAITLIST_SWEEP_SECRET>');
+--
+-- Every minute is the right cadence: the claim window is measured in minutes, the sweep is a
+-- no-op when the wakeup queue is empty, and it holds an advisory lock so a slow run simply makes
+-- the next one return immediately.
+create or replace function public.waitlist_schedule_sweep(
+  p_url text, p_secret text default null, p_schedule text default '* * * * *'
+) returns text language plpgsql as $$
+declare v_sql text; v_id bigint;
+begin
+  if to_regclass('cron.job') is null then
+    return 'pg_cron is not installed — enable it in Supabase → Database → Extensions, then run this again.';
+  end if;
+  if to_regproc('net.http_post') is null then
+    return 'pg_net is not installed — enable it in Supabase → Database → Extensions, then run this again.';
+  end if;
+
+  perform cron.unschedule(jobid) from cron.job where jobname = 'waitlist-sweep';
+
+  v_sql := format(
+    'select net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb, timeout_milliseconds := 8000)',
+    p_url,
+    jsonb_build_object('Content-Type', 'application/json',
+                       'x-waitlist-secret', coalesce(p_secret, ''))::text,
+    '{}');
+  select cron.schedule('waitlist-sweep', p_schedule, v_sql) into v_id;
+  return format('waitlist-sweep scheduled as job %s (%s) → %s', v_id, p_schedule, p_url);
+end $$;
+
+-- Stop it again (holidays, a broken deployment, or before rotating the secret):
+--   select public.waitlist_unschedule_sweep();
+create or replace function public.waitlist_unschedule_sweep()
+returns text language plpgsql as $$
+begin
+  if to_regclass('cron.job') is null then return 'pg_cron is not installed.'; end if;
+  perform cron.unschedule(jobid) from cron.job where jobname = 'waitlist-sweep';
+  return 'waitlist-sweep unscheduled.';
+end $$;
+-- ============================================================================
+-- FUNCTION GRANTS — keep the internals off the anon key.
+-- ============================================================================
+-- Postgres grants EXECUTE on a new function to PUBLIC by default, and /api/config hands the anon
+-- key to every visitor of the site. That made waitlist_note_free_slot() callable by anyone, with
+-- no auth and no rate limit: an anonymous caller could flood waitlist_wakeups and drive the sweep.
+-- Nothing in the application calls it directly -- every caller is a trigger or another function
+-- in this file, which run as their definer -- so revoking it from anon costs nothing.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'public.waitlist_note_free_slot(date,text,int,int,text)',
+    'public.waitlist_process(integer)',
+    'public.waitlist_sweep_expired()'
+  ] loop
+    if to_regprocedure(fn) is null then continue; end if;
+    execute format('revoke all on function %s from public', fn);
+    execute format('revoke all on function %s from anon', fn);
+    execute format('grant execute on function %s to service_role', fn);
+    execute format('grant execute on function %s to authenticated', fn);
+  end loop;
+exception when others then
+  raise notice '0022: could not tighten waitlist function grants (%).', sqlerrm;
+end $$;
+
+
+-- ==========================================================================
+-- MIGRATION 0023 - GROUP RECURRING BOOKINGS
+-- ==========================================================================
+
+-- Invictus Golf — group + recurring bookings, and the minimum refunds ledger they need.
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- WHY ONE MIGRATION FOR TWO FEATURES
+-- The build plan noticed that `booking_groups.series_id` (proposed by the group-booking research)
+-- and `booking_series` (proposed by the recurring-booking research) are the same concept invented
+-- twice. They are: a GROUP is "N bays at one moment", a SERIES is "that moment, repeated". Modelled
+-- separately you get two ways to write several booking rows at once, two conflict stories and two
+-- cancellation stories. Modelled together there is one table for the definition, one table per
+-- occurrence, and — the part that actually matters — ONE function that writes booking rows in bulk.
+--
+--   booking_series   the definition: which bays, what time, how often, until when.
+--                    A one-off group is a series with freq = 'once'. No special case.
+--   booking_groups   one occurrence of that definition. Always exists, even for a single bay,
+--                    so "cancel the Tuesday" and "refund two of the six bays" have one shape.
+--   bookings         unchanged, plus group_id / series_id so the tee sheet can draw the rail.
+--
+-- THE ATOMICITY RULE, which is the whole point of book_group() below.
+-- `bookings_no_overlap` is a gist EXCLUDE constraint: overlapping non-cancelled rows in the same
+-- bay on the same day are physically impossible. So reserving six bays is six inserts any one of
+-- which can fail, and a partial failure would leave a customer holding four bays of a six-bay
+-- event and no record of what went wrong. The research reports proposed relying on PostgREST
+-- sending `insert([...N rows])` as a single statement. Measured against this database that is
+-- true today — a three-row insert whose third row collided left the other two out — but it is an
+-- implementation detail of PostgREST's request handling, not a contract it publishes, and the
+-- same reports reached the opposite conclusion (use plpgsql) for confirmation. So: every multi-row
+-- booking write in this system goes through public.book_group(), which
+--   (a) takes its rollback from PL/pgSQL's implicit savepoint — the whole function's work is
+--       undone by the BEGIN … EXCEPTION block, so a conflict on the last bay leaves NO rows, and
+--   (b) inserts IN bay_id ORDER, so two concurrent groups overlapping on two bays always take
+--       their locks in the same sequence and deadlock-by-lock-ordering is structural rather than
+--       a convention someone has to remember at every call site.
+--
+-- MATERIALISE-AHEAD, NOT GENERATE-ON-READ — see the note above booking_series.materialised_through.
+
+-- 1) BOOKING_SERIES — the definition. -----------------------------------------------------
+--
+-- MATERIALISE-AHEAD. Every occurrence of a series is written into `bookings` up to a rolling
+-- horizon, rather than being computed when someone looks at a calendar. Three reasons, in order
+-- of how much they cost to get wrong:
+--
+--   1. The exclusion constraint is this system's only source of truth about whether a bay is free,
+--      and a virtual occurrence cannot participate in it. A league that exists only as a rule in
+--      this table would be sold out from under itself by the next walk-in, and nobody would find
+--      out until somebody arrived.
+--   2. Four separate readers already answer "is this slot busy?" from the `bookings` table —
+--      /api/availability, the manager tee sheet, waitlist_booking_freed() in 0022, and the cart
+--      hold path. Generate-on-read means teaching every one of them recurrence arithmetic: a
+--      second availability implementation, which is exactly the fork this codebase keeps avoiding.
+--   3. Pricing. quoteBooking() in lib/booking.js is the single pricing waterfall and it lives in
+--      JavaScript. An occurrence that materialises inside the database would have to be priced
+--      inside the database, forking it. Instead the horizon job runs in the API: it asks
+--      booking_series_occurrences() which dates are still owed, prices each one through
+--      quoteBooking(), and calls book_group() per occurrence.
+--
+-- The cost is a horizon to maintain, which is one scheduled call — and the plan already adopts
+-- pg_cron globally for the waitlist sweep and hold cleanup, so the machinery is there.
+create table if not exists public.booking_series (
+  id                uuid primary key default gen_random_uuid(),
+  label             text,                                   -- "Thursday night league", "Acme Corp"
+  freq              text not null default 'once'
+                      check (freq in ('once','daily','weekly','monthly','annual')),
+  interval_n        smallint not null default 1 check (interval_n between 1 and 52),
+  start_date        date not null,
+  until_date        date,                                   -- inclusive; null = bounded by max_occurrences
+  max_occurrences   smallint check (max_occurrences is null or max_occurrences between 1 and 520),
+  bay_ids           text[] not null check (array_length(bay_ids, 1) >= 1),
+  start_min         smallint not null check (start_min >= 0 and start_min < 1440),
+  end_min           smallint not null check (end_min > 0 and end_min <= 1440),
+  players           smallint,
+  customer_id       uuid references public.customers(id) on delete set null,
+  customer_name     text,
+  customer_email    text,
+  customer_phone    text,
+  status_label      text,                                   -- workflow status stamped on each row
+  source            text not null default 'manager',        -- online | manager
+  note              text,
+  status            text not null default 'active'
+                      check (status in ('active','ended','cancelled')),
+  -- How the money is collected. 'per_occurrence' is the honest default and the only one the API
+  -- implements today: each occurrence carries its own price and is settled on its own. 'prepaid'
+  -- (one payment for a whole season) is recorded here but deliberately NOT implemented — the build
+  -- plan flags that it recreates the partial-refund problem the same research used to reject
+  -- Stripe subscriptions, and that is a business decision, not an implementation detail.
+  pay_mode          text not null default 'per_occurrence'
+                      check (pay_mode in ('per_occurrence','prepaid','invoice')),
+  -- The horizon: occurrences are written up to and including this date. Advanced by the API's
+  -- materialise pass; null means nothing has been written yet.
+  materialised_through date,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  constraint booking_series_times check (end_min > start_min),
+  constraint booking_series_bounded check (freq = 'once' or until_date is not null or max_occurrences is not null)
+);
+create index if not exists booking_series_open on public.booking_series (status, materialised_through)
+  where status = 'active';
+
+-- 2) BOOKING_GROUPS — one occurrence. -----------------------------------------------------
+--
+-- TWO DATES, ON PURPOSE. `occurrence_date` is which slot of the recurrence this row IS — its
+-- identity inside the series, unique per series, and it never changes. `booking_date` is where the
+-- bookings actually sit. They are equal until somebody moves one week's league night to the Friday,
+-- and keeping them apart is what stops the next horizon pass from cheerfully re-creating the
+-- Thursday it was moved off. Same trick for `status = 'cancelled'`: the row stays, so the date
+-- stays claimed, so a cancelled occurrence is never silently resurrected.
+create table if not exists public.booking_groups (
+  id                    uuid primary key default gen_random_uuid(),
+  series_id             uuid not null references public.booking_series(id) on delete cascade,
+  occurrence_date       date not null,                      -- recurrence identity — never moves
+  seq                   integer not null default 1,         -- 1-based occurrence number
+  booking_date          date not null,                      -- where the rows actually are
+  start_min             smallint not null,
+  end_min               smallint not null,
+  status                text not null default 'confirmed'
+                          check (status in ('confirmed','held','partial','cancelled')),
+  bay_count             smallint not null default 0,
+  players               smallint,
+  list_price_cents      integer not null default 0,         -- before any discount
+  amount_cents          integer not null default 0,         -- what this occurrence was charged
+  refunded_cents        integer not null default 0,
+  stripe_payment_intent text,
+  note                  text,
+  moved_at              timestamptz,
+  created_at            timestamptz not null default now(),
+  cancelled_at          timestamptz
+);
+create unique index if not exists booking_groups_occurrence
+  on public.booking_groups (series_id, occurrence_date);
+create index if not exists booking_groups_date on public.booking_groups (booking_date);
+
+-- 3) BOOKING_SERIES_EXCEPTIONS — the "never silently drop an occurrence" table. ------------
+--
+-- A recurrence that lands on an already-booked bay is NOT dropped and NOT quietly moved. It is
+-- recorded here with kind = 'skipped' and a reason, and the date is thereafter treated as spoken
+-- for so the next horizon pass does not retry it behind the operator's back. The manager portal
+-- reads this table to show "3 of 12 Thursdays could not be booked — here is which bay was taken".
+--
+-- kind:  skipped   the occurrence could not be created (reason says why: conflict, closed, past)
+--        cancelled the customer or the venue called this one off (the group row carries the money)
+--        moved     this occurrence sits somewhere other than its recurrence date
+create table if not exists public.booking_series_exceptions (
+  id              uuid primary key default gen_random_uuid(),
+  series_id       uuid not null references public.booking_series(id) on delete cascade,
+  occurrence_date date not null,
+  kind            text not null check (kind in ('skipped','cancelled','moved')),
+  reason          text,                                     -- conflict | closed | past | customer | manager
+  detail          jsonb not null default '{}'::jsonb,       -- e.g. { "bays": ["B3"], "conflictIds": [...] }
+  created_at      timestamptz not null default now()
+);
+create unique index if not exists booking_series_exceptions_uniq
+  on public.booking_series_exceptions (series_id, occurrence_date);
+
+-- 4) BOOKINGS — the two links, and the refund counter. ------------------------------------
+alter table public.bookings add column if not exists group_id  uuid references public.booking_groups(id) on delete set null;
+alter table public.bookings add column if not exists series_id uuid references public.booking_series(id) on delete set null;
+alter table public.bookings add column if not exists refunded_cents integer not null default 0;
+create index if not exists bookings_group  on public.bookings (group_id)  where group_id  is not null;
+create index if not exists bookings_series on public.bookings (series_id) where series_id is not null;
+
+-- 5) REFUNDS — the MINIMUM ledger, and a loud flag about what it is not. -------------------
+--
+-- ⚠ READ THIS BEFORE TRUSTING THIS TABLE. Partial cancellation of a group ("two of the six bays
+-- fell through") is meaningless without somewhere to record money going back, and the build plan
+-- sequences refunds as its own deliverable (#6) that has not been built. This is the minimum that
+-- makes group cancellation honest, and NOTHING MORE:
+--
+--   · It RECORDS an obligation. It does NOT move money. No Stripe call is made from here or from
+--     api/booking-series.js. A row with method = 'stripe', status = 'pending' means "somebody owes
+--     this customer this much and nobody has paid it yet".
+--   · .env.example steers the operator toward a restricted Stripe key scoped to Checkout Sessions,
+--     which will reject POST /v1/refunds with a permissions error that reads exactly like a code
+--     bug. The refunds deliverable has to grant `Refunds: write` + `Charges: read` first.
+--   · There is no reversal path for stored value either: points spent on a cancelled occurrence
+--     are not returned by this table, and a gift card debited for it is not credited back. Those
+--     need adjust_points() / adjust_gift_card() calls that belong with the real feature.
+--
+-- What it does give you: an idempotent, auditable list of what is owed, and refunded_cents kept in
+-- step on both the booking and the group so nothing can be refunded twice or beyond what was paid.
+create table if not exists public.refunds (
+  id                    uuid primary key default gen_random_uuid(),
+  booking_id            uuid references public.bookings(id) on delete set null,
+  group_id              uuid references public.booking_groups(id) on delete set null,
+  amount_cents          integer not null check (amount_cents > 0),
+  currency              text not null default 'cad',
+  reason                text,
+  method                text not null default 'stripe'
+                          check (method in ('stripe','gift_card','points','hours','manual','none')),
+  status                text not null default 'pending'
+                          check (status in ('pending','succeeded','failed','cancelled')),
+  stripe_payment_intent text,
+  stripe_refund_id      text,
+  ref                   text,                               -- idempotency key from the caller
+  note                  text,
+  created_by            text,
+  created_at            timestamptz not null default now(),
+  settled_at            timestamptz
+);
+-- Idempotency is per booking, not global — the gift-card research was right that a global (ref)
+-- index blocks a second row legitimately keyed to the same PaymentIntent, and a six-bay group
+-- refunded bay by bay is exactly that case.
+create unique index if not exists refunds_booking_ref on public.refunds (booking_id, ref)
+  where ref is not null and booking_id is not null;
+-- A refund attached to the occurrence rather than to one of its bays still has to be idempotent.
+create unique index if not exists refunds_group_ref on public.refunds (group_id, ref)
+  where ref is not null and booking_id is null and group_id is not null;
+create index if not exists refunds_group on public.refunds (group_id) where group_id is not null;
+
+-- 6) RLS — same class as bookings: manager-only, nothing for anon. -------------------------
+alter table public.booking_series            enable row level security;
+alter table public.booking_groups            enable row level security;
+alter table public.booking_series_exceptions enable row level security;
+alter table public.refunds                   enable row level security;
+
+drop policy if exists booking_series_read  on public.booking_series;
+create policy booking_series_read  on public.booking_series  for select to authenticated using (true);
+drop policy if exists booking_series_write on public.booking_series;
+create policy booking_series_write on public.booking_series  for all to authenticated using (true) with check (true);
+
+drop policy if exists booking_groups_read  on public.booking_groups;
+create policy booking_groups_read  on public.booking_groups  for select to authenticated using (true);
+drop policy if exists booking_groups_write on public.booking_groups;
+create policy booking_groups_write on public.booking_groups  for all to authenticated using (true) with check (true);
+
+drop policy if exists booking_series_exceptions_read  on public.booking_series_exceptions;
+create policy booking_series_exceptions_read  on public.booking_series_exceptions for select to authenticated using (true);
+drop policy if exists booking_series_exceptions_write on public.booking_series_exceptions;
+create policy booking_series_exceptions_write on public.booking_series_exceptions for all to authenticated using (true) with check (true);
+
+drop policy if exists refunds_read  on public.refunds;
+create policy refunds_read  on public.refunds for select to authenticated using (true);
+drop policy if exists refunds_write on public.refunds;
+create policy refunds_write on public.refunds for all to authenticated using (true) with check (true);
+
+-- ============================================================================
+-- FUNCTIONS
+-- ============================================================================
+
+-- 7) group_conflicts — read-only "which of these bays is already taken?". ------------------
+--
+-- book_group() below is safe without this: the exclusion constraint catches everything. But the
+-- constraint reports the FIRST collision and then the transaction is over, so an operator holding
+-- a six-bay corporate booking would be told about one bay at a time, six round trips. This answers
+-- the whole question at once. It is advisory only — never the guard.
+create or replace function public.group_conflicts(
+  p_date date, p_bays text[], p_start integer, p_end integer, p_ignore_group uuid default null)
+returns table (bay_id text, booking_id uuid, start_min integer, end_min integer, status text)
+language sql stable as $$
+  select b.bay_id, b.id, b.start_min::integer, b.end_min::integer, b.status
+    from public.bookings b
+   where b.booking_date = p_date
+     and b.bay_id = any (p_bays)
+     and b.status <> 'cancelled'
+     and b.start_min < p_end and b.end_min > p_start
+     and (p_ignore_group is null or b.group_id is distinct from p_ignore_group)
+     and (b.status <> 'held' or (b.expires_at is not null and b.expires_at > now()))
+   order by b.bay_id;
+$$;
+
+-- 8) book_group — THE ONLY MULTI-ROW BOOKING WRITE IN THE SYSTEM. -------------------------
+--
+-- Writes one booking_groups row plus one bookings row per bay, all of it or none of it.
+--
+-- HOW THE ALL-OR-NOTHING WORKS, precisely, because it is easy to believe and hard to see:
+-- a PL/pgSQL block with an EXCEPTION clause is wrapped in an implicit subtransaction. When the
+-- exclusion constraint fires on the fifth bay, control jumps to the handler and everything the
+-- block did — the group row and the four bookings already inserted — is rolled back to the
+-- savepoint taken when the block was entered. The handler then RETURNS a value instead of
+-- re-raising, so the caller gets `{"conflict": true, "bay": "B5"}` and a clean database rather
+-- than an error and a mess. Verify it, do not take my word for it: scripts/verify-group-series.mjs
+-- forces a collision on exactly one bay of five and asserts the bookings table is untouched.
+--
+-- THE ORDER BY IS LOAD-BEARING. Rows are inserted in bay_id order, always. Two operators booking
+-- overlapping sets of bays therefore acquire their locks in the same sequence and one waits for
+-- the other instead of the pair deadlocking. Because every bulk write in the system comes through
+-- this one function, that ordering is a property of the schema, not a rule call sites must follow.
+--
+-- p_group jsonb: series_id, occurrence_date, booking_date, seq, status, players, list_price_cents,
+--                amount_cents, stripe_payment_intent, note
+-- p_rows  jsonb: [ { bay_id, start_min, end_min, status, status_label, customer_name,
+--                    customer_email, customer_phone, amount_cents, list_price_cents,
+--                    stripe_payment_intent, source, note, expires_at }, … ]
+--                Prices come in already computed — quoteBooking() in lib/booking.js is the one
+--                pricing waterfall and it does not live here.
+-- returns jsonb: { ok, groupId, bays } | { conflict, bay } | { error }
+create or replace function public.book_group(p_group jsonb, p_rows jsonb)
+returns jsonb language plpgsql as $$
+declare
+  g_id  uuid;
+  r     record;
+  v_bay text;
+  n     integer := 0;
+  g_date date := (p_group->>'booking_date')::date;
+  o_date date := coalesce((p_group->>'occurrence_date')::date, (p_group->>'booking_date')::date);
+begin
+  if p_rows is null or jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then
+    return jsonb_build_object('error', 'no_rows');
+  end if;
+
+  insert into public.booking_groups (
+      series_id, occurrence_date, seq, booking_date, start_min, end_min, status, bay_count,
+      players, list_price_cents, amount_cents, stripe_payment_intent, note)
+    values (
+      (p_group->>'series_id')::uuid, o_date,
+      coalesce(nullif(p_group->>'seq', '')::integer, 1), g_date,
+      (p_group->>'start_min')::smallint, (p_group->>'end_min')::smallint,
+      coalesce(p_group->>'status', 'confirmed'), jsonb_array_length(p_rows),
+      nullif(p_group->>'players', '')::smallint,
+      coalesce(nullif(p_group->>'list_price_cents', '')::integer, 0),
+      coalesce(nullif(p_group->>'amount_cents', '')::integer, 0),
+      nullif(p_group->>'stripe_payment_intent', ''), nullif(p_group->>'note', ''))
+    returning id into g_id;
+
+  -- ORDER BY bay_id: the deadlock ordering, structurally.
+  for r in
+    select e.value as v from jsonb_array_elements(p_rows) e order by e.value->>'bay_id'
+  loop
+    v_bay := r.v->>'bay_id';
+    insert into public.bookings (
+        bay_id, booking_date, start_min, end_min, status, status_label,
+        customer_name, customer_email, customer_phone,
+        amount_cents, stripe_payment_intent, source, note, expires_at, group_id, series_id)
+      values (
+        v_bay, g_date,
+        (r.v->>'start_min')::smallint, (r.v->>'end_min')::smallint,
+        coalesce(r.v->>'status', 'confirmed'), nullif(r.v->>'status_label', ''),
+        nullif(r.v->>'customer_name', ''), nullif(r.v->>'customer_email', ''), nullif(r.v->>'customer_phone', ''),
+        nullif(r.v->>'amount_cents', '')::integer, nullif(r.v->>'stripe_payment_intent', ''),
+        coalesce(r.v->>'source', 'manager'), nullif(r.v->>'note', ''),
+        nullif(r.v->>'expires_at', '')::timestamptz,
+        g_id, (p_group->>'series_id')::uuid);
+    n := n + 1;
+  end loop;
+
+  return jsonb_build_object('ok', true, 'groupId', g_id, 'bays', n,
+    'occurrenceDate', o_date, 'bookingDate', g_date);
+exception
+  -- 23P01. Everything above is undone; report which bay lost the race.
+  when exclusion_violation then
+    return jsonb_build_object('conflict', true, 'bay', v_bay, 'bookingDate', g_date,
+      'occurrenceDate', o_date, 'written', 0);
+  -- 23505 on booking_groups_occurrence: this occurrence already exists. Also fully rolled back.
+  when unique_violation then
+    return jsonb_build_object('error', 'occurrence_exists', 'occurrenceDate', o_date);
+end $$;
+
+-- 9) series_dates + booking_series_occurrences — the recurrence arithmetic, once. -----------
+--
+-- series_dates() takes the recurrence PARAMETERS rather than a series id, so the "what would this
+-- league look like?" preview and the real materialisation pass share one implementation instead of
+-- the API growing a JavaScript copy of the same arithmetic. There is exactly one place in this
+-- system that turns "every second Thursday until March" into a list of dates, and this is it.
+--
+-- MONTH-END. Dates are computed from p_start each time (p_start + n months), never by stepping the
+-- previous one, so a monthly series never drifts. Postgres clamps 31 Jan + 1 month to 28 Feb, which
+-- is the behaviour we want and the opposite of the JS Date.UTC bug fixed in commit 20a7de8.
+create or replace function public.series_dates(
+  p_freq text, p_interval integer, p_start date,
+  p_until date default null, p_max integer default null, p_through date default null)
+returns table (occurrence_date date, seq integer)
+language sql immutable as $$
+  with cfg as (
+    select coalesce(p_freq, 'once') as freq,
+           greatest(coalesce(p_interval, 1), 1) as step,
+           p_start as d0,
+           least(coalesce(p_through, p_until, p_start), coalesce(p_until, 'infinity'::date)) as horizon
+  ),
+  n as (select generate_series(0, least(coalesce(p_max, 520), 520) - 1) as i)
+  select x.dt, x.k from (
+    select (n.i + 1)::integer as k,
+      case cfg.freq
+        when 'once'    then cfg.d0
+        when 'daily'   then cfg.d0 + (n.i * cfg.step)
+        when 'weekly'  then cfg.d0 + (n.i * cfg.step * 7)
+        when 'monthly' then (cfg.d0 + make_interval(months => n.i * cfg.step))::date
+        when 'annual'  then (cfg.d0 + make_interval(years  => n.i * cfg.step))::date
+      end as dt,
+      cfg.horizon as horizon
+      from cfg, n
+     where cfg.freq <> 'once' or n.i = 0
+  ) x
+   where x.dt is not null and x.dt <= x.horizon
+   order by x.k;
+$$;
+
+-- What the recurrence owes, and what became of each date.
+--
+-- Read-only. The API asks it which dates are still 'pending', prices those through quoteBooking(),
+-- and calls book_group() for each. That split is what keeps recurrence arithmetic in SQL and
+-- pricing in JavaScript without either one forking the other.
+--
+-- state: pending   nothing has happened to this date yet — it is owed
+--        booked    a live group exists for it
+--        cancelled a group exists and was called off (the date stays claimed on purpose)
+--        skipped   could not be booked; booking_series_exceptions.reason says why
+--        moved     it exists, somewhere other than its recurrence date
+create or replace function public.booking_series_occurrences(p_series uuid, p_through date default null)
+returns table (occurrence_date date, seq integer, state text, detail jsonb)
+language sql stable as $$
+  select d.occurrence_date, d.seq,
+    coalesce(
+      case when g.id is null then null
+           when g.status = 'cancelled' then 'cancelled'
+           when g.booking_date <> g.occurrence_date then 'moved'
+           else 'booked' end,
+      x.kind,
+      'pending'),
+    coalesce(
+      case when g.id is null then null else jsonb_build_object(
+        'groupId', g.id, 'status', g.status, 'bookingDate', g.booking_date,
+        'startMin', g.start_min, 'endMin', g.end_min, 'bays', g.bay_count) end,
+      case when x.id is null then null else jsonb_build_object(
+        'reason', x.reason, 'detail', x.detail) end,
+      '{}'::jsonb)
+    from public.booking_series s
+    cross join lateral public.series_dates(
+      s.freq, s.interval_n, s.start_date, s.until_date, s.max_occurrences,
+      coalesce(p_through, s.until_date, s.materialised_through, s.start_date)) d
+    left join public.booking_groups g
+      on g.series_id = s.id and g.occurrence_date = d.occurrence_date
+    left join public.booking_series_exceptions x
+      on x.series_id = s.id and x.occurrence_date = d.occurrence_date
+   where s.id = p_series
+   order by d.seq;
+$$;
+
+-- 10) record_series_exception — "this date did not happen, and here is why". ---------------
+-- Upsert, because a date can be skipped, retried and skipped again for a different reason.
+create or replace function public.record_series_exception(
+  p_series uuid, p_date date, p_kind text, p_reason text default null, p_detail jsonb default '{}'::jsonb)
+returns uuid language plpgsql as $$
+declare x_id uuid;
+begin
+  insert into public.booking_series_exceptions (series_id, occurrence_date, kind, reason, detail)
+    values (p_series, p_date, p_kind, p_reason, coalesce(p_detail, '{}'::jsonb))
+  on conflict (series_id, occurrence_date) do update
+    set kind = excluded.kind, reason = excluded.reason, detail = excluded.detail, created_at = now()
+  returning id into x_id;
+  return x_id;
+end $$;
+
+-- 11) cancel_group — full or PARTIAL cancellation of one occurrence. -----------------------
+--
+-- p_bays null cancels the whole occurrence; a subset cancels just those bays and leaves the rest
+-- of the event standing. Rows are locked in bay_id order for the same reason book_group inserts in
+-- that order. Returns what was cancelled AND what each row was worth, because the caller cannot
+-- work out what to refund without it — this function deliberately does not decide that.
+--
+-- Group status afterwards: 'cancelled' when nothing is left, 'partial' when some bays survive.
+-- The group row is never deleted, so the occurrence date stays claimed against re-materialisation.
+create or replace function public.cancel_group(
+  p_group uuid, p_bays text[] default null, p_reason text default null)
+returns jsonb language plpgsql as $$
+declare
+  g       record;
+  killed  jsonb := '[]'::jsonb;
+  b       record;
+  live    integer;
+  refundable integer := 0;
+begin
+  select * into g from public.booking_groups where id = p_group for update;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+
+  for b in
+    select id, bay_id, amount_cents, refunded_cents, status
+      from public.bookings
+     where group_id = p_group and status <> 'cancelled'
+       and (p_bays is null or bay_id = any (p_bays))
+     order by bay_id
+     for update
+  loop
+    update public.bookings
+       set status = 'cancelled', cancelled_at = now(), expires_at = null
+     where id = b.id;
+    refundable := refundable + greatest(0, coalesce(b.amount_cents, 0) - coalesce(b.refunded_cents, 0));
+    killed := killed || jsonb_build_object(
+      'id', b.id, 'bayId', b.bay_id,
+      'amountCents', coalesce(b.amount_cents, 0),
+      'refundedCents', coalesce(b.refunded_cents, 0));
+  end loop;
+
+  select count(*) into live from public.bookings where group_id = p_group and status <> 'cancelled';
+
+  update public.booking_groups
+     set status = case when live = 0 then 'cancelled'
+                       when live < bay_count then 'partial'
+                       else status end,
+         cancelled_at = case when live = 0 then now() else cancelled_at end
+   where id = p_group;
+
+  if live = 0 and g.series_id is not null then
+    perform public.record_series_exception(g.series_id, g.occurrence_date, 'cancelled',
+      coalesce(p_reason, 'manager'), jsonb_build_object('groupId', p_group));
+  end if;
+
+  return jsonb_build_object('ok', true, 'groupId', p_group, 'cancelled', killed,
+    'cancelledCount', jsonb_array_length(killed), 'remaining', live,
+    'refundableCents', refundable,
+    'groupStatus', (select status from public.booking_groups where id = p_group));
+end $$;
+
+-- 12) move_group — put one occurrence somewhere else without breaking the series. ----------
+--
+-- Same all-or-nothing shape as book_group and for the same reason: a six-bay event that moved four
+-- bays to Friday and left two on Thursday is worse than one that did not move. occurrence_date is
+-- untouched — that is what keeps the recurrence's memory of this week intact — and the move is
+-- written to booking_series_exceptions so the horizon pass can see it happened.
+--
+-- p_bay_map jsonb: optional { "B1": "B4", … } to land on different bays. Unlisted bays stay.
+create or replace function public.move_group(
+  p_group uuid, p_date date default null, p_start integer default null,
+  p_end integer default null, p_bay_map jsonb default null, p_reason text default null)
+returns jsonb language plpgsql as $$
+declare
+  g      record;
+  b      record;
+  v_bay  text;
+  new_bay text;
+  n_date date; n_start integer; n_end integer; n integer := 0;
+begin
+  select * into g from public.booking_groups where id = p_group for update;
+  if not found then return jsonb_build_object('error', 'not_found'); end if;
+  if g.status = 'cancelled' then return jsonb_build_object('error', 'cancelled'); end if;
+
+  n_date  := coalesce(p_date, g.booking_date);
+  n_start := coalesce(p_start, g.start_min);
+  n_end   := coalesce(p_end, g.end_min);
+  if n_end <= n_start then return jsonb_build_object('error', 'bad_times'); end if;
+
+  for b in
+    select id, bay_id from public.bookings
+     where group_id = p_group and status <> 'cancelled'
+     order by bay_id
+  loop
+    v_bay := b.bay_id;
+    new_bay := coalesce(nullif(p_bay_map->>b.bay_id, ''), b.bay_id);
+    update public.bookings
+       set bay_id = new_bay, booking_date = n_date, start_min = n_start::smallint, end_min = n_end::smallint
+     where id = b.id;
+    n := n + 1;
+  end loop;
+
+  update public.booking_groups
+     set booking_date = n_date, start_min = n_start::smallint, end_min = n_end::smallint,
+         moved_at = case when n_date <> occurrence_date or n_start <> start_min or n_end <> end_min
+                         then now() else moved_at end
+   where id = p_group;
+
+  if g.series_id is not null then
+    perform public.record_series_exception(g.series_id, g.occurrence_date, 'moved',
+      coalesce(p_reason, 'manager'),
+      jsonb_build_object('groupId', p_group,
+        'from', jsonb_build_object('date', g.booking_date, 'startMin', g.start_min, 'endMin', g.end_min),
+        'to',   jsonb_build_object('date', n_date, 'startMin', n_start, 'endMin', n_end)));
+  end if;
+
+  return jsonb_build_object('ok', true, 'groupId', p_group, 'moved', n,
+    'bookingDate', n_date, 'startMin', n_start, 'endMin', n_end);
+exception
+  when exclusion_violation then
+    return jsonb_build_object('conflict', true, 'bay', v_bay, 'bookingDate', n_date);
+end $$;
+
+-- 13) record_refund — write the obligation down, once. -------------------------------------
+--
+-- Again: this MOVES NO MONEY (see section 5). It records what is owed, keeps refunded_cents in
+-- step on the booking and its group, and refuses to record more than was charged. Idempotent on
+-- (booking_id, ref) so a retried API call does not double-count.
+create or replace function public.record_refund(
+  p_booking uuid, p_group uuid, p_amount integer, p_reason text default null,
+  p_method text default 'stripe', p_ref text default null, p_note text default null,
+  p_by text default null)
+returns jsonb language plpgsql as $$
+declare
+  r_id     uuid;
+  paid     integer;
+  done     integer;
+  v_group  uuid := p_group;
+  v_pi     text;
+begin
+  if coalesce(p_amount, 0) <= 0 then return jsonb_build_object('error', 'bad_amount'); end if;
+
+  -- IDEMPOTENCY IS CHECKED FIRST, and the order matters. A retried call carries the same ref and
+  -- the same amount, and by then refunded_cents already includes it — so an over-refund guard
+  -- placed above this would answer a harmless retry with 'over_refund' and make a caller believe
+  -- something had gone wrong. Ask "have I already recorded this one?" before asking "is there room
+  -- for another?". (Caught in testing, by exactly that sequence.)
+  if p_ref is not null then
+    select r.id into r_id from public.refunds r
+     where r.ref = p_ref
+       and (p_booking is not null and r.booking_id = p_booking
+            or p_booking is null and r.booking_id is null and r.group_id = p_group)
+     limit 1;
+    if r_id is not null then
+      return jsonb_build_object('already', true, 'refundId', r_id, 'moneyMoved', false);
+    end if;
+  end if;
+
+  -- A refund can be attached to one booking (a bay of a group) or to the group as a whole.
+  -- Only the booking case has an amount to check against, so only it can be over-refunded.
+  if p_booking is not null then
+    select coalesce(b.amount_cents, 0), coalesce(b.refunded_cents, 0), b.group_id, b.stripe_payment_intent
+      into paid, done, v_group, v_pi
+      from public.bookings b where b.id = p_booking for update;
+    if not found then return jsonb_build_object('error', 'booking_not_found'); end if;
+    v_group := coalesce(p_group, v_group);
+    if done + p_amount > paid then
+      return jsonb_build_object('error', 'over_refund',
+        'paidCents', paid, 'refundedCents', done, 'requested', p_amount);
+    end if;
+  end if;
+
+  insert into public.refunds (booking_id, group_id, amount_cents, reason, method, status,
+      stripe_payment_intent, ref, note, created_by)
+    values (p_booking, v_group, p_amount, p_reason,
+      coalesce(p_method, 'stripe'),
+      case when coalesce(p_method, 'stripe') = 'none' then 'cancelled' else 'pending' end,
+      v_pi, p_ref, p_note, p_by)
+    returning id into r_id;
+
+  if p_booking is not null then
+    update public.bookings set refunded_cents = coalesce(refunded_cents, 0) + p_amount where id = p_booking;
+  end if;
+  if v_group is not null then
+    update public.booking_groups set refunded_cents = coalesce(refunded_cents, 0) + p_amount
+     where id = v_group;
+  end if;
+
+  return jsonb_build_object('ok', true, 'refundId', r_id, 'amountCents', p_amount,
+    'moneyMoved', false);
+exception
+  -- Two callers retrying at once: the unique index is the real guard, the check above is the
+  -- fast path. Either way the answer is the same and refunded_cents is not touched twice.
+  when unique_violation then
+    select r.id into r_id from public.refunds r
+     where r.ref = p_ref
+       and (p_booking is not null and r.booking_id = p_booking
+            or p_booking is null and r.booking_id is null and r.group_id = p_group)
+     limit 1;
+    return jsonb_build_object('already', true, 'refundId', r_id, 'moneyMoved', false);
+end $$;
+
+
+-- ==========================================================================
+-- MIGRATION 0024 - STAFF ROLES
+-- ==========================================================================
+
+-- Invictus Golf — staff accounts, roles, and an audit log (migration 0024)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- ============================================================================
+-- WHAT IS WRONG TODAY
+-- ============================================================================
+-- Every write policy in this database says "for all to authenticated using (true)". There is one
+-- Supabase auth user, so that has been harmless. The moment a second person is given a login —
+-- a part-time counter employee, a bookkeeper — that person can issue refunds, rewrite the rate
+-- card, adjust anybody's points balance, and read the whole customer list. There is no smaller
+-- door. This migration adds three roles (admin / employee / read-only), one capability check
+-- behind every write policy, and a record of who changed what.
+--
+-- ============================================================================
+-- THE ONE THING THAT MUST NOT HAPPEN: LOCKING THE OWNER OUT
+-- ============================================================================
+-- There is exactly one live manager account. A role system that leaves it unable to sign in and
+-- fix the problem is worse than no role system at all. Four independent guarantees, in order of
+-- when they fire:
+--
+--   G1  SEED FROM auth.users. Section 5 copies EVERY existing auth user into public.staff as
+--       role 'admin'. Not a hardcoded email — whoever can already log in keeps exactly the
+--       access they have today. If there are zero users, it seeds zero rows and nothing breaks.
+--   G2  NAMED OWNER. On top of G1, the email in settings.staff->>'owner_email' (default
+--       john@gmail.com) is force-upserted to an active admin on every run. G1 uses
+--       "on conflict do nothing" so a later demotion sticks; the owner row is the deliberate
+--       exception, so re-running this file always restores the owner. If that account does not
+--       exist, the statement matches no rows and is a no-op — no error, no failure.
+--   G3  BOOTSTRAP FAIL-OPEN. public.staff_role() returns 'admin' to any signed-in user while the
+--       staff table contains NO active admin at all. So even if G1 and G2 both failed (the SQL
+--       editor role could not read auth.users, say), the next login is an admin and can fix it
+--       from the portal. It self-closes the instant one admin row exists. It cannot be reached
+--       by an anonymous visitor: no JWT subject, no role. And this database has no public
+--       sign-up — the only way to hold an authenticated JWT is a user the owner created.
+--   G4  LAST-ADMIN TRIGGER. Section 6 refuses any delete/demote/deactivate that would leave zero
+--       active admins, so the failsafe in G3 stays theoretical after day one.
+--
+-- Two more things that keep the lights on:
+--   · The server (server.js, api/*) uses SUPABASE_SERVICE_ROLE_KEY, which bypasses RLS entirely.
+--     Nothing here can break a customer booking, a webhook, or a cron sweep.
+--   · Section 8 is a function, public.rbac_apply(). Every policy this migration writes is
+--     (re)applied by calling it. Re-run it any time — after another migration, after a mistake.
+--
+-- ============================================================================
+-- DESIGN DECISION: A staff TABLE, NOT JWT app_metadata
+-- ============================================================================
+-- The two options were a role claim baked into the JWT (auth.jwt()->'app_metadata'->>'role',
+-- free to read inside a policy) versus a staff table RLS has to look up.
+--
+-- Cost of the table, measured honestly: a policy that calls public.staff_can('x') directly
+-- evaluates it PER ROW. Wrapped as (select public.staff_can('x')) — which is how every policy
+-- below is written — Postgres hoists it into an InitPlan and evaluates it ONCE PER STATEMENT.
+-- The function is STABLE and hits one primary-key lookup on staff plus at most one on
+-- role_permissions. Two index probes per query, on tables with a handful of rows that live in
+-- shared_buffers permanently. On a tee sheet that reads a few hundred booking rows, that is not
+-- measurable next to the round trip from the browser.
+--
+-- What the JWT would have cost instead:
+--   · Revocation is delayed by the token lifetime. Fire an employee at 2pm and their access
+--     card still opens the door for up to an hour, because their existing access token keeps
+--     asserting the old role until it refreshes. For a venue whose staff handle refunds and
+--     gift cards, "he can still issue himself a refund for the next 55 minutes" is not an
+--     acceptable failure mode, and it is the exact scenario this feature exists for.
+--   · Changing a role means calling the GoTrue admin API with the service-role key, so the
+--     portal cannot do it in SQL, cannot do it transactionally, and cannot do it in the same
+--     statement it writes the audit row.
+--   · app_metadata is not a foreign key. Nothing joins it, nothing lists it, and "who has
+--     access?" becomes a paginated admin-API call instead of `select * from staff`.
+--   · Two sources of truth appear the moment anything else needs the role.
+--
+-- So: the table is the source of truth, read through a stable SECURITY DEFINER helper, called
+-- from policies as a scalar subquery. If a slow query ever traces back to it, the mitigation is
+-- a mirrored claim as a CACHE with the table still authoritative — not a rewrite.
+--
+-- ============================================================================
+-- HOW A REQUEST IS CLASSIFIED
+-- ============================================================================
+--   request.jwt.claims unset      → not a PostgREST request at all: the SQL editor, psql,
+--                                   pg_cron, this migration. Trusted; RBAC does not apply.
+--   claims.role = 'service_role'  → the server's own key. Already bypasses RLS; treated as
+--                                   trusted by the guard triggers too, which RLS cannot cover.
+--   claims.role = 'authenticated' → a human in the portal. claims.sub is looked up in staff.
+--   claims.role = 'anon'          → the key /api/config hands every visitor. No subject, no
+--                                   role, no reads, no writes. Anywhere.
+
+-- ============================================================================
+-- 1) STAFF — who may sign in to the portal, and as what.
+-- ============================================================================
+-- One row per Supabase auth user. `email` and `name` are denormalised copies for display: the
+-- portal holds an `authenticated` JWT and cannot read auth.users, so without them the staff
+-- screen would be a list of UUIDs. api/* refreshes them through the admin API when it can.
+create table if not exists public.staff (
+  user_id    uuid primary key,
+  email      text,
+  name       text,
+  role       text not null default 'employee',
+  is_active  boolean not null default true,
+  note       text,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Added separately so the table still exists on a plain Postgres that has no GoTrue.
+do $$
+begin
+  if to_regclass('auth.users') is not null
+     and not exists (select 1 from pg_constraint
+                      where conname = 'staff_user_fk' and conrelid = 'public.staff'::regclass) then
+    alter table public.staff
+      add constraint staff_user_fk foreign key (user_id) references auth.users (id) on delete cascade;
+  end if;
+exception when others then
+  raise notice '0024: could not add the auth.users foreign key (%). The table works without it.', sqlerrm;
+end $$;
+
+alter table public.staff add column if not exists note text;
+alter table public.staff add column if not exists created_by uuid;
+alter table public.staff drop constraint if exists staff_role_check;
+alter table public.staff add constraint staff_role_check check (role in ('admin','employee','readonly'));
+
+create index if not exists staff_active_admins on public.staff (role) where is_active;
+-- Deliberately NOT unique. user_id is the identity; email is a display copy that can go
+-- stale (a deleted-and-recreated auth user is a new uuid with the same address), and a
+-- unique index there would turn that into a migration that fails instead of a duplicate row.
+create index if not exists staff_email_idx on public.staff (lower(email));
+
+-- ============================================================================
+-- 2) CAPABILITIES — the vocabulary the policies are written in.
+-- ============================================================================
+-- Six of them, chosen so that each one is a sentence the owner would actually say out loud, and
+-- so that no policy ever has to name a role. Adding a seventh table to the system means picking
+-- one of these, not inventing another.
+create table if not exists public.capabilities (
+  key         text primary key,
+  label       text not null,
+  description text,
+  sort        smallint not null default 0
+);
+
+insert into public.capabilities (key, label, description, sort) values
+  ('booking.write',  'Bookings',     'Create, move and cancel reservations, blocks, groups, leagues and the waiting list.', 0),
+  ('customer.write', 'Customers',    'Edit customer records, contact details and marketing consent.',                       1),
+  ('money.write',    'Money',        'Refunds, gift cards, promo codes and prepaid-hour balances, and the price on an existing booking.', 2),
+  ('config.write',   'Setup',        'Rates, opening hours, bays, membership plans, hour packages and status labels.',      3),
+  ('staff.manage',   'Staff',        'Add and remove staff logins and change what each role may do.',                       4),
+  ('audit.read',     'Activity log', 'Read the record of who changed what.',                                                5)
+on conflict (key) do update
+  set label = excluded.label, description = excluded.description, sort = excluded.sort;
+
+-- ============================================================================
+-- 3) ROLE PERMISSIONS — the editable part.
+-- ============================================================================
+-- ADMIN IS DELIBERATELY NOT IN THIS TABLE. public.staff_can() returns true for an admin without
+-- reading a row, so an admin can never lock themselves out by unticking a box, and a corrupted
+-- or truncated permissions table cannot brick the portal. The screen should render admin as
+-- "everything" and not let it be edited.
+--
+-- The defaults below are the venue's stated worry — refunds, price changes and customer data —
+-- turned into rows. An employee books, moves and cancels play and keeps customer records
+-- straight; they do not touch money or setup. If the owner decides counter staff should be able
+-- to sell a gift card, that is one boolean in this table, not a code change.
+create table if not exists public.role_permissions (
+  role       text not null,
+  capability text not null,
+  allowed    boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (role, capability)
+);
+alter table public.role_permissions drop constraint if exists role_permissions_role_check;
+alter table public.role_permissions add constraint role_permissions_role_check check (role in ('employee','readonly'));
+
+-- "do nothing", not "do update": once the owner has tuned these, re-running this file must not
+-- silently hand an employee back a permission they were deliberately denied.
+insert into public.role_permissions (role, capability, allowed) values
+  ('employee', 'booking.write',  true),
+  ('employee', 'customer.write', true),
+  ('employee', 'money.write',    false),
+  ('employee', 'config.write',   false),
+  ('employee', 'staff.manage',   false),
+  ('employee', 'audit.read',     false),
+  ('readonly', 'booking.write',  false),
+  ('readonly', 'customer.write', false),
+  ('readonly', 'money.write',    false),
+  ('readonly', 'config.write',   false),
+  ('readonly', 'staff.manage',   false),
+  ('readonly', 'audit.read',     false)
+on conflict (role, capability) do nothing;
+
+-- ============================================================================
+-- 4) IDENTITY HELPERS.
+-- ============================================================================
+-- Everything below reads request.jwt.claims directly rather than auth.uid()/auth.jwt(), for two
+-- reasons: it works on a database that has no GoTrue (setup.sql is run by hand elsewhere), and
+-- current_setting(..., true) returns null instead of raising when the GUC is absent.
+--
+-- CRITICAL: these must never look at current_user. Inside a SECURITY DEFINER function
+-- current_user is the function's owner, so a current_user test would hand every caller of
+-- adjust_points() the owner's privileges — the exact hole section 9's triggers exist to close.
+
+-- The subject of the calling JWT, or null when there isn't one.
+create or replace function public.rbac_uid() returns uuid
+language plpgsql stable as $fn$
+declare v text;
+begin
+  v := nullif(current_setting('request.jwt.claims', true), '');
+  if v is null then return null; end if;
+  return nullif(v::jsonb ->> 'sub', '')::uuid;
+exception when others then
+  return null;
+end $fn$;
+
+-- True for the server's own service-role key, and for a direct database connection (SQL editor,
+-- psql, pg_cron), which has no JWT at all and already has whatever the database granted it.
+-- PostgREST always sets request.jwt.claims — an anon request carries the anon key, which is
+-- itself a JWT with role='anon' — so "no claims" reliably means "not an API request".
+create or replace function public.rbac_is_service() returns boolean
+language plpgsql stable as $fn$
+declare v text;
+begin
+  v := nullif(current_setting('request.jwt.claims', true), '');
+  if v is null then return true; end if;
+  return (v::jsonb ->> 'role') = 'service_role';
+exception when others then
+  return false;
+end $fn$;
+
+-- The signed-in human's role, or null if they are not staff. SECURITY DEFINER so that a policy
+-- on `staff` itself does not have to be consulted to find out whether you may read `staff`
+-- (that recursion is the classic way an RLS role system deadlocks on its own first query).
+--
+-- The bootstrap branch is guarantee G3 in the header. Read it before removing it.
+create or replace function public.staff_role() returns text
+language plpgsql stable security definer set search_path = public, pg_temp as $fn$
+declare v_uid uuid; v_role text;
+begin
+  v_uid := public.rbac_uid();
+  if v_uid is null then return null; end if;
+
+  select role into v_role from public.staff where user_id = v_uid and is_active;
+  if v_role is not null then return v_role; end if;
+
+  -- No active admin exists anywhere: this database has not been set up yet (or somebody has
+  -- managed to remove them all). Anyone who can sign in is treated as the admin so the system
+  -- can be repaired from the portal. Closes automatically the moment one admin row exists.
+  if not exists (select 1 from public.staff where role = 'admin' and is_active) then
+    return 'admin';
+  end if;
+
+  return null;
+end $fn$;
+
+-- The single question every write policy and every guard trigger asks.
+create or replace function public.staff_can(p_capability text) returns boolean
+language plpgsql stable security definer set search_path = public, pg_temp as $fn$
+declare v_role text;
+begin
+  if public.rbac_is_service() then return true; end if;
+  v_role := public.staff_role();
+  if v_role is null then return false; end if;
+  if v_role = 'admin' then return true; end if;   -- see section 3: never data-dependent
+  return exists (
+    select 1 from public.role_permissions
+     where role = v_role and capability = p_capability and allowed);
+end $fn$;
+
+-- What the portal calls on load to decide which tabs and buttons to render. Returns a role of
+-- null for anyone who is not staff, which is the signal to show "your account has no access".
+create or replace function public.staff_whoami() returns jsonb
+language plpgsql stable security definer set search_path = public, pg_temp as $fn$
+declare v_uid uuid; v_role text; v_row public.staff; v_caps text[];
+begin
+  v_uid  := public.rbac_uid();
+  v_role := public.staff_role();
+  if v_role is null then
+    return jsonb_build_object('user_id', v_uid, 'role', null, 'capabilities', '[]'::jsonb);
+  end if;
+  select * into v_row from public.staff where user_id = v_uid;
+  if v_role = 'admin' then
+    select array_agg(key order by sort) into v_caps from public.capabilities;
+  else
+    select array_agg(capability order by capability) into v_caps
+      from public.role_permissions where role = v_role and allowed;
+  end if;
+  return jsonb_build_object(
+    'user_id',      v_uid,
+    'email',        v_row.email,
+    'name',         v_row.name,
+    'role',         v_role,
+    'bootstrap',    (v_row.user_id is null),   -- true = admin only because nobody else is
+    'capabilities', to_jsonb(coalesce(v_caps, '{}'::text[])));
+end $fn$;
+
+grant execute on function public.rbac_uid()               to authenticated;
+grant execute on function public.rbac_is_service()        to authenticated;
+grant execute on function public.staff_role()             to authenticated;
+grant execute on function public.staff_can(text)          to authenticated;
+grant execute on function public.staff_whoami()           to authenticated;
+
+-- ============================================================================
+-- 5) SEED — guarantees G1 and G2 from the header.
+-- ============================================================================
+-- Where the owner's address is configured. Change it here, not in the SQL:
+--   update public.settings set staff = coalesce(staff,'{}'::jsonb) || '{"owner_email":"someone@example.com"}'::jsonb where id = 1;
+alter table public.settings add column if not exists staff jsonb not null default '{}'::jsonb;
+
+-- G1 — everyone who can already sign in keeps the access they have today.
+-- "on conflict do nothing" so re-running this file never re-promotes somebody who was demoted
+-- on purpose. Its own do-block: if this fails, G2 below must still get its chance.
+do $$
+declare n integer;
+begin
+  if to_regclass('auth.users') is null then
+    raise notice '0024: no auth.users table here — skipping the seed. The bootstrap in staff_role() still applies.';
+    return;
+  end if;
+  insert into public.staff (user_id, email, name, role, is_active, note)
+  select u.id,
+         u.email,
+         nullif(coalesce(u.raw_user_meta_data ->> 'name', u.raw_user_meta_data ->> 'full_name'), ''),
+         'admin',
+         true,
+         'seeded by migration 0024 — existing login, kept as admin'
+    from auth.users u
+   -- ...but NEVER a customer's login. When 0024 was written the only logins were staff. Customers
+   -- have had their own accounts since 0025, and leagues (0031) ask every player to make one — so
+   -- without this, re-running the file would hand the manager portal to every customer.
+   where not exists (select 1 from public.customers c where c.user_id = u.id)
+     and coalesce(u.raw_user_meta_data ->> 'source', '') <> 'customer_signup'
+  on conflict (user_id) do nothing;
+  get diagnostics n = row_count;
+  raise notice '0024: seeded % existing auth user(s) as admin.', n;
+exception when others then
+  raise notice '0024: could not seed from auth.users (%). Falls through to the bootstrap in staff_role().', sqlerrm;
+end $$;
+
+-- G2 — the named owner, force-restored on every run. A no-op if that account does not exist.
+do $$
+declare v_owner text; n integer;
+begin
+  if to_regclass('auth.users') is null then return; end if;
+  select coalesce(nullif(s.staff ->> 'owner_email', ''), 'john@gmail.com') into v_owner
+    from public.settings s where s.id = 1;
+  v_owner := coalesce(v_owner, 'john@gmail.com');
+
+  insert into public.staff (user_id, email, role, is_active, note)
+  select u.id, u.email, 'admin', true, 'owner account — restored to admin by migration 0024'
+    from auth.users u
+   where lower(u.email) = lower(v_owner)
+  on conflict (user_id) do update
+    set role = 'admin', is_active = true, email = excluded.email, updated_at = now();
+  get diagnostics n = row_count;
+  if n = 0 then
+    raise notice '0024: owner % has no auth user yet — nothing to restore. Anyone who signs in while there are no admins gets admin (G3).', v_owner;
+  else
+    raise notice '0024: owner % confirmed as an active admin.', v_owner;
+  end if;
+exception when others then
+  raise notice '0024: could not confirm the owner row (%). Falls through to the bootstrap in staff_role().', sqlerrm;
+end $$;
+
+-- ============================================================================
+-- 6) LAST-ADMIN TRIGGER — guarantee G4.
+-- ============================================================================
+-- Deleting, demoting or deactivating the final active admin is refused. It fires for the
+-- service-role key and the SQL editor too, on purpose: this is not an authorisation check, it is
+-- a structural rule about the database, and "I did it from the server" is not a reason to allow
+-- it. Drop the trigger for one statement if you genuinely mean to empty the table.
+create or replace function public.staff_keep_one_admin() returns trigger
+language plpgsql as $fn$
+begin
+  if old.role <> 'admin' or not old.is_active then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  if tg_op = 'UPDATE' and new.role = 'admin' and new.is_active then
+    return new;
+  end if;
+  if not exists (select 1 from public.staff
+                  where role = 'admin' and is_active and user_id <> old.user_id) then
+    raise exception 'refusing to remove the last active admin (%) — promote someone else first',
+      coalesce(old.email, old.user_id::text) using errcode = '42501';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end $fn$;
+
+drop trigger if exists staff_keep_one_admin on public.staff;
+create trigger staff_keep_one_admin
+  before update or delete on public.staff
+  for each row execute function public.staff_keep_one_admin();
+
+-- Keep updated_at honest without asking the caller to remember.
+create or replace function public.staff_touch() returns trigger
+language plpgsql as $fn$
+begin
+  new.updated_at := now();
+  return new;
+end $fn$;
+drop trigger if exists staff_touch on public.staff;
+create trigger staff_touch before update on public.staff
+  for each row execute function public.staff_touch();
+
+-- ============================================================================
+-- 7) AUDIT LOG — who changed what.
+-- ============================================================================
+-- One row per consequential write, captured by a trigger rather than by application code, so it
+-- records the change whoever made it: the portal, the server's service-role key, a cron job, or
+-- somebody typing into the SQL editor. Application code cannot forget to call it.
+create table if not exists public.audit_log (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  actor_id    uuid,          -- the JWT subject, null for server / SQL-editor writes
+  actor_email text,
+  actor_role  text,          -- admin | employee | readonly | service | none
+  action      text not null, -- insert | update | delete
+  table_name  text not null,
+  row_id      text,
+  changed     jsonb,         -- update only: { column: [before, after] }
+  row_before  jsonb,
+  row_after   jsonb,
+  note        text,          -- set by lib/db.js recordAudit() for things no trigger can see
+  source      text not null default 'trigger'
+);
+create index if not exists audit_log_at    on public.audit_log (at desc);
+create index if not exists audit_log_table on public.audit_log (table_name, at desc);
+create index if not exists audit_log_actor on public.audit_log (actor_id, at desc);
+
+-- Table-level grants for the four tables this migration creates. Supabase's default privileges
+-- normally cover new tables in `public`, but RLS is only the second gate — if PostgREST's
+-- `authenticated` role has no GRANT, the portal gets "permission denied for table staff" no
+-- matter how permissive the policy is. Stating them removes that failure mode. `anon` gets
+-- nothing here, ever: /api/config hands that key to every visitor of the site.
+grant select                         on public.audit_log        to authenticated;
+grant select, insert, update, delete on public.staff            to authenticated;
+grant select, insert, update, delete on public.role_permissions to authenticated;
+grant select, insert, update, delete on public.capabilities     to authenticated;
+revoke all on public.audit_log, public.staff, public.role_permissions, public.capabilities from anon;
+
+-- Values never worth keeping a copy of: tokens, hashes and secrets. Redacted from both
+-- snapshots, so restoring the audit log to a laptop cannot leak a claim token or a card hash.
+create or replace function public.audit_redact(p jsonb) returns jsonb
+language sql immutable as $fn$
+  select case when p is null then null else
+    (select coalesce(jsonb_object_agg(k, case when k ~* '(token|secret|hash|password)' then '"[redacted]"'::jsonb else p -> k end), '{}'::jsonb)
+       from jsonb_object_keys(p) k)
+  end
+$fn$;
+
+create or replace function public.audit_row() returns trigger
+language plpgsql security definer set search_path = public, pg_temp as $fn$
+declare
+  v_before jsonb; v_after jsonb; v_changed jsonb;
+  v_uid uuid; v_email text; v_role text; v_claims jsonb; v_id text;
+begin
+  if tg_op <> 'INSERT' then v_before := to_jsonb(old); end if;
+  if tg_op <> 'DELETE' then v_after  := to_jsonb(new); end if;
+
+  -- Cart holds are created and deleted for every visitor who clicks a time slot. Logging them
+  -- would bury real changes under machine noise. The transition that matters — a hold becoming
+  -- a real booking — is an UPDATE away from 'held' and is still recorded.
+  if tg_table_name = 'bookings' then
+    if tg_op = 'INSERT' and v_after ->> 'status' = 'held' then return new; end if;
+    if tg_op = 'DELETE' and v_before ->> 'status' = 'held' then return old; end if;
+    if tg_op = 'UPDATE' and v_before ->> 'status' = 'held' and v_after ->> 'status' = 'held' then return new; end if;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    select jsonb_object_agg(k, jsonb_build_array(v_before -> k, v_after -> k))
+      into v_changed
+      from jsonb_object_keys(v_after) k
+     where v_before -> k is distinct from v_after -> k
+       and k not in ('updated_at');
+    -- A write that changed nothing (or only a timestamp) is not an event.
+    if v_changed is null then return new; end if;
+  end if;
+
+  v_claims := coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb);
+  v_uid    := public.rbac_uid();
+  v_email  := nullif(v_claims ->> 'email', '');
+  if v_uid is null then
+    v_role := case coalesce(v_claims ->> 'role', '')
+                when ''             then 'sql'      -- SQL editor, psql, pg_cron: no JWT at all
+                when 'service_role' then 'service'  -- the app's own key
+                else v_claims ->> 'role' end;
+  else
+    v_role := coalesce(public.staff_role(), 'none');
+    if v_email is null then select email into v_email from public.staff where user_id = v_uid; end if;
+  end if;
+
+  v_id := coalesce(v_after ->> 'id', v_before ->> 'id', v_after ->> 'user_id', v_before ->> 'user_id',
+                   v_after ->> 'key',  v_before ->> 'key');
+
+  insert into public.audit_log (actor_id, actor_email, actor_role, action, table_name, row_id,
+                                changed, row_before, row_after, source)
+  values (v_uid, v_email, v_role, lower(tg_op), tg_table_name, v_id,
+          public.audit_redact(v_changed), public.audit_redact(v_before), public.audit_redact(v_after), 'trigger');
+
+  return case when tg_op = 'DELETE' then old else new end;
+exception when others then
+  -- An audit failure must never be able to stop a customer from booking. Complain loudly in the
+  -- Postgres log and let the business write through.
+  raise warning 'audit_log: could not record % on % (%)', tg_op, tg_table_name, sqlerrm;
+  return case when tg_op = 'DELETE' then old else new end;
+end $fn$;
+
+-- ============================================================================
+-- 8) GUARD TRIGGERS — the part RLS cannot do.
+-- ============================================================================
+-- adjust_points(), adjust_hours() and adjust_gift_card() become SECURITY DEFINER in section 9.
+-- That is the right call — the ledgers must only ever be written through the function that keeps
+-- the balance and the ledger row in step, so a caller needs no direct write access to them — but
+-- SECURITY DEFINER means the function runs as its owner and RLS on those tables no longer
+-- applies to it. Without something else in the way, `select adjust_points(...)` would become a
+-- hole any signed-in employee could walk through.
+--
+-- Triggers are that something else. They fire inside a SECURITY DEFINER function, and
+-- request.jwt.claims is a per-request setting that SECURITY DEFINER does not change, so the
+-- guard still sees the real caller. Raising here aborts the transaction, which rolls back the
+-- balance update the ledger insert was paired with — the two can never come apart.
+--
+-- All of them return true for the service-role key, so every server path (webhooks, checkout,
+-- cron sweeps) is untouched.
+
+-- Whole-table: touching this at all requires the "money" permission.
+create or replace function public.rbac_guard_money() returns trigger
+language plpgsql as $fn$
+begin
+  if not public.staff_can('money.write') then
+    raise exception 'permission denied: changing % requires the "money" permission', tg_table_name
+      using errcode = '42501';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end $fn$;
+
+-- Column-level: the rest of the row is fair game, these columns are not. Reads the columns out
+-- of to_jsonb() rather than naming them, so the trigger is safe to attach to a table whose
+-- migration for that column has not been applied yet.
+create or replace function public.rbac_guard_money_columns() returns trigger
+language plpgsql as $fn$
+declare b_old jsonb; b_new jsonb; c text;
+begin
+  b_old := to_jsonb(old); b_new := to_jsonb(new);
+  foreach c in array tg_argv loop
+    if b_old -> c is distinct from b_new -> c then
+      if not public.staff_can('money.write') then
+        raise exception 'permission denied: changing %.% requires the "money" permission', tg_table_name, c
+          using errcode = '42501';
+      end if;
+      return new;
+    end if;
+  end loop;
+  return new;
+end $fn$;
+
+-- ============================================================================
+-- 9) rbac_apply() — every policy, trigger and function attribute, in one re-runnable place.
+-- ============================================================================
+-- WHY THIS IS A FUNCTION AND NOT JUST A LIST OF STATEMENTS
+--
+--   · Migrations 0022 and 0023 are written but not yet applied here, and they create their
+--     tables with the old "for all to authenticated using (true)" policies. Whichever order the
+--     files are run in, the last word has to be this one. Apply 0022/0023, then run
+--        select public.rbac_apply();
+--     and the new tables are covered. It skips tables that do not exist yet and says so.
+--   · Any future migration that re-creates a policy or does `create or replace function
+--     adjust_points(...)` (which silently resets a function back to SECURITY INVOKER) re-opens
+--     what this file closed. One call puts it back.
+--
+-- Run `select public.rbac_apply();` after ANY migration that touches these tables.
+create or replace function public.rbac_apply() returns text
+language plpgsql as $fn$
+declare
+  r record;
+  applied text[] := '{}';
+  absent  text[] := '{}';
+  hardened text[] := '{}';
+begin
+  -- 9a) One write capability per table. Reads are open to any staff member — including
+  --     read-only, which is the entire point of that role — and closed to everyone else.
+  for r in
+    select * from (values
+      -- setup: the rate card, the calendar, the plans. The most expensive mistakes live here.
+      ('settings',                  'config.write'),
+      ('memberships',               'config.write'),
+      ('price_templates',           'config.write'),
+      ('hour_cards',                'config.write'),
+      ('bay_categories',            'config.write'),
+      ('schedule_overrides',        'config.write'),
+      ('schedule_templates',        'config.write'),
+      ('booking_statuses',          'config.write'),
+      -- the tee sheet and everything that puts play on it
+      ('bookings',                  'booking.write'),
+      ('tags',                      'booking.write'),
+      ('notifications',             'booking.write'),
+      ('waitlist_entries',          'booking.write'),   -- migration 0022
+      ('waitlist_offers',           'booking.write'),   -- migration 0022
+      ('booking_series',            'booking.write'),   -- migration 0023
+      ('booking_groups',            'booking.write'),   -- migration 0023
+      ('booking_series_exceptions', 'booking.write'),   -- migration 0023
+      -- customer records
+      ('customers',                 'customer.write'),
+      -- stored value and anything that gives money back
+      ('gift_cards',                'money.write'),
+      ('gift_card_transactions',    'money.write'),
+      ('gift_card_reservations',    'money.write'),
+      ('promos',                    'money.write'),
+      ('promo_redemptions',         'money.write'),
+      ('hour_transactions',         'money.write'),
+      ('point_transactions',        'money.write'),
+      ('refunds',                   'money.write'),     -- migration 0023
+      -- the role system itself
+      ('staff',                     'staff.manage'),
+      ('role_permissions',          'staff.manage'),
+      ('capabilities',              'staff.manage')
+    ) as m(tbl, cap)
+  loop
+    if to_regclass('public.' || quote_ident(r.tbl)) is null then
+      absent := absent || r.tbl; continue;
+    end if;
+    execute format('alter table public.%I enable row level security', r.tbl);
+    -- Every policy name any migration in this repo has used on these tables.
+    execute format('drop policy if exists %I on public.%I', r.tbl || '_read',  r.tbl);
+    execute format('drop policy if exists %I on public.%I', r.tbl || '_write', r.tbl);
+    execute format('drop policy if exists %I on public.%I', r.tbl || '_admin', r.tbl);
+    -- (select ...) so the planner evaluates the check once per statement, not once per row.
+    execute format(
+      'create policy %I on public.%I for select to authenticated using ((select public.staff_role()) is not null)',
+      r.tbl || '_read', r.tbl);
+    execute format(
+      'create policy %I on public.%I for all to authenticated using ((select public.staff_can(%L))) with check ((select public.staff_can(%L)))',
+      r.tbl || '_write', r.tbl, r.cap, r.cap);
+    applied := applied || r.tbl;
+  end loop;
+
+  -- 9b) Server-only bookkeeping: RLS on with NO policies denies anon and authenticated
+  --     everything, while the service-role key (which bypasses RLS) keeps working. Note this
+  --     also removes the write policy migration 0018 gave stripe_events — a signed-in user
+  --     being able to delete webhook idempotency records was never intended.
+  for r in select unnest(array['stripe_events','gift_card_attempts','promo_attempts','waitlist_wakeups']) as tbl loop
+    if to_regclass('public.' || quote_ident(r.tbl)) is null then absent := absent || r.tbl; continue; end if;
+    execute format('alter table public.%I enable row level security', r.tbl);
+    execute format('drop policy if exists %I on public.%I', r.tbl || '_read',  r.tbl);
+    execute format('drop policy if exists %I on public.%I', r.tbl || '_write', r.tbl);
+    execute format('drop policy if exists %I on public.%I', r.tbl || '_admin', r.tbl);
+    applied := applied || (r.tbl || '(server-only)');
+  end loop;
+
+  -- 9c) The audit log is readable by whoever holds audit.read (admins, by default) and writable
+  --     by nobody: the trigger in section 7 is SECURITY DEFINER and inserts as the table owner.
+  --     Nothing in the portal may edit or delete history.
+  alter table public.audit_log enable row level security;
+  drop policy if exists audit_log_read  on public.audit_log;
+  drop policy if exists audit_log_write on public.audit_log;
+  create policy audit_log_read on public.audit_log
+    for select to authenticated using ((select public.staff_can('audit.read')));
+
+  -- 9d) Audit triggers. Ledgers, outboxes and attempt counters are left out: they are already
+  --     append-only records of themselves, and mirroring them would double the write volume for
+  --     no new information.
+  for r in select unnest(array[
+      'bookings','customers','settings','memberships','price_templates','hour_cards',
+      'bay_categories','schedule_overrides','schedule_templates','booking_statuses','tags',
+      'gift_cards','promos','refunds','booking_groups','booking_series',
+      'staff','role_permissions']) as tbl
+  loop
+    if to_regclass('public.' || quote_ident(r.tbl)) is null then continue; end if;
+    execute format('drop trigger if exists %I on public.%I', 'audit_' || r.tbl, r.tbl);
+    execute format('create trigger %I after insert or update or delete on public.%I for each row execute function public.audit_row()',
+                   'audit_' || r.tbl, r.tbl);
+  end loop;
+
+  -- 9e) Money guards (section 8). Whole-table on the ledgers and the card balances…
+  for r in select unnest(array['point_transactions','hour_transactions','gift_card_transactions','gift_cards']) as tbl loop
+    if to_regclass('public.' || quote_ident(r.tbl)) is null then continue; end if;
+    execute format('drop trigger if exists %I on public.%I', 'rbac_money_' || r.tbl, r.tbl);
+    execute format('create trigger %I before insert or update or delete on public.%I for each row execute function public.rbac_guard_money()',
+                   'rbac_money_' || r.tbl, r.tbl);
+  end loop;
+
+  -- …and column-level where the rest of the row is an employee's job. An employee may edit a
+  -- customer and may move or cancel a booking; they may not silently rewrite what it cost.
+  if to_regclass('public.customers') is not null then
+    drop trigger if exists rbac_money_customers on public.customers;
+    create trigger rbac_money_customers before update on public.customers
+      for each row execute function public.rbac_guard_money_columns('points_balance', 'hours_balance_min');
+  end if;
+  if to_regclass('public.bookings') is not null then
+    drop trigger if exists rbac_money_bookings on public.bookings;
+    create trigger rbac_money_bookings before update on public.bookings
+      for each row execute function public.rbac_guard_money_columns('amount_cents', 'refunded_cents');
+    -- refunded_cents belongs here too: without it an employee with no money.write could mark any
+    -- booking fully refunded, corrupting the refund ledger and the dashboard's revenue figures.
+  end if;
+
+  -- 9f) The adjust_* functions. SECURITY DEFINER so the ledgers need no direct write grant, plus
+  --     a pinned search_path so the definer's privileges cannot be aimed at a shadowed table.
+  --     Authorisation for them is the trigger in 9e, which SECURITY DEFINER cannot bypass.
+  --     ALTER rather than a re-created body: one definition of adjust_points() in this repo,
+  --     still the one in migration 0016.
+  for r in select unnest(array[
+      'public.adjust_points(uuid,integer,text,text,uuid,text)',
+      'public.adjust_hours(uuid,integer,text,text,uuid,text)',
+      'public.adjust_gift_card(uuid,integer,text,text,uuid,text)']) as sig
+  loop
+    if to_regprocedure(r.sig) is null then absent := absent || r.sig; continue; end if;
+    begin
+      execute format('alter function %s security definer', r.sig);
+      execute format('alter function %s set search_path = public, pg_temp', r.sig);
+      hardened := hardened || r.sig;
+    exception when others then
+      raise notice '0024: could not harden % (%). Run this as the function owner.', r.sig, sqlerrm;
+    end;
+  end loop;
+
+  return format('rbac_apply: %s table(s) covered; %s function(s) hardened; not present yet (re-run after those migrations): %s',
+                cardinality(applied), cardinality(hardened),
+                case when cardinality(absent) = 0 then 'none' else array_to_string(absent, ', ') end);
+end $fn$;
+
+select public.rbac_apply();
+
+-- ============================================================================
+-- 10) AFTER RUNNING THIS
+-- ============================================================================
+--   select public.staff_whoami();                    -- as the signed-in manager: role 'admin'
+--   select * from public.staff;                      -- who has access
+--   select * from public.audit_log order by at desc; -- what has changed since
+--
+-- Add an employee: create the login in Supabase → Authentication → Users, then
+--   insert into public.staff (user_id, email, name, role)
+--   values ('<uuid from that screen>', 'someone@example.com', 'Their Name', 'employee');
+-- (or use the Staff tab in the manager portal, which does the same thing through the server).
+--
+-- Let counter staff sell gift cards after all:
+--   update public.role_permissions set allowed = true where role = 'employee' and capability = 'money.write';
+
+
+-- ==========================================================================
+-- MIGRATION 0025 - CUSTOMER ACCOUNTS
+-- ==========================================================================
+
+-- Invictus Golf — customer accounts (migration 0025)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- ============================================================================
+-- WHAT THIS REPLACES
+-- ============================================================================
+-- /account today asks for a phone number and nothing else. Type any customer's number and you
+-- see their bookings, their points, their prepaid hours and their membership. There is no
+-- password because there are no customer logins — customers exist only as rows the shop created.
+--
+-- This gives them real accounts: a Supabase auth user (email + password) linked to their
+-- customer row, and RLS that lets each one see exactly their own data and nothing else.
+--
+-- ============================================================================
+-- WHY A PHONE CODE, AND WHY THE ANSWER IS WITHHELD UNTIL IT IS ENTERED
+-- ============================================================================
+-- Customer rows were imported from GolfBooking carrying real balances. If signing up simply
+-- claimed the row matching a typed phone number, then knowing somebody's number would be enough
+-- to take their points, their prepaid hours and their membership discount. So the number has to
+-- be PROVEN, not merely typed — a one-time code sent to it, checked before any linking happens.
+--
+-- Equally, "we sent you a code" must be the answer for EVERY number. Saying "no account found"
+-- turns this endpoint into a directory: type numbers, learn who is a customer. So a code is
+-- always issued, and whether an account exists is only disclosed once the code is verified —
+-- i.e. only to somebody holding the phone.
+--
+-- Codes are stored HASHED. A leaked backup of this table must not be a pile of live codes.
+
+-- ============================================================================
+-- 1) THE LINK — one auth user, one customer row.
+-- ============================================================================
+alter table public.customers add column if not exists user_id uuid;
+alter table public.customers add column if not exists account_created_at timestamptz;
+-- Partial unique: many customer rows legitimately have no login, but one auth user must never
+-- be attached to two of them.
+create unique index if not exists customers_user_id_key on public.customers (user_id) where user_id is not null;
+
+do $$
+begin
+  if to_regclass('auth.users') is not null
+     and not exists (select 1 from pg_constraint
+                      where conname = 'customers_user_fk' and conrelid = 'public.customers'::regclass) then
+    alter table public.customers
+      add constraint customers_user_fk foreign key (user_id) references auth.users (id) on delete set null;
+  end if;
+exception when others then
+  raise notice '0025: could not add the auth.users foreign key (%). The column works without it.', sqlerrm;
+end $$;
+
+-- ============================================================================
+-- 2) ONE-TIME CODES.
+-- ============================================================================
+-- Keyed on the E.164 phone. One live code per number: requesting again replaces the previous one,
+-- so an attacker cannot bank a pile of valid codes.
+create table if not exists public.phone_codes (
+  phone       text primary key,
+  code_hash   text not null,
+  expires_at  timestamptz not null,
+  attempts    smallint not null default 0,
+  sent_count  smallint not null default 1,
+  last_sent   timestamptz not null default now(),
+  created_at  timestamptz not null default now()
+);
+create index if not exists phone_codes_expiry on public.phone_codes (expires_at);
+
+-- Short-lived proof that somebody entered the code for this number. The signup call presents this
+-- instead of the code, so the code itself is used exactly once.
+create table if not exists public.phone_verifications (
+  token      text primary key,
+  phone      text not null,
+  expires_at timestamptz not null,
+  used_at    timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists phone_verifications_expiry on public.phone_verifications (expires_at);
+
+-- Failed attempts per phone AND per caller, so one number cannot be brute-forced and one caller
+-- cannot sweep many numbers. Mirrors gift_card_attempts / promo_attempts from 0020 and 0021.
+create table if not exists public.phone_attempts (
+  id         bigint generated always as identity primary key,
+  key        text not null,
+  ok         boolean not null default false,
+  at         timestamptz not null default now()
+);
+create index if not exists phone_attempts_key on public.phone_attempts (key, at desc);
+
+-- ============================================================================
+-- 2b) PHONE NORMALISATION — one definition, used by the policy above.
+-- ============================================================================
+-- lib/db.js normalises phones in JavaScript ("(204) 990-6530" and "+12049906530" are the same
+-- person). The booking policy needs the same rule in SQL or it would miss a customer's own
+-- bookings purely because of formatting.
+create or replace function public.norm_phone(p text) returns text
+language sql immutable as $fn$
+  select nullif(regexp_replace(coalesce(p, ''), '[^0-9]', '', 'g'), '')
+$fn$;
+grant execute on function public.norm_phone(text) to authenticated;
+
+-- ============================================================================
+-- 3) RLS — a customer sees their own row, and nothing else.
+-- ============================================================================
+-- Existing policies from 0024 are staff-only (they test staff_role()/staff_can()). A customer is
+-- authenticated but not staff, so today they get nothing at all — verified before this migration
+-- was written. These policies are additive: Postgres ORs permissive policies together, so a
+-- customer gains access to their own row without widening anything for anyone else.
+--
+-- IMPORTANT: `using` matches on user_id = the caller's JWT subject. It never matches on phone or
+-- email, which a caller controls. The only way to be attached to a row is through the verified
+-- signup path in api/account.js.
+
+create or replace function public.customer_id_for_caller() returns uuid
+language plpgsql stable security definer set search_path = public, pg_temp as $fn$
+declare v_uid uuid; v_id uuid;
+begin
+  v_uid := public.rbac_uid();          -- from 0024; null when there is no JWT subject
+  if v_uid is null then return null; end if;
+  select id into v_id from public.customers where user_id = v_uid;
+  return v_id;
+end $fn$;
+grant execute on function public.customer_id_for_caller() to authenticated;
+
+drop policy if exists customers_self_read  on public.customers;
+create policy customers_self_read on public.customers
+  for select to authenticated
+  using (user_id is not null and user_id = (select public.rbac_uid()));
+
+-- A customer may correct their own name, email and SMS preference. Deliberately NOT
+-- points_balance, hours_balance_min, membership_id or membership_expires: those are the shop's
+-- to set, and 0024's money guard already refuses them to anyone without money.write.
+drop policy if exists customers_self_update on public.customers;
+create policy customers_self_update on public.customers
+  for update to authenticated
+  using (user_id is not null and user_id = (select public.rbac_uid()))
+  with check (user_id is not null and user_id = (select public.rbac_uid()));
+
+create or replace function public.customer_guard_self_columns() returns trigger
+language plpgsql as $fn$
+begin
+  -- Staff paths are unaffected: money.write covers the shop, service_role covers the server.
+  if public.staff_can('money.write') then return new; end if;
+  if new.points_balance    is distinct from old.points_balance
+     or new.hours_balance_min is distinct from old.hours_balance_min
+     or new.membership_id     is distinct from old.membership_id
+     or new.membership_expires is distinct from old.membership_expires
+     or new.user_id           is distinct from old.user_id then
+    raise exception 'permission denied: that field is set by the shop, not by the account holder'
+      using errcode = '42501';
+  end if;
+  return new;
+end $fn$;
+drop trigger if exists customer_guard_self on public.customers;
+create trigger customer_guard_self before update on public.customers
+  for each row execute function public.customer_guard_self_columns();
+
+-- Their own bookings, matched through the customer row rather than through a typed email.
+drop policy if exists bookings_self_read on public.bookings;
+create policy bookings_self_read on public.bookings
+  for select to authenticated
+  using (
+    exists (
+      select 1 from public.customers c
+       where c.user_id = (select public.rbac_uid())
+         and (
+           (c.email is not null and public.bookings.customer_email is not null
+             and lower(c.email) = lower(public.bookings.customer_email))
+           or (c.phone is not null and public.bookings.customer_phone is not null
+             and public.norm_phone(c.phone) = public.norm_phone(public.bookings.customer_phone))
+         )
+    )
+  );
+
+-- The three code tables are server-only: RLS on, no policies. anon and authenticated get nothing;
+-- the service-role key the server uses bypasses RLS and keeps working.
+do $$
+declare t text;
+begin
+  foreach t in array array['phone_codes','phone_verifications','phone_attempts'] loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('revoke all on public.%I from anon, authenticated', t);
+  end loop;
+end $$;
+
+-- ============================================================================
+-- 5) HOUSEKEEPING — expired codes are rubbish, not history.
+-- ============================================================================
+create or replace function public.phone_codes_sweep() returns integer
+language plpgsql security definer set search_path = public, pg_temp as $fn$
+declare n integer;
+begin
+  delete from public.phone_codes where expires_at < now() - interval '1 hour';
+  get diagnostics n = row_count;
+  delete from public.phone_verifications where expires_at < now() - interval '1 day';
+  delete from public.phone_attempts where at < now() - interval '7 days';
+  return n;
+end $fn$;
+revoke all on function public.phone_codes_sweep() from public, anon;
+grant execute on function public.phone_codes_sweep() to service_role;
+
+-- Re-assert 0024's policies so the new tables are covered by the role system too.
+do $$
+begin
+  if to_regprocedure('public.rbac_apply()') is not null then perform public.rbac_apply(); end if;
+end $$;
+
+
+-- ==========================================================================
+-- MIGRATION 0026 - STAFF INVITES
+-- ==========================================================================
+
+-- Invictus Golf — staff invites, and closing the bootstrap to customer accounts (migration 0026)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- ============================================================================
+-- WHY
+-- ============================================================================
+-- 1) CLOSES A HOLE. staff_role() (0024, guarantee G3) treats ANY signed-in user as an admin while
+--    no active admin exists, on the stated assumption that "this database has no public sign-up".
+--    Migration 0025 added public customer sign-up. On a fresh database — exactly the state of a new
+--    project — the first customer to make an account on the website would become an admin: refunds,
+--    rates, the customer list, staff. The bootstrap now skips customer accounts, and anyone who
+--    already has a staff row (a suspended employee stays suspended).
+--
+-- 2) THE OWNER is murad@voltrisai.com, and becomes an admin the moment that login is created, so the
+--    bootstrap closes on the owner's first sign-in instead of staying open until somebody adds an
+--    admin row by hand. More admins are added from the portal's Staff tab like any other employee.
+--
+-- 3) Employees are now invited from the Staff tab (api/staff.js creates the login and the staff row
+--    together), so nothing here changes the staff table itself.
+
+-- ============================================================================
+-- 1) staff_role() — the bootstrap no longer admits customers.
+-- ============================================================================
+-- Same contract as 0024: the role of the signed-in user, or null. `create or replace` keeps the
+-- existing grant to authenticated and every policy that calls it.
+create or replace function public.staff_role() returns text
+language plpgsql stable security definer set search_path = public, pg_temp as $fn$
+declare v_uid uuid; v_role text; v_customer boolean := false;
+begin
+  v_uid := public.rbac_uid();
+  if v_uid is null then return null; end if;
+
+  select role into v_role from public.staff where user_id = v_uid and is_active;
+  if v_role is not null then return v_role; end if;
+
+  -- The bootstrap (0024 G3): nobody is an admin yet, so whoever signs in can set the system up.
+  if exists (select 1 from public.staff where role = 'admin' and is_active) then return null; end if;
+  -- ...but not somebody the staff table already knows about (suspended, or not an admin)...
+  if exists (select 1 from public.staff where user_id = v_uid) then return null; end if;
+  -- ...and never a customer. Two checks, because api/account.js creates the login a moment before
+  -- it links the customer row: the metadata covers that gap, the link covers everything else.
+  -- Dynamic SQL so this still compiles on a database without 0025 or without GoTrue; if either
+  -- lookup fails for any reason the answer is "no", not "admin".
+  begin
+    if to_regclass('auth.users') is not null then
+      execute $q$select exists (select 1 from auth.users
+                                where id = $1 and raw_user_meta_data ->> 'source' = 'customer_signup')$q$
+        into v_customer using v_uid;
+      if v_customer then return null; end if;
+    end if;
+    if exists (select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'customers' and column_name = 'user_id') then
+      execute 'select exists (select 1 from public.customers where user_id = $1)' into v_customer using v_uid;
+      if v_customer then return null; end if;
+    end if;
+  exception when others then
+    return null;
+  end;
+
+  return 'admin';
+end $fn$;
+
+-- ============================================================================
+-- 2) The owner email.
+-- ============================================================================
+-- Only replaces the placeholder 0024 shipped with, so an owner email somebody has already set on
+-- purpose is left alone on a re-run.
+update public.settings
+   set staff = coalesce(staff, '{}'::jsonb) || jsonb_build_object('owner_email', 'murad@voltrisai.com')
+ where id = 1
+   and coalesce(nullif(staff ->> 'owner_email', ''), 'john@gmail.com') = 'john@gmail.com';
+
+-- ============================================================================
+-- 3) The owner is an admin from the moment the login exists.
+-- ============================================================================
+-- A trigger on auth.users, which every login goes through — the Supabase dashboard, an invite from
+-- the Staff tab, a customer sign-up. It must NEVER stop a login from being created, so any failure
+-- is logged and swallowed.
+create or replace function public.staff_claim_owner() returns trigger
+language plpgsql security definer set search_path = public, pg_temp as $fn$
+declare v_owner text;
+begin
+  select nullif(staff ->> 'owner_email', '') into v_owner from public.settings where id = 1;
+  if v_owner is not null and new.email is not null and lower(new.email) = lower(v_owner) then
+    insert into public.staff (user_id, email, role, is_active, note)
+    values (new.id, new.email, 'admin', true, 'owner account — made admin when the login was created (0026)')
+    on conflict (user_id) do update
+      set role = 'admin', is_active = true, email = excluded.email, updated_at = now();
+  end if;
+  return new;
+exception when others then
+  raise warning 'staff_claim_owner: % — the login was still created', sqlerrm;
+  return new;
+end $fn$;
+
+do $$
+begin
+  if to_regclass('auth.users') is null then
+    raise notice '0026: no auth.users table here — skipping the owner trigger.';
+    return;
+  end if;
+  execute 'drop trigger if exists staff_claim_owner on auth.users';
+  execute 'create trigger staff_claim_owner after insert on auth.users
+             for each row execute function public.staff_claim_owner()';
+exception when others then
+  raise notice '0026: could not add the owner trigger (%). Re-run this file after the owner login exists instead.', sqlerrm;
+end $$;
+
+-- If the owner login already exists, make it an admin now (0024's G2, with the new email).
+do $$
+declare v_owner text; n integer;
+begin
+  if to_regclass('auth.users') is null then return; end if;
+  select nullif(staff ->> 'owner_email', '') into v_owner from public.settings where id = 1;
+  if v_owner is null then return; end if;
+  insert into public.staff (user_id, email, role, is_active, note)
+  select u.id, u.email, 'admin', true, 'owner account — confirmed as admin by migration 0026'
+    from auth.users u
+   where lower(u.email) = lower(v_owner)
+  on conflict (user_id) do update
+    set role = 'admin', is_active = true, email = excluded.email, updated_at = now();
+  get diagnostics n = row_count;
+  raise notice '0026: owner % — %', v_owner,
+    case when n = 0 then 'no login yet; becomes admin automatically when it is created' else 'active admin' end;
+exception when others then
+  raise notice '0026: could not confirm the owner row (%).', sqlerrm;
+end $$;
+
+
+-- ==========================================================================
+-- MIGRATION 0027 - NOTES PROFILE FEEDBACK
+-- ==========================================================================
+
+-- Invictus Golf — customer booking notes, profile details, and post-session feedback (migration 0027)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+
+-- ============================================================================
+-- 1) The customer's own note on a booking.
+-- ============================================================================
+-- Separate from bookings.note (0006), which is the shop's note. A customer typing "bringing my own
+-- clubs" at checkout must never overwrite what staff wrote, and staff must be able to tell the two
+-- apart on the tee sheet.
+alter table public.bookings add column if not exists customer_note text;
+
+-- ============================================================================
+-- 2) Profile details asked for at sign-up.
+-- ============================================================================
+-- Both optional. Customers can edit them on My Account through customers_self_update (0025); the
+-- guard trigger there only protects balances, membership and the login link, not these.
+alter table public.customers add column if not exists address text;
+alter table public.customers add column if not exists career  text;
+
+-- ============================================================================
+-- 3) Feedback after a session.
+-- ============================================================================
+-- One answer per booking. A party across several bays is asked once: api code saves it against
+-- one booking of the group and treats the whole group as answered. `skipped` records "not now" so
+-- the customer is not asked about the same session again.
+--
+-- Written only by the server (service-role key) after it has checked the booking belongs to the
+-- customer and has actually ended, so there is deliberately no insert policy.
+create table if not exists public.booking_feedback (
+  id          uuid primary key default gen_random_uuid(),
+  booking_id  uuid not null references public.bookings(id) on delete cascade,
+  customer_id uuid references public.customers(id) on delete set null,
+  rating      smallint check (rating between 1 and 5),
+  comment     text check (comment is null or char_length(comment) <= 1000),
+  skipped     boolean not null default false,
+  created_at  timestamptz not null default now(),
+  constraint booking_feedback_rating_or_skip check (skipped or rating is not null)
+);
+create unique index if not exists booking_feedback_booking on public.booking_feedback (booking_id);
+create index if not exists booking_feedback_recent on public.booking_feedback (created_at desc) where not skipped;
+
+alter table public.booking_feedback enable row level security;
+-- Any staff member can read it (the Dashboard), same rule as every other table (0024 rbac_apply).
+drop policy if exists booking_feedback_staff_read on public.booking_feedback;
+create policy booking_feedback_staff_read on public.booking_feedback
+  for select to authenticated
+  using ((select public.staff_role()) is not null);
+-- A customer can read their own answers, so My Account knows what not to ask again.
+drop policy if exists booking_feedback_self_read on public.booking_feedback;
+create policy booking_feedback_self_read on public.booking_feedback
+  for select to authenticated
+  using (customer_id is not null and exists (
+    select 1 from public.customers c
+     where c.id = booking_feedback.customer_id and c.user_id = (select public.rbac_uid())));
+
+
+-- ==========================================================================
+-- MIGRATION 0028 - LEAGUES
+-- ==========================================================================
+
+-- Invictus Golf — leagues (replacing memberships) and the advance-booking window (migration 0028)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- WHAT CHANGES FOR CUSTOMERS
+--   · Memberships are retired from the site. Their tables and customer columns are LEFT IN PLACE —
+--     nothing here drops data — but no page sells them and no price uses their discount.
+--   · A league is a season of weekly play: a night, a time, bays, a roster, and results.
+--   · Players join from the /leagues page (and pay, when the league has a fee) or are added by staff.
+--   · Being on an active league roster is the perk: book up to settings.booking_window.leagueDays
+--     ahead instead of regularDays. No price discount.
+
+-- ============================================================================
+-- 1) LEAGUES
+-- ============================================================================
+create table if not exists public.leagues (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null,
+  description   text,
+  day_of_week   smallint check (day_of_week between 0 and 6),        -- 0 = Sunday
+  start_min     smallint check (start_min between 0 and 1440),
+  end_min       smallint check (end_min between 0 and 1440),
+  season_start  date,
+  season_end    date,
+  bay_ids       text[] not null default '{}',
+  fee_cents     integer not null default 0 check (fee_cents >= 0),     -- per player, per season; 0 = free
+  capacity      integer check (capacity is null or capacity > 0),       -- players; null = no limit
+  team_mode     boolean not null default false,                         -- players play in teams
+  scoring       text not null default 'points' check (scoring in ('points','strokes')),  -- points: high wins, strokes: low wins
+  join_online   boolean not null default true,                          -- listed on /leagues with a Join button
+  is_active     boolean not null default true,
+  series_id     uuid,                                                   -- booking_series this season is booked as (0023)
+  color         text,
+  sort          integer not null default 0,
+  created_at    timestamptz not null default now(),
+  constraint leagues_time_order check (start_min is null or end_min is null or end_min > start_min),
+  constraint leagues_season_order check (season_start is null or season_end is null or season_end >= season_start)
+);
+
+create table if not exists public.league_teams (
+  id         uuid primary key default gen_random_uuid(),
+  league_id  uuid not null references public.leagues(id) on delete cascade,
+  name       text not null,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists league_teams_name on public.league_teams (league_id, lower(name));
+
+-- One row per player per league. `status` keeps history: someone who left still has their results.
+create table if not exists public.league_members (
+  id                uuid primary key default gen_random_uuid(),
+  league_id         uuid not null references public.leagues(id) on delete cascade,
+  customer_id       uuid not null references public.customers(id) on delete cascade,
+  team_id           uuid references public.league_teams(id) on delete set null,
+  status            text not null default 'active' check (status in ('active','left')),
+  source            text not null default 'staff' check (source in ('staff','online')),
+  paid_cents        integer not null default 0,
+  stripe_session_id text,
+  note              text,
+  joined_at         timestamptz not null default now()
+);
+create unique index if not exists league_members_once on public.league_members (league_id, customer_id);
+-- A refresh of the payment success page must find the same membership, not create a second.
+create unique index if not exists league_members_session on public.league_members (stripe_session_id) where stripe_session_id is not null;
+create index if not exists league_members_customer on public.league_members (customer_id) where status = 'active';
+
+-- One score per team (team leagues) or per player (individual leagues) per night played.
+create table if not exists public.league_results (
+  id          uuid primary key default gen_random_uuid(),
+  league_id   uuid not null references public.leagues(id) on delete cascade,
+  played_on   date not null,
+  team_id     uuid references public.league_teams(id) on delete cascade,
+  customer_id uuid references public.customers(id) on delete cascade,
+  score       numeric(8,2) not null,
+  note        text,
+  created_at  timestamptz not null default now(),
+  constraint league_results_who check ((team_id is null) <> (customer_id is null))
+);
+create unique index if not exists league_results_team_night on public.league_results (league_id, played_on, team_id) where team_id is not null;
+create unique index if not exists league_results_player_night on public.league_results (league_id, played_on, customer_id) where customer_id is not null;
+
+-- ============================================================================
+-- 2) THE ADVANCE-BOOKING WINDOW
+-- ============================================================================
+-- How far ahead a customer may book online. Staff bookings on the tee sheet are not limited.
+alter table public.settings add column if not exists booking_window jsonb not null default '{}'::jsonb;
+update public.settings
+   set booking_window = jsonb_build_object('regularDays', 10, 'leagueDays', 60)
+ where id = 1 and (booking_window is null or booking_window = '{}'::jsonb);
+
+-- ============================================================================
+-- 3) ROW LEVEL SECURITY
+-- ============================================================================
+-- Staff: read with any role, write with booking.write — the same rule rbac_apply (0024) gives the
+-- tee sheet, since running a league is running bookings. Customers and the public get their league
+-- information through api/leagues.js on the service-role key, which returns only what a player
+-- should see (team names, first names, standings) — never a teammate's phone or email.
+do $$
+declare t text;
+begin
+  foreach t in array array['leagues','league_teams','league_members','league_results'] loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('drop policy if exists %I on public.%I', t || '_read', t);
+    execute format('drop policy if exists %I on public.%I', t || '_write', t);
+    execute format('create policy %I on public.%I for select to authenticated using ((select public.staff_role()) is not null)', t || '_read', t);
+    execute format('create policy %I on public.%I for all to authenticated using ((select public.staff_can(''booking.write''))) with check ((select public.staff_can(''booking.write'')))', t || '_write', t);
+  end loop;
+end $$;
+
+
+-- ==========================================================================
+-- MIGRATION 0029 - SAVED CARDS
+-- ==========================================================================
+
+-- Invictus Golf — saved cards and wallets through Stripe (migration 0029)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- WHAT THIS IS
+-- Card numbers are never stored here. A customer's saved cards (and Apple Pay / Google Pay) live on
+-- a Stripe Customer; this column is only the link to it. Because the counter's Stripe card reader
+-- (Stripe Terminal) works in the same Stripe account, the shop sees the same Customer and the same
+-- saved cards in the Stripe Dashboard.
+--
+-- The server creates the Stripe Customer the first time a signed-in customer checks out or adds a
+-- card (lib/db.js stripeCustomerIdFor). Saved cards are only ever offered to that signed-in
+-- customer — never to someone who merely types a matching phone number at checkout.
+
+alter table public.customers add column if not exists stripe_customer_id text;
+create unique index if not exists customers_stripe_customer on public.customers (stripe_customer_id) where stripe_customer_id is not null;
+
+-- THE LINK IS SHOP-OWNED. customers_self_update (0025) lets a signed-in customer edit their own row;
+-- without this, they could write someone else's cus_… id into stripe_customer_id and be shown that
+-- person's saved cards. Same guard as 0025, one more column.
+create or replace function public.customer_guard_self_columns() returns trigger
+language plpgsql as $fn$
+begin
+  -- Staff paths are unaffected: money.write covers the shop, service_role covers the server.
+  if public.staff_can('money.write') then return new; end if;
+  if new.points_balance    is distinct from old.points_balance
+     or new.hours_balance_min is distinct from old.hours_balance_min
+     or new.membership_id     is distinct from old.membership_id
+     or new.membership_expires is distinct from old.membership_expires
+     or new.user_id           is distinct from old.user_id
+     or new.stripe_customer_id is distinct from old.stripe_customer_id then
+    raise exception 'permission denied: that field is set by the shop, not by the account holder'
+      using errcode = '42501';
+  end if;
+  return new;
+end $fn$;
+
+
+-- ==========================================================================
+-- MIGRATION 0030 - LEAGUE MANAGEMENT
+-- ==========================================================================
+
+-- Invictus Golf — league management: payments per player and cancelled nights (migration 0030)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+
+-- ============================================================================
+-- 1) Who has paid their league fee.
+-- ============================================================================
+-- league_members.paid_cents (0028) is how much; paid_at is when, and null means not paid yet. An
+-- online sign-up is paid the moment Stripe says so; staff mark counter and e-transfer payments.
+alter table public.league_members add column if not exists paid_at timestamptz;
+update public.league_members set paid_at = joined_at where paid_at is null and paid_cents > 0;
+
+-- ============================================================================
+-- 2) League nights that are not happening.
+-- ============================================================================
+-- A holiday, a tournament, the shop closed. A cancelled night drops out of the players' schedule
+-- and the results sheet; results already entered for it are kept, not deleted.
+create table if not exists public.league_cancelled_nights (
+  id         uuid primary key default gen_random_uuid(),
+  league_id  uuid not null references public.leagues(id) on delete cascade,
+  night      date not null,
+  reason     text,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists league_cancelled_nights_once on public.league_cancelled_nights (league_id, night);
+
+-- Same rule as the other league tables (0028): staff read with any role, write with booking.write.
+alter table public.league_cancelled_nights enable row level security;
+drop policy if exists league_cancelled_nights_read on public.league_cancelled_nights;
+drop policy if exists league_cancelled_nights_write on public.league_cancelled_nights;
+create policy league_cancelled_nights_read on public.league_cancelled_nights
+  for select to authenticated using ((select public.staff_role()) is not null);
+create policy league_cancelled_nights_write on public.league_cancelled_nights
+  for all to authenticated using ((select public.staff_can('booking.write'))) with check ((select public.staff_can('booking.write')));
+
+
+-- ==========================================================================
+-- MIGRATION 0031 - LEAGUE TEAMS
+-- ==========================================================================
+
+-- Invictus Golf — leagues sold by the team, played on the team's own time (migration 0031)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- WHAT CHANGED, AND WHY
+--
+-- 0028 modelled a league the usual way: one night a week, everybody in at 7pm, the shop books the
+-- bays for the season. That is not how this venue runs leagues. Here:
+--
+--   · A league is sold BY THE TEAM. One captain pays one price for the whole team.
+--   · The captain invites their friends by phone number. A friend who already has an account taps
+--     the link and is on the team; a friend who doesn't makes one first.
+--   · There is NO fixed night. Each team plays once a week, whenever suits them, in whichever bay
+--     is free — booked from the ordinary booking page and flagged as that team's league round.
+--   · The round is free: the team paid for the season up front.
+--   · Any member of the team can book the week's round, and all of them see it.
+--   · Staff enter the scores and watch for teams who have not booked this week.
+--
+-- So the league's own night/time columns stop being the schedule, teams gain a captain and a
+-- payment, invites get a home, and a booking can say "this is team X's round for week Y".
+--
+-- Nothing is dropped. day_of_week/start_min/end_min stay on the table (already nullable) so a
+-- league booked the old way keeps its history; they are simply not used to build the schedule any
+-- more. The same goes for league_cancelled_nights (0030): a league with no fixed nights has no
+-- nights to cancel, so the table sits unused rather than being deleted with its history.
+
+-- ============================================================================
+-- 1) The league: sold by the team, with a recommended round length
+-- ============================================================================
+alter table public.leagues
+  add column if not exists team_size       integer,
+  add column if not exists weekly_min_mins integer not null default 180;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'leagues_team_size_positive') then
+    alter table public.leagues add constraint leagues_team_size_positive
+      check (team_size is null or team_size > 0);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'leagues_weekly_min_positive') then
+    alter table public.leagues add constraint leagues_weekly_min_positive
+      check (weekly_min_mins > 0);
+  end if;
+end $$;
+
+comment on column public.leagues.fee_cents       is 'Price for ONE TEAM for the season (0031). Was per player in 0028.';
+comment on column public.leagues.team_size       is 'How many players fit on a team. Null = no limit.';
+comment on column public.leagues.weekly_min_mins is 'Recommended length of a team''s weekly round, in minutes. A suggestion shown when booking, never enforced.';
+comment on column public.leagues.capacity        is 'Unused since 0031 (team_size replaced it). Kept so older rows keep their value.';
+comment on column public.leagues.day_of_week     is 'Unused since 0031 — teams book their own time. Kept for leagues created before it.';
+
+-- The old per-player price becomes the per-team price, and the old player cap becomes the team
+-- size. For a league that already exists, those are the closest honest readings of what was there.
+update public.leagues set team_size = capacity where team_size is null and capacity is not null;
+
+-- ============================================================================
+-- 2) The team: who captains it, and what was paid for it
+-- ============================================================================
+alter table public.league_teams
+  add column if not exists captain_customer_id uuid references public.customers(id) on delete set null,
+  add column if not exists paid_cents          integer not null default 0,
+  add column if not exists paid_at             timestamptz,
+  add column if not exists stripe_session_id   text,
+  add column if not exists note                text;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'league_teams_paid_nonneg') then
+    alter table public.league_teams add constraint league_teams_paid_nonneg check (paid_cents >= 0);
+  end if;
+end $$;
+
+comment on column public.league_teams.captain_customer_id is 'The player who bought the team and invites the others. Null for teams staff made by hand.';
+comment on column public.league_teams.stripe_session_id   is 'The Checkout Session that paid for this team. Unique, so a replayed webhook cannot create a second team.';
+
+-- One team per Checkout Session: the webhook and the success page both settle the same payment.
+create unique index if not exists league_teams_session_once
+  on public.league_teams (stripe_session_id) where stripe_session_id is not null;
+
+-- Two teams called "Birdies" in one league would make the standings a guessing game. Only added
+-- when the existing data allows it, so this migration can never fail on a live database.
+do $$
+begin
+  if not exists (
+    select 1 from public.league_teams
+     group by league_id, lower(name) having count(*) > 1
+  ) then
+    create unique index if not exists league_teams_name_per_league
+      on public.league_teams (league_id, lower(name));
+  else
+    raise notice '0031: two teams share a name in the same league — rename one and re-run to add the unique index.';
+  end if;
+end $$;
+
+-- What each team has paid, carried over from the per-player payments 0028/0030 recorded.
+update public.league_teams t set
+  paid_cents = coalesce((select sum(m.paid_cents) from public.league_members m where m.team_id = t.id), 0)
+where t.paid_cents = 0;
+update public.league_teams t set
+  paid_at = (select min(m.paid_at) from public.league_members m where m.team_id = t.id and m.paid_at is not null)
+where t.paid_at is null;
+-- The longest-standing active member is the closest thing an old team has to a captain.
+update public.league_teams t set
+  captain_customer_id = (
+    select m.customer_id from public.league_members m
+     where m.team_id = t.id and m.status = 'active'
+     order by m.joined_at limit 1)
+where t.captain_customer_id is null;
+
+-- ============================================================================
+-- 3) Invites: "here's the link, you're on my team"
+-- ============================================================================
+-- The captain types a phone number; we text a link carrying the token. Whoever opens it proves
+-- nothing about who they are — so the token is the only secret, it is single-use, and it can be
+-- revoked. It is never shown in a list that anyone but the team can read.
+create table if not exists public.league_team_invites (
+  id                  uuid primary key default gen_random_uuid(),
+  team_id             uuid not null references public.league_teams(id) on delete cascade,
+  phone               text not null,
+  name                text,
+  token               uuid not null default gen_random_uuid(),
+  invited_by          uuid references public.customers(id) on delete set null,
+  claimed_at          timestamptz,
+  claimed_customer_id uuid references public.customers(id) on delete set null,
+  revoked_at          timestamptz,
+  created_at          timestamptz not null default now()
+);
+create unique index if not exists league_team_invites_token on public.league_team_invites (token);
+-- One live invite per number per team: inviting the same friend twice just re-sends the first one.
+create unique index if not exists league_team_invites_open
+  on public.league_team_invites (team_id, phone)
+  where claimed_at is null and revoked_at is null;
+create index if not exists league_team_invites_team on public.league_team_invites (team_id);
+
+-- ============================================================================
+-- 4) The weekly round: a booking that belongs to a team
+-- ============================================================================
+-- league_week is generated, never supplied: date_trunc('week') is the Monday of that booking's
+-- week, so a team cannot book twice and claim the two rounds fell in different weeks.
+alter table public.bookings
+  add column if not exists league_team_id uuid references public.league_teams(id) on delete set null;
+
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'bookings' and column_name = 'league_week') then
+    -- booking_date::timestamp is deliberate: date_trunc('week', <date>) resolves to the
+    -- timestamptz form, which depends on the server's TimeZone setting and is therefore only
+    -- STABLE — Postgres refuses it in a generated column (42P17). Casting to a plain timestamp
+    -- picks the immutable form, and the answer is identical: the Monday of that calendar date.
+    alter table public.bookings
+      add column league_week date generated always as (date_trunc('week', booking_date::timestamp)::date) stored;
+  end if;
+end $$;
+
+comment on column public.bookings.league_team_id is 'Set when this booking IS a team''s league round for the week (free, booked by any member).';
+comment on column public.bookings.league_week    is 'Monday of booking_date''s week. Generated — the one round per team per week rule leans on it.';
+
+-- The rule itself: one live round per team per week. A cancelled round frees the week again.
+create unique index if not exists bookings_league_round_once
+  on public.bookings (league_team_id, league_week)
+  where league_team_id is not null and status <> 'cancelled';
+
+create index if not exists bookings_league_team on public.bookings (league_team_id) where league_team_id is not null;
+
+-- ============================================================================
+-- 5) Results, grouped by the week a team played
+-- ============================================================================
+-- Teams no longer play on the same night, so "the 3rd Thursday" is not a column any more. The week
+-- is. Same trick as above: generated from played_on so it cannot disagree with it.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'league_results' and column_name = 'week') then
+    -- Same immutability rule as bookings.league_week above.
+    alter table public.league_results
+      add column week date generated always as (date_trunc('week', played_on::timestamp)::date) stored;
+  end if;
+end $$;
+
+create index if not exists league_results_week on public.league_results (league_id, week);
+
+-- ============================================================================
+-- 6) Row level security
+-- ============================================================================
+-- Same rule as every other league table (0028 §RLS, re-asserted by 0024's rbac_apply): any staff
+-- role may read, booking.write may change. Customers never touch these tables directly — the
+-- server reads them with the service-role key on their behalf, exactly as it does for My Account.
+alter table public.league_team_invites enable row level security;
+drop policy if exists league_team_invites_read  on public.league_team_invites;
+drop policy if exists league_team_invites_write on public.league_team_invites;
+create policy league_team_invites_read on public.league_team_invites
+  for select to authenticated using ((select public.staff_role()) is not null);
+create policy league_team_invites_write on public.league_team_invites
+  for all to authenticated
+  using ((select public.staff_can('booking.write')))
+  with check ((select public.staff_can('booking.write')));
+
+-- Tying a booking to a team needs booking.write, NOT money.write — which is what the bookings
+-- write policy (0024 rbac_apply) already requires, so no extra trigger.
+--
+-- It was money.write at first, on the reading that a free round is a discount. In this venue the
+-- person who answers the phone when a team rings is the employee, and an owner-only button would
+-- mean either fetching the owner for a routine call or booking the round as an ordinary
+-- reservation — which quietly loses the league record. The protection that matters is not who
+-- clicks: the team already paid for the season, the season dates are checked, and the unique index
+-- above allows exactly one round per team per week whoever is asking. Handing out a second free
+-- round is impossible; the remaining risk is a scheduling mistake, recorded in the audit log with
+-- the employee's name on it. The dangerous thing — rewriting the PRICE of a paying customer's
+-- booking — is still money.write, guarded by rbac_money_bookings (amount_cents, refunded_cents).
+--
+-- Dropped rather than replaced, so a database that ran the earlier version of this file loses it.
+do $$
+begin
+  if to_regclass('public.bookings') is not null then
+    drop trigger if exists rbac_league_round_bookings on public.bookings;
+  end if;
+end $$;
+
+
+-- ==========================================================================
+-- MIGRATION 0032 - OVERRIDE PUBLIC REASON
+-- ==========================================================================
+
+-- Invictus Golf — say WHY a time is unavailable, when staff want customers to know (migration 0032)
+-- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run.
+--
+-- WHAT WAS WRONG
+-- A schedule override carries a note ("Christmas", "Maintenance") — the column is `note`; there
+-- has never been a `reason` column, which is what the first version of this code read, finding
+-- nothing. And until now that note never left the building: api/availability.js merged blocked
+-- time into the busy ranges with the
+-- comment "no reason leaked". So a customer looking at Christmas Day saw every slot marked
+-- "Booked" — which is not merely unhelpful, it is untrue. Nobody booked it; the venue is shut.
+--
+-- WHY A COLUMN AND NOT JUST "SHOW IT"
+-- Some reasons are for customers ("Closed for Christmas") and some are not ("Dave's leaving do",
+-- "hold for the Henderson party"). Staff cannot know, when they type it, which of the two a future
+-- reader will treat it as — so the choice is made per override, at the moment it is written, by
+-- the person who knows. Default true: the common case is a closure the customer benefits from
+-- understanding, and an operator who types something private can untick the switch in front of
+-- them. The field's label changes from "shown on the tee sheet" to say so.
+--
+-- The reason is still only ever shown for time that is genuinely unavailable. An "Open" status
+-- (Happy Hour) never reaches the customer's availability at all, so nothing changes there.
+
+alter table public.schedule_overrides
+  add column if not exists public_reason boolean not null default true;
+
+comment on column public.schedule_overrides.public_reason is
+  'true = show this override''s note to customers on the booking page as well as to staff on the tee sheet. Staff pick this per override; the default is true.';
+
+-- Existing rows keep the default (true). There is one deliberate exception: a row with no reason
+-- has nothing to show either way, so the flag is irrelevant to it.
+
+-- RLS: unchanged. schedule_overrides is already staff-read / config.write via 0024's rbac_apply,
+-- and customers never read this table — the server sends them the reason through
+-- /api/availability on the service-role key, exactly as it sends them opening hours.
