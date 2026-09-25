@@ -1,12 +1,43 @@
 {
   "rewrites": [
-    { "source": "/assets/:path*", "destination": "/demo/assets/:path*" },
-    { "source": "/", "destination": "/demo/index.html" },
-    { "source": "/admin", "destination": "/demo/admin.html" },
-    { "source": "/manage", "destination": "/demo/manage.html" },
-    { "source": "/waiver", "destination": "/demo/waiver.html" },
-    { "source": "/membership", "destination": "/demo/membership.html" },
-    { "source": "/hours", "destination": "/demo/hours.html" },
-    { "source": "/account", "destination": "/demo/account.html" }
+    {
+      "source": "/assets/:path*",
+      "destination": "/demo/assets/:path*"
+    },
+    {
+      "source": "/",
+      "destination": "/demo/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/demo/admin.html"
+    },
+    {
+      "source": "/manage",
+      "destination": "/demo/manage.html"
+    },
+    {
+      "source": "/waiver",
+      "destination": "/demo/waiver.html"
+    },
+    {
+      "source": "/hours",
+      "destination": "/demo/hours.html"
+    },
+    {
+      "source": "/account",
+      "destination": "/demo/account.html"
+    },
+    {
+      "source": "/leagues",
+      "destination": "/demo/leagues.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/membership",
+      "destination": "/leagues",
+      "permanent": true
+    }
   ]
 }
