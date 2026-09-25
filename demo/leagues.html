@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Invictus Golf — Memberships</title>
+<title>Invictus Golf — Leagues</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
@@ -26,38 +26,62 @@
   .eyebrow{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange);margin-bottom:10px}
   .head-block h1{font-size:32px;margin-bottom:10px}
   .head-block .sub{color:var(--muted);font-size:15.5px;font-weight:500;line-height:1.65}
+  /* How the team deal works — said once at the top instead of on every card. */
+  .how{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:0 auto 26px;max-width:860px}
+  .how-step{flex:1 1 200px;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+  .how-step .n{font-family:'Space Grotesk';font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);margin-bottom:6px}
+  .how-step .t{font-family:'Space Grotesk';font-weight:700;font-size:14.5px;margin-bottom:4px}
+  .how-step .d{color:var(--muted);font-size:13px;line-height:1.5}
   /* Fixed-width cards on centered wrap lines — partial rows stay symmetric. */
   .plans{display:flex;flex-wrap:wrap;justify-content:center;gap:16px}
   .plan{width:296px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:26px 24px 22px;display:flex;flex-direction:column}
-  @media(max-width:680px){ .plan{width:100%} }
+  @media(max-width:680px){ .plan{width:100%} .how-step{flex:1 1 100%} }
   .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:2px}
-  .plan-name{font-family:'Space Grotesk';font-weight:700;font-size:16px;color:var(--muted);margin-bottom:14px;min-height:42px;line-height:1.3}
-  .plan-price{font-family:'Space Grotesk';font-weight:700;font-size:38px;line-height:1;color:var(--white)}
-  .plan-price .per{font-size:14px;font-weight:500;color:var(--dim);margin-left:5px}
-  .btn-line{background:transparent;border:1px solid var(--orange);color:var(--orange)}
-  .btn-line:hover{background:rgba(240,82,61,.12)}
-  .plan-disc{display:inline-block;align-self:flex-start;margin-top:12px;font-size:12px;font-weight:700;color:var(--ok);background:rgba(78,192,106,.12);border:1px solid rgba(78,192,106,.4);border-radius:999px;padding:4px 11px}
-  .plan-perks{color:var(--muted);font-size:13.5px;line-height:1.6;margin-top:14px;white-space:pre-line;flex:1}
+  .plan-name{font-family:'Space Grotesk';font-weight:700;font-size:18px;color:var(--white);margin-bottom:6px;line-height:1.3}
+  .plan-when{font-size:13.5px;color:var(--muted);font-weight:600}
+  .plan-price{font-family:'Space Grotesk';font-weight:700;font-size:30px;line-height:1;color:var(--white);margin-top:16px}
+  .plan-price .per{font-size:13px;font-weight:500;color:var(--dim);margin-left:5px}
+  .facts{list-style:none;color:var(--muted);font-size:13px;line-height:1.55;margin-top:14px;display:grid;gap:4px;flex:1}
+  .facts b{color:var(--white);font-weight:600}
+  .plan-desc{color:var(--muted);font-size:13.5px;line-height:1.6;margin-top:12px;white-space:pre-line}
+  .perk{display:inline-block;align-self:flex-start;margin-top:12px;font-size:12px;font-weight:700;color:var(--ok);background:rgba(78,192,106,.12);border:1px solid rgba(78,192,106,.4);border-radius:999px;padding:4px 11px}
   .btn{display:block;width:100%;border:none;border-radius:11px;padding:14px;font-weight:700;font-size:15px;font-family:'Space Grotesk';cursor:pointer;transition:.15s;margin-top:18px;text-align:center;text-decoration:none}
   .btn-primary{background:var(--orange);color:#fff}.btn-primary:hover{background:#d8452f}
   .btn-primary:disabled{background:#E4E7EC;color:#98A2B3;cursor:not-allowed}
   .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:var(--white);border-color:var(--dim)}
+  /* After .btn, so its border is not cancelled by .btn's border:none. */
+  .btn-line{background:transparent;border:1px solid var(--orange);color:var(--orange)}
+  .btn-line:hover{background:rgba(240,82,61,.12)}
+  .btn-line:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;background:transparent}
   .card{max-width:460px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:30px}
   .card h2{font-size:22px;margin-bottom:4px}
   .card .sub{color:var(--dim);font-size:13.5px;margin-bottom:20px;line-height:1.5}
   .fld{display:block;font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin:16px 0 7px}
   .fld:first-of-type{margin-top:0}
+  .opt{text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500}
   .input{width:100%;background:var(--near-black);border:1px solid var(--border);border-radius:11px;padding:13px 14px;color:var(--white);font-family:'Raleway';font-size:15px;outline:none;transition:.15s}
   .input:focus{border-color:var(--orange)} .input.invalid{border-color:var(--danger)}
   .summary{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;gap:12px}
   .summary .s-name{font-family:'Space Grotesk';font-weight:700}
-  .summary .s-price{font-family:'Space Grotesk';font-weight:700;color:var(--orange)}
-  .err{color:var(--danger);font-size:13px;margin-top:12px;min-height:18px}
+  .summary .s-price{font-family:'Space Grotesk';font-weight:700;color:var(--orange);white-space:nowrap}
+  .err{color:var(--danger);font-size:13px;margin-top:12px;min-height:18px;line-height:1.5}
+  .err a{color:var(--orange)}
   .fine{color:var(--dim);font-size:11.5px;line-height:1.5;margin-top:14px;text-align:center}
   .center{text-align:center;max-width:460px;margin:0 auto}
   .big{font-size:56px;line-height:1;margin:6px 0 14px} .big.ok{color:var(--ok)}
   .note{border-radius:12px;padding:14px 16px;font-size:13.5px;line-height:1.5;margin-top:8px;background:rgba(240,82,61,.10);border:1px solid rgba(240,82,61,.4);color:#A8321F}
+  .note.is-ok{background:rgba(6,118,71,.09);border-color:rgba(6,118,71,.35);color:#0a5c38}
+  .note.is-plain{background:var(--near-black);border-color:var(--border);color:var(--muted)}
+  .note a{color:var(--orange)}
   .spin{color:var(--dim);text-align:center;padding:50px 0}
+  /* The invite screen: who asked you, and what you are being asked to join. */
+  .invited{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:18px;text-align:center}
+  .invited .who{font-family:'Space Grotesk';font-weight:700;font-size:17px;line-height:1.35}
+  .invited .what{color:var(--muted);font-size:13.5px;margin-top:6px;line-height:1.5}
+  .ck{list-style:none;color:var(--muted);font-size:13.5px;line-height:1.6;display:grid;gap:7px;margin:4px 0 18px}
+  .ck li{position:relative;padding-left:20px}
+  .ck li:before{content:'✓';position:absolute;left:0;top:0;color:var(--ok);font-weight:700}
+  .ck b{color:var(--white);font-weight:700}
 </style>
 </head>
 <body>
@@ -70,100 +94,339 @@
       </div>
       <a class="back" href="/">← Back to booking</a>
     </header>
-    <div id="content"><div class="spin">Loading memberships…</div></div>
+    <div id="content"><div class="spin">Loading leagues…</div></div>
   </div>
 
+<script src="/assets/leagues.js"></script>
 <script>
+/* ============================================================================
+   Leagues, sold by the team (migration 0031).
+
+   One captain pays one price for the whole team, then invites friends by phone number. There is no
+   league night: each team plays once a week whenever it likes, booked from the ordinary booking
+   page, and those rounds are free because the season was paid up front.
+
+   This page does three jobs:
+     · the shop window — what a team costs, how many players fit, how the weekly round works;
+     · "start a team"  — name it, pay for it on Stripe Checkout, come back;
+     · the invite link — ?invite=<token>, where a friend sees who asked them and joins.
+
+   The server contract it speaks is listed above leaguesApi(). Migration 0031 may not be applied and
+   those actions may not exist yet, so every call here has an honest answer for "not there".
+   ========================================================================== */
 const $ = s => document.querySelector(s);
+const L = window.InvictusLeagues;
 const params = new URLSearchParams(location.search);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const validEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e||'').trim());
+// The My Account session saved in this browser. Starting or joining a team needs one.
+function accountToken(){ try{ const s=JSON.parse(localStorage.getItem('invictus-customer')||'null'); return (s&&s.access_token&&(!s.expires_at||s.expires_at*1000>Date.now()))?s.access_token:null; }catch(e){ return null; } }
+const IS_LOCAL = ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+// The account session travels with every call; on localhost the no-login dev account stands in for
+// it, exactly as it does on the booking page (server.js, /api/dev/my-account).
+const authHeaders = () => { const t=accountToken(); return { 'Content-Type':'application/json',
+  ...(t?{ Authorization:'Bearer '+t }:{}), ...(IS_LOCAL?{ 'X-Dev-Account':'1' }:{}) }; };
+const SHOP = '204-488-6177';
 const money = c => '$'+(c/100).toFixed(c%100?2:0);
-const perLabel = p => p==='year' ? '/year' : p==='month' ? '/month' : 'one-time';
-const termLabel = p => p==='year' ? 'Renews yearly' : p==='month' ? 'Renews monthly' : 'One-time';
-const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
+const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
+const season = l => (l.season_start && l.season_end) ? `${fmtDate(l.season_start)} – ${fmtDate(l.season_end)}` : (l.season_start ? `From ${fmtDate(l.season_start)}` : 'Season dates to be announced');
 function render(html){ $('#content').innerHTML = html; }
+// Where to send somebody who has to sign in first, and how to get them back here afterwards.
+const signInHref = back => '/account?next=' + encodeURIComponent(back);
 
-let PLANS = [];
-
-function plansView(){
-  if(!PLANS.length){ render('<div class="center"><h1>Memberships</h1><div class="note">No membership plans are available right now — please check back soon or call the shop.</div><a class="btn btn-ghost" href="/" style="max-width:300px;margin:22px auto 0">Back to booking</a></div>'); return; }
-  render(`
-    <div class="head-block">
-      <div class="eyebrow">Invictus Golf members</div>
-      <h1>Become a member</h1>
-      <div class="sub">Buy online and it's on your account right away — we recognize you by the phone number or email you book with.</div>
-    </div>
-    <div class="plans">${PLANS.map(p=>`
-      <div class="plan">
-        <div class="plan-name"><span class="cdot" style="background:${esc(p.color||'#c4e538')}"></span>${esc(p.name)}</div>
-        <div class="plan-price">${money(p.price_cents)}<span class="per">${perLabel(p.period)}</span></div>
-        ${p.discount_pct?`<div class="plan-disc">${p.discount_pct}% off sessions</div>`:''}
-        ${p.perks?`<div class="plan-perks">${esc(p.perks)}</div>`:'<div class="plan-perks"></div>'}
-        <button class="btn btn-line buy" data-id="${p.id}">Join</button>
-      </div>`).join('')}</div>`);
-  document.querySelectorAll('.buy').forEach(b=>b.onclick=()=>buyView(PLANS.find(p=>p.id===b.dataset.id)));
+/*  POST /api/leagues?action=…
+      list          (public)     → { ok, leagues:[{ id, name, description, fee_cents, team_size,
+                                     weekly_min_mins, season_start, season_end, teamCount, myTeamId }] }
+      buy-team      (signed in)  { leagueId, teamName } → { ok, url } | { ok, teamId }
+      invite-info   (public)     { token } → { ok, leagueName, teamName, invitedBy, teamFull, claimed }
+      invite-claim  (signed in)  { token } → { ok, teamId }
+      my-teams      (signed in)  → { ok, teams:[…] }
+    A 404 means the action is not deployed yet; 401/403 means "not signed in". Both get words, never
+    a blank screen. */
+async function leaguesApi(action, body){
+  let r;
+  try{ r = await fetch('/api/leagues?action='+action, { method:'POST', headers:authHeaders(), body:JSON.stringify(body||{}) }); }
+  catch(e){ return { status:0, ok:false, error:'Could not reach the server. Check your connection and try again.' }; }
+  let j = {};
+  try{ j = await r.json(); }catch(e){}
+  return { status:r.status, ok:r.ok && j.ok !== false && !j.error, ...j };
 }
 
-function buyView(plan){
-  if(!plan) return;
+let LEAGUES = [];
+// null = we could not find out (the action is not deployed); [] = signed in with no team yet.
+let MY_TEAMS = null;
+let SIGNED_IN = !!accountToken();
+
+async function loadMyTeams(){
+  const r = await leaguesApi('my-teams');
+  if(r.ok && Array.isArray(r.teams)){ MY_TEAMS = r.teams; SIGNED_IN = true; return; }
+  if(r.status===401 || r.status===403){ MY_TEAMS = []; SIGNED_IN = false; return; }
+  MY_TEAMS = null;   // unknown — leave SIGNED_IN as the saved session says
+}
+// The team this customer already has in that league, as far as we know.
+function myTeamIn(league){
+  const hit = (MY_TEAMS||[]).find(t => ((t.league||{}).id) === league.id);   // knows the name
+  if(hit) return { id:(hit.team||{}).id, name:(hit.team||{}).name || null };
+  return league.myTeamId ? { id: league.myTeamId, name: null } : null;       // knows only that there is one
+}
+
+/* ---------- the shop window ---------- */
+function listView(){
+  if(!LEAGUES.length){
+    render(`<div class="center"><h1>Leagues</h1>
+      <div class="note is-plain" style="text-align:left">No leagues are taking sign-ups online right now. Check back soon, or call the shop at ${SHOP} and we'll tell you what is coming up.</div>
+      <a class="btn btn-ghost" href="/" style="max-width:300px;margin:22px auto 0">Back to booking</a></div>`);
+    return;
+  }
+  render(`
+    <div class="head-block">
+      <div class="eyebrow">Invictus Golf leagues</div>
+      <h1>Start a team</h1>
+      <div class="sub">A league here is sold by the team, not by the player. One person pays once for the whole team, invites their friends, and then you play a round a week whenever it suits you — and those rounds cost nothing.</div>
+    </div>
+    <div class="how">
+      <div class="how-step"><div class="n">Step 1</div><div class="t">Pay for the team</div><div class="d">One price, one payment, the whole season. You name the team.</div></div>
+      <div class="how-step"><div class="n">Step 2</div><div class="t">Invite your players</div><div class="d">Add them by mobile number from My Account. They tap the link and they are on the team.</div></div>
+      <div class="how-step"><div class="n">Step 3</div><div class="t">Play once a week</div><div class="d">Book any bay at any time you like. Anyone on the team can book it, and it is free.</div></div>
+    </div>
+    <div class="plans">${LEAGUES.map(planCard).join('')}</div>
+    ${MY_TEAMS===null && SIGNED_IN ? `<div class="note is-plain" style="max-width:520px;margin:22px auto 0">We could not check whether you are already on a team — that part of the site is still being switched on. Your team, if you have one, is on <a href="/account">My Account</a>.</div>` : ''}`);
+  document.querySelectorAll('[data-start]').forEach(b => b.onclick = () => {
+    const lg = LEAGUES.find(l => l.id === b.dataset.start);
+    if(!lg) return;
+    if(!SIGNED_IN){ location.href = signInHref('/leagues?start='+encodeURIComponent(lg.id)); return; }
+    startView(lg);
+  });
+}
+
+function planCard(l){
+  const mine = myTeamIn(l);
+  const size = l.team_size != null ? l.team_size : l.capacity;   // 0031 moves capacity → team_size
+  const hrs = Math.round(((l.weekly_min_mins || 180)/60)*10)/10;
+  return `<div class="plan">
+    <div class="plan-name"><span class="cdot" style="background:${esc(l.color||'#4AA3FF')}"></span>${esc(l.name)}</div>
+    <div class="plan-when">${esc(L.scheduleLabel(l))}</div>
+    <div class="plan-price">${l.fee_cents>0 ? money(l.fee_cents)+'<span class="per">per team / season</span>' : 'Free<span class="per">per team</span>'}</div>
+    <ul class="facts">
+      <li>${esc(season(l))}</li>
+      <li>${size ? `Up to <b>${size} players</b> on a team` : 'As many players as you like on a team'}</li>
+      <li>One round a week, <b>any bay, any time</b> — about ${hrs} hour${hrs===1?'':'s'} is the usual</li>
+      <li>Every round is <b>free</b> — the season is paid up front</li>
+      ${l.teamCount!=null ? `<li>${l.teamCount} team${l.teamCount===1?'':'s'} signed up so far</li>` : ''}
+    </ul>
+    ${l.description?`<div class="plan-desc">${esc(l.description)}</div>`:''}
+    <span class="perk">Weekly rounds included</span>
+    ${mine
+      ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'} — see My Account</a>`
+      : `<button class="btn btn-line" data-start="${esc(l.id)}">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>`}
+    ${mine || SIGNED_IN ? '' : '<div class="fine">You need an account to buy a team — it takes a minute, and we bring you straight back here.</div>'}
+  </div>`;
+}
+
+/* ---------- start a team: name it, pay for it ---------- */
+function startView(league){
+  if(!league) return;
+  const paid = league.fee_cents > 0;
+  const size = league.team_size != null ? league.team_size : league.capacity;
   render(`
     <div class="card">
-      <h2>${esc(plan.name)} membership</h2>
-      <div class="sub">${esc(termLabel(plan.period))}. Enter your details, then pay securely — your membership links to this email.</div>
-      <div class="summary"><span class="s-name">${esc(plan.name)}</span><span class="s-price">${money(plan.price_cents)} <span style="color:var(--dim);font-weight:500;font-size:13px">${perLabel(plan.period)}</span></span></div>
-      <label class="fld" for="m-name">Full name</label>
-      <input class="input" id="m-name" placeholder="Your name" autocomplete="name" />
-      <label class="fld" for="m-email">Email</label>
-      <input class="input" id="m-email" type="email" placeholder="you@email.com" autocomplete="email" />
-      <label class="fld" for="m-phone">Phone <span style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">(optional)</span></label>
-      <input class="input" id="m-phone" type="tel" placeholder="(204) 000-0000" autocomplete="tel" />
-      <div class="err" id="m-err"></div>
-      <button class="btn btn-primary" id="m-go">Continue to secure payment</button>
-      <button class="btn btn-ghost" id="m-back">Back to plans</button>
-      <div class="fine">You'll finish on Stripe's secure checkout. This is a one-time payment — no auto-renewal.</div>
+      <h2>Start a team in ${esc(league.name)}</h2>
+      <div class="sub">${esc(season(league))} · ${esc(L.scheduleLabel(league))}</div>
+      <div class="summary"><span class="s-name">One team, whole season</span><span class="s-price">${paid ? money(league.fee_cents) : 'Free'}</span></div>
+      <ul class="ck">
+        <li>You pay <b>once for the team</b>, not per player.</li>
+        <li>You are the captain: you invite ${size ? `up to <b>${size-1} more player${size-1===1?'':'s'}</b>` : 'your players'} by mobile number from My Account.</li>
+        <li>Your team plays <b>once a week, whenever suits you</b> — there is no fixed league night.</li>
+        <li>Those weekly rounds are <b>free</b>, in any bay, and anyone on the team can book one.</li>
+      </ul>
+      <label class="fld" for="t-name">Team name</label>
+      <input class="input" id="t-name" maxlength="60" placeholder="e.g. The Mulligans" autocomplete="off" />
+      <div class="err" id="t-err"></div>
+      <button class="btn btn-primary" id="t-go">${paid ? 'Continue to secure payment' : 'Start the team'}</button>
+      <button class="btn btn-ghost" id="t-back">Back to leagues</button>
+      ${paid ? '<div class="fine">You finish on Stripe\'s secure checkout. One payment for the season — no auto-renewal.</div>' : ''}
     </div>`);
-  $('#m-back').onclick=plansView;
-  const nameEl=$('#m-name'), emailEl=$('#m-email'), phoneEl=$('#m-phone'), err=$('#m-err'), go=$('#m-go');
-  [nameEl,emailEl,phoneEl].forEach(el=>el.addEventListener('input',()=>el.classList.remove('invalid')));
-  go.onclick=async()=>{
-    const name=nameEl.value.trim(), email=emailEl.value.trim(), phone=phoneEl.value.trim();
-    if(name.length<2){ err.textContent='Please enter your name.'; nameEl.classList.add('invalid'); nameEl.focus(); return; }
-    if(!validEmail(email)){ err.textContent='Please enter a valid email — your membership links to it.'; emailEl.classList.add('invalid'); emailEl.focus(); return; }
-    err.textContent=''; go.disabled=true; go.textContent='Redirecting to payment…';
-    let r;
-    try{ r = await (await fetch('/api/membership?action=checkout',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ membershipId:plan.id, name, email, phone }) })).json(); }
-    catch(e){ r={ error:'Network error — please try again.' }; }
-    if(r && r.url){ window.location.href = r.url; return; }
-    go.disabled=false; go.textContent='Continue to secure payment';
-    err.textContent=(r && r.error) || 'Could not start checkout — please try again or call the shop.';
+  $('#t-back').onclick = listView;
+  const nameEl = $('#t-name'), err = $('#t-err'), go = $('#t-go');
+  nameEl.addEventListener('input', () => nameEl.classList.remove('invalid'));
+  nameEl.addEventListener('keydown', e => { if(e.key==='Enter') go.click(); });
+  nameEl.focus();
+  go.onclick = async () => {
+    const teamName = nameEl.value.trim();
+    if(teamName.length < 2){ err.textContent = 'Give your team a name of two characters or more — it is what the other teams see in the standings.'; nameEl.classList.add('invalid'); nameEl.focus(); return; }
+    err.textContent=''; go.disabled=true; go.textContent = paid ? 'Redirecting to payment…' : 'Starting…';
+    const r = await leaguesApi('buy-team', { leagueId: league.id, teamName });
+    if(r.ok && r.url){ window.location.href = r.url; return; }
+    if(r.ok && r.teamId){ doneView(teamName, league.name); return; }
+    go.disabled=false; go.textContent = paid ? 'Continue to secure payment' : 'Start the team';
+    const back = '/leagues?start=' + encodeURIComponent(league.id);
+    if(r.status===401 || r.status===403){
+      err.innerHTML = `Your sign-in has expired. <a href="${esc(signInHref(back))}">Sign in again</a> and we will bring you back here.`;
+      return;
+    }
+    if(r.status===404){ err.textContent = `Buying a team online is not switched on yet. Call the shop at ${SHOP} and we will set your team up over the phone.`; return; }
+    if(r.status===503){ err.textContent = `Team leagues are still being set up here, so we cannot take your payment yet. Call the shop at ${SHOP} and we will get your team in.`; return; }
+    if(r.status===409 && r.teamId){ err.innerHTML = `${esc(r.error || 'You are already on a team in this league.')} <a href="/account">See your team</a>.`; return; }
+    err.textContent = r.error || `Could not start your team. Please try again, or call the shop at ${SHOP}.`;
   };
 }
 
-async function confirmView(sessionId){
-  render('<div class="spin">Confirming your membership…</div>');
-  let r;
-  try{ r = await (await fetch('/api/membership?action=confirm',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ sessionId }) })).json(); }
-  catch(e){ r={ ok:false, error:'Network error.' }; }
-  if(r && r.ok){
-    render(`<div class="center">
-      <div class="big ok">✓</div>
-      <h1>You're a ${esc(r.planName)} member!</h1>
-      <div class="sub" style="color:var(--muted);font-size:14.5px;line-height:1.6;margin:12px auto 0;max-width:420px">Your membership is active${r.expiresAt?` until <b>${esc(fmtDate(r.expiresAt))}</b>`:''} and linked to <b>${esc(r.email||'your account')}</b>. Use that email when you book and we'll recognize you.</div>
-      <a class="btn btn-primary" href="/" style="max-width:320px;margin:26px auto 0">Book a session</a>
-    </div>`);
-    history.replaceState({}, '', '/membership');
-  } else {
-    render(`<div class="center"><h1>Almost there</h1><div class="note">${esc((r&&r.error)||'We couldn’t confirm your membership.')} If you were charged, please contact the shop and we’ll sort it out right away.</div><a class="btn btn-ghost" href="/membership" style="max-width:300px;margin:22px auto 0">Back to memberships</a></div>`);
-  }
+function doneView(teamName, leagueName){
+  render(`<div class="center">
+    <div class="big ok">✓</div>
+    <h1>${esc(teamName)} is in${leagueName ? ' ' + esc(leagueName) : ''}</h1>
+    <div class="note is-ok" style="text-align:left;margin-top:16px">
+      <b>Next: invite your players.</b> Open My Account, type a mobile number, and we give you a link to send them.
+      Then book your first round from the booking page any time this week — it is free.
+    </div>
+    <a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">Go to My Account</a>
+    <a class="btn btn-ghost" href="/?league-round=1" style="max-width:320px;margin:10px auto 0">Book this week's round</a>
+  </div>`);
+  history.replaceState({}, '', '/leagues');
 }
 
+/* ---------- back from Stripe ----------
+   The webhook creates the team. It is usually done before the browser gets back here, but not
+   always — so this looks, and says plainly what to do when the team is not there yet. */
+async function successView(sessionId){
+  render('<div class="spin">Confirming your team…</div>');
+  // ?action=confirm settles the Checkout Session; the Stripe webhook settles the same payment from
+  // the other side, so whichever arrives first wins and the second one is a no-op.
+  if(sessionId){
+    const c = await leaguesApi('confirm', { sessionId });
+    if(c.ok){ doneView(c.teamName || 'Your team', c.leagueName); return; }
+  }
+  await loadMyTeams();
+  const team = (MY_TEAMS||[])[0];
+  if(team){ doneView((team.team||{}).name || 'Your team', (team.league||{}).name); return; }
+  render(`<div class="center">
+    <h1>Payment received</h1>
+    <div class="note is-plain" style="text-align:left">Your team is being set up, which usually takes a few seconds. Check again in a moment, or open My Account.
+      If it still is not there in five minutes, call the shop at ${SHOP} with your payment confirmation and we will finish it by hand — you will not be charged twice.</div>
+    <button class="btn btn-primary" id="s-again" style="max-width:320px;margin:22px auto 0">Check again</button>
+    <a class="btn btn-ghost" href="/account" style="max-width:320px;margin:10px auto 0">Go to My Account</a>
+  </div>`);
+  $('#s-again').onclick = successView;
+}
+
+/* ---------- the invite link: ?invite=<token> ---------- */
+async function inviteView(token){
+  render('<div class="spin">Checking your invitation…</div>');
+  const r = await leaguesApi('invite-info', { token });
+  const back = '/leagues?invite=' + encodeURIComponent(token);
+
+  if(!r.ok){
+    const why = r.status===404 ? 'That invitation link is not valid — it may have been cancelled, or the address may have been cut short in the message.'
+      : r.status===0 ? r.error
+      : (r.error || 'We could not check that invitation just now.');
+    inviteProblem('This invitation did not work', `${why} Ask whoever sent it to invite you again from My Account, or call the shop at ${SHOP}.`);
+    return;
+  }
+  const team = r.teamName || 'the team', league = r.leagueName || 'the league', by = r.invitedBy || 'A teammate';
+  if(r.claimed){
+    inviteProblem('This invitation has already been used',
+      `Somebody has already joined ${team} with this link. If that was you, your team is on My Account. If it was not, ask ${by} to send you a fresh one.`, true);
+    return;
+  }
+  if(r.revoked){
+    inviteProblem('This invitation was cancelled',
+      `${by} cancelled this invitation to ${team}. Ask them to send you a new link, or call the shop at ${SHOP}.`);
+    return;
+  }
+  if(r.teamFull){
+    inviteProblem(`${team} is full`,
+      `There is no room left on ${team} for ${league}. Ask ${by} to sort it out with the shop at ${SHOP} — or start a team of your own.`);
+    return;
+  }
+
+  render(`<div class="card">
+    <h2>You are invited</h2>
+    <div class="sub">Joining a team costs you nothing — the season is already paid for.</div>
+    <div class="invited">
+      <div class="who">${esc(by)} wants you on ${esc(team)}</div>
+      <div class="what">${esc(league)}</div>
+    </div>
+    <ul class="ck">
+      <li>Your team plays <b>once a week, whenever suits you</b> — there is no fixed league night.</li>
+      <li>Rounds are <b>free</b>: any bay, any time, and anyone on the team can book them.</li>
+      <li>You see the team, the weeks you have played and the standings on My Account.</li>
+    </ul>
+    <div class="err" id="i-err"></div>
+    ${SIGNED_IN
+      ? `<button class="btn btn-primary" id="i-join">Join ${esc(team)}</button>`
+      : `<a class="btn btn-primary" href="${esc(signInHref(back))}">Create an account to join</a>
+         <div class="fine">You need an account so the team knows who you are. It takes about a minute — we text you a code — and we bring you straight back to this invitation.</div>`}
+    <a class="btn btn-ghost" href="/leagues">See the leagues first</a>
+  </div>`);
+
+  if(SIGNED_IN) $('#i-join').onclick = async () => {
+    const btn = $('#i-join'), err = $('#i-err');
+    btn.disabled = true; btn.textContent = 'Joining…'; err.textContent = '';
+    const j = await leaguesApi('invite-claim', { token });
+    if(j.ok){ joinedView(team, league, j.already); return; }
+    btn.disabled = false; btn.textContent = 'Join ' + team;
+    if(j.status===401 || j.status===403){ err.innerHTML = `Your sign-in has expired. <a href="${esc(signInHref(back))}">Sign in again</a> and we will bring you back to this invitation.`; return; }
+    if(j.status===409){ err.textContent = j.error || `That invitation has just been used, or the team filled up. Ask ${by} to send another, or call the shop at ${SHOP}.`; return; }
+    if(j.status===404){ err.textContent = `Joining a team online is not switched on yet. Call the shop at ${SHOP}, tell them ${by} invited you, and we will add you.`; return; }
+    if(j.status===503){ err.textContent = `Team leagues are still being set up here, so we cannot add you yet. Call the shop at ${SHOP}, tell them ${by} invited you, and we will do it by hand.`; return; }
+    err.textContent = j.error || `Could not join the team. Please try again, or call the shop at ${SHOP}.`;
+  };
+}
+
+function inviteProblem(title, body, account){
+  render(`<div class="center">
+    <h1>${esc(title)}</h1>
+    <div class="note" style="text-align:left">${esc(body)}</div>
+    ${account ? '<a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">Go to My Account</a>' : ''}
+    <a class="btn btn-ghost" href="/leagues" style="max-width:320px;margin:10px auto 0">See the leagues</a>
+  </div>`);
+}
+
+function joinedView(team, league, already){
+  render(`<div class="center">
+    <div class="big ok">✓</div>
+    <h1>You are on ${esc(team)}</h1>
+    <div class="note is-ok" style="text-align:left;margin-top:16px">
+      ${already ? 'You were already on this team — nothing has changed, and you have not been added twice. ' : ''}You are playing in ${esc(league)}. Your team plays one round a week, whenever you like, and it is free —
+      any of you can book it from the booking page. Your team, the weeks you have played and the standings are on My Account.
+    </div>
+    <a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">See my team</a>
+    <a class="btn btn-ghost" href="/?league-round=1" style="max-width:320px;margin:10px auto 0">Book this week's round</a>
+  </div>`);
+  history.replaceState({}, '', '/leagues');
+}
+
+/* ---------- boot ---------- */
 async function load(){
-  if(params.get('success')==='1' && params.get('session_id')){ confirmView(params.get('session_id')); return; }
-  let canceled = params.get('canceled')==='1';
-  try{ const d = await (await fetch('/api/membership?action=list')).json(); PLANS = (d.plans||[]).filter(p=>p.price_cents>0); }catch(e){ PLANS=[]; }
-  plansView();
-  if(canceled){ history.replaceState({}, '', '/membership'); const n=document.createElement('div'); n.className='note'; n.style.maxWidth='520px'; n.style.margin='18px auto 0'; n.textContent='Payment canceled — you have not been charged. Pick a plan to try again.'; $('#content').prepend(n); }
+  const invite = params.get('invite');
+  if(invite){ await loadMyTeams(); inviteView(invite); return; }
+  if(params.get('success')==='1'){ const sid = params.get('session_id'); history.replaceState({}, '', '/leagues'); successView(sid); return; }
+
+  const [list] = await Promise.all([ leaguesApi('list'), loadMyTeams() ]);
+  if(!list.ok || !Array.isArray(list.leagues)){
+    render(`<div class="center"><h1>Leagues</h1>
+      <div class="note is-plain" style="text-align:left">${esc(list.status===404 ? 'League sign-up is not switched on yet.'
+        : list.status===503 ? 'Team leagues are still being set up here, so we cannot show them yet.'
+        : (list.error || 'We could not load the leagues just now.'))} Call the shop at ${SHOP} and we will tell you what is running and get your team in.</div>
+      <a class="btn btn-ghost" href="/" style="max-width:300px;margin:22px auto 0">Back to booking</a></div>`);
+    return;
+  }
+  LEAGUES = list.leagues;
+  listView();
+
+  // Sent here to start a team, and signed in on the way: open that league's form.
+  const start = params.get('start');
+  if(start && SIGNED_IN){
+    const lg = LEAGUES.find(l => l.id === start);
+    history.replaceState({}, '', '/leagues');
+    if(lg && !myTeamIn(lg)) startView(lg);
+  }
+  if(params.get('canceled')==='1'){
+    history.replaceState({}, '', '/leagues');
+    const n = document.createElement('div');
+    n.className = 'note is-plain'; n.style.maxWidth='520px'; n.style.margin='18px auto 0';
+    n.textContent = 'Payment canceled — you have not been charged, and no team was created. Pick a league to try again.';
+    $('#content').prepend(n);
+  }
 }
 load();
 </script>

@@ -33,9 +33,10 @@
   .btn-primary:disabled{background:#E4E7EC;color:#98A2B3;cursor:not-allowed}
   .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:var(--white);border-color:var(--dim)}
   .err{color:var(--danger);font-size:13px;margin-top:10px;min-height:16px}
+  #pm-err:empty{min-height:0;margin-top:0}   /* no blank strip above "Add a card" until there is an error */
   .ph-hint{font-size:12px;color:var(--dim);margin:5px 0 0 2px;min-height:15px;letter-spacing:.01em}
   .ph-hint.on{color:#067647}
-  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:4px 0 4px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:4px 0 4px}
   .tile{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:16px}
   .tile .t-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;font-family:'Space Grotesk'}
   .tile .t-v{font-family:'Space Grotesk';font-weight:700;font-size:22px;line-height:1.15}
@@ -57,6 +58,76 @@
   .switch a{color:var(--muted);cursor:pointer;text-decoration:underline}
   .spin{color:var(--dim);text-align:center;padding:36px 0}
   .empty{color:var(--dim);font-size:13px;padding:8px 0}
+  .code-in{letter-spacing:.42em;font-family:'Space Grotesk';font-weight:700;font-size:22px;text-align:center;padding:15px 14px}
+  .muted-note{color:var(--dim);font-size:12.5px;line-height:1.5;margin-top:12px}
+  .inherit{background:rgba(78,192,106,.09);border:1px solid rgba(78,192,106,.35);border-radius:12px;padding:13px 15px;margin:2px 0 16px;font-size:13px;color:#0a5c38;line-height:1.5}
+  .steps{display:flex;gap:6px;margin-bottom:18px}
+  .steps i{flex:1;height:3px;border-radius:2px;background:var(--surface-2)}
+  .steps i.on{background:var(--orange)}
+  /* Profile details + post-session feedback (migration 0027) */
+  .details{margin-top:18px;border-top:1px solid var(--border);padding-top:12px}
+  .kv{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:7px 0;font-size:14px}
+  .kv .k{color:var(--dim);flex:none}
+  .kv .v{text-align:right;overflow-wrap:anywhere}
+  .kv .v.is-empty{color:var(--dim)}
+  .opt{font-weight:500;text-transform:none;letter-spacing:0;color:var(--dim)}
+  textarea.input{resize:vertical;min-height:72px;line-height:1.45}
+  .stars{display:flex;gap:8px;margin:2px 0 14px}
+  .star{width:46px;height:46px;border-radius:11px;border:1px solid var(--border);background:var(--near-black);
+    font-size:22px;line-height:1;color:#C9CED6;cursor:pointer;transition:.12s}
+  .star.is-on{color:#E8A317;border-color:#F2C668;background:#FFF7E6}
+  .star:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+  /* My team (migration 0031): a league is sold by the team and played once a week, the team's own time. */
+  .lg-name{font-size:20px;margin-bottom:4px}
+  .lg-table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px}
+  .lg-table th{text-align:left;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);padding:6px 8px;border-bottom:1px solid var(--border);font-family:'Space Grotesk'}
+  .lg-table td{padding:9px 8px;border-bottom:1px solid var(--border)}
+  .lg-table .num{text-align:right;font-family:'Space Grotesk';font-weight:700;white-space:nowrap}
+  .lg-table tr.is-you td{background:rgba(240,82,61,.07)}
+  .lg-table tr.is-you td:first-child{box-shadow:inset 3px 0 0 var(--orange)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .chip{font-size:12.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--near-black);color:var(--muted)}
+  .chip.is-you{border-color:rgba(240,82,61,.5);color:var(--white);font-weight:700}
+  .team-h{font-family:'Space Grotesk';font-weight:700;font-size:13px;margin:12px 0 2px}
+  .lg-tiles{margin:6px 0 12px}
+  .tbl-wrap{overflow-x:auto}
+  .team-box{padding:10px 12px;border:1px solid var(--border);border-radius:12px;margin-top:8px}
+  .team-box.is-mine{border-color:rgba(240,82,61,.45);background:rgba(240,82,61,.04)}
+  .team-box .team-h{margin-top:0}
+  /* This week's round — the one thing a player comes to this card for. */
+  .week-now{border:1px solid var(--border);border-left:3px solid var(--orange);border-radius:12px;padding:15px 16px;margin:4px 0 6px;background:var(--near-black)}
+  .week-now.is-booked{border-left-color:var(--ok);background:rgba(6,118,71,.06);border-color:rgba(6,118,71,.3)}
+  .week-now.is-open{background:rgba(240,82,61,.07);border-color:rgba(240,82,61,.35)}
+  .week-now .t-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-family:'Space Grotesk'}
+  .wn-main{font-family:'Space Grotesk';font-weight:700;font-size:18px;margin-top:5px;line-height:1.3}
+  .wn-sub{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5}
+  .week-now .btn{margin-top:13px}
+  .sched{max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:12px;scrollbar-width:thin}
+  .sched::-webkit-scrollbar{width:8px;display:block} .sched::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .sched-more{font-size:12px;color:var(--dim);margin-top:6px}
+  .sched-row{display:grid;grid-template-columns:34px 104px 1fr;gap:8px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--border);font-size:13.5px}
+  .sched-row:last-child{border-bottom:none}
+  .sched-row .sd-n{font-family:'Space Grotesk';font-weight:700;color:var(--dim);text-align:right}
+  .sched-row .sd-what{color:var(--muted)}
+  .sched-row.is-current{background:rgba(240,82,61,.06)}
+  .sched-row.is-current .sd-what{color:var(--orange);font-weight:700}
+  .sched-row.is-missed .sd-date{color:var(--dim)}
+  .sched-row.is-missed .sd-what{color:var(--danger)}
+  @media(max-width:420px){ .sched-row{grid-template-columns:26px 88px 1fr;gap:6px;padding:9px 8px;font-size:12.5px} }
+  /* Captain's invite control */
+  .inv-link{display:flex;gap:8px;margin-top:10px;align-items:stretch}
+  .inv-link .input{font-size:12.5px;flex:1;min-width:0}
+  .inv-link .btn{width:auto;margin:0;padding:0 16px;font-size:13px;white-space:nowrap}
+  .inv-ok{color:var(--ok);font-size:12.5px;margin-top:8px;line-height:1.5}
+  .lg-note{border-radius:12px;padding:13px 15px;font-size:13px;line-height:1.55;background:var(--near-black);border:1px solid var(--border);color:var(--muted)}
+  /* Saved cards (migration 0029) */
+  .pm-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--border)}
+  .pm-row:last-of-type{border-bottom:none}
+  .pm-name{font-weight:700;font-size:14.5px}
+  .pm-sub{font-size:12.5px;color:var(--dim);margin-top:2px}
+  .pm-row .btn{width:auto;margin:0;padding:8px 14px;font-size:13px}
+  .pm-row .btn.is-confirm{border-color:var(--danger);color:var(--danger)}
+  #pm-element{margin-top:12px}
 </style>
 </head>
 <body>
@@ -72,6 +143,8 @@
     <div id="content"></div>
   </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/assets/leagues.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -110,76 +183,771 @@ function phoneCountryHint(v){
   return 'Not a Canada/US number — include your country code (e.g. +44…)';
 }
 function wirePhoneHint(inp,host){ if(!inp||!host) return; const upd=()=>{ const h=phoneCountryHint(inp.value); host.textContent=h; host.classList.toggle('on',/\(\+/.test(h)); }; inp.addEventListener('input',upd); upd(); }
+/* Another page (leagues.html, an invite link) can send someone here to sign in and then want them
+   back: /account?next=/leagues?invite=… Only a path on this same site is ever followed — never a
+   full URL, never //host — so the parameter cannot be used to bounce anybody somewhere else. */
+function nextUrl(){
+  const n = new URLSearchParams(location.search).get('next') || '';
+  return /^\/(?!\/)[^\s]*$/.test(n) ? n : null;
+}
 const fmtHrs = min => (Math.round((min||0)/6)/10)+' hrs';
 const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
 function render(html){ $('#content').innerHTML = html; }
+/* ============================================================================
+   Sign-in is: prove the phone, then use a password.
 
-function askView(msg){
-  const saved=localStorage.getItem('jhg-contact')||'';
+   The phone step is IDENTITY, not a credential. /api/account?action=start answers the same way
+   for every number on earth, so this page can never be used to find out who is a customer; the
+   server only says whether an account exists once the code is entered, i.e. only to somebody
+   holding the handset. Nothing here decides that — it just renders what the server returns.
+
+   This replaces a page that asked for a phone number and showed the matching customer's
+   prepaid hours and membership with no password at all.
+   ========================================================================== */
+let SB = null;              // supabase client, built from /api/config
+let FLOW = { phone:'', token:'', name:'' };
+
+const steps = n => `<div class="steps">${[1,2,3].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</div>`;
+const setErr = (sel,msg) => { const e=$(sel); if(e) e.textContent = msg||''; };
+
+async function api(action, body){
+  const r = await fetch('/api/account?action='+action, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  let j={}; try{ j = await r.json(); }catch(e){}
+  return { status:r.status, ...j };
+}
+
+async function supa(){
+  if (SB) return SB;
+  const cfg = await (await fetch('/api/config')).json();
+  if (!cfg.supabase || !window.supabase) return null;
+  SB = window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey,
+    { auth:{ persistSession:true, autoRefreshToken:true, storageKey:'invictus-customer' } });
+  return SB;
+}
+
+/* ---------- 0. the choice ---------- */
+/* Two doors, deliberately. Signing IN is email and password like anywhere else — the phone code
+   is not a second factor and pretending otherwise would just make returning customers wait for a
+   text every visit. The code belongs to signing UP, where it does real work: it proves the number
+   before the account inherits the prepaid hours and membership sitting on the imported
+   customer record for that number. */
+function viewLanding(msg){
   render(`<div class="card">
     <h1>My account</h1>
-    <div class="sub">Enter the phone number you book with to see your bookings, points, hours and membership.</div>
-    <label class="fld" for="a-c">Phone number</label>
-    <input class="input" id="a-c" type="tel" placeholder="(204) 000-0000" value="${esc(saved)}" autocomplete="tel" />
-    <div class="ph-hint" id="a-ph-hint"></div>
-    <div class="err" id="a-err">${esc(msg||'')}</div>
-    <button class="btn btn-primary" id="a-go">View my account</button>
+    <div class="sub">${nextUrl()
+      ? 'Sign in, or create an account, and we take you straight back to what you were doing.'
+      : 'See your bookings, prepaid hours and your league team.'}</div>
+    <div class="err" id="l-err">${esc(msg||'')}</div>
+    <button class="btn btn-primary" id="l-in">Sign in</button>
+    <button class="btn btn-ghost" id="l-up">Create an account</button>
+    <div class="muted-note">Booked with us before? Create an account with the mobile number you booked on and your history comes with it.</div>
   </div>`);
-  const inp=$('#a-c'), go=$('#a-go');
-  inp.addEventListener('input',()=>{ inp.classList.remove('invalid'); $('#a-err').textContent=''; });
-  wirePhoneHint(inp, $('#a-ph-hint'));
-  inp.addEventListener('keydown',e=>{ if(e.key==='Enter') go.click(); });
-  go.onclick=()=>{
-    const v=inp.value.trim();
-    if(!validPhone(v)){ $('#a-err').textContent='Enter a valid phone number (international: include your country code, e.g. +44…).'; inp.classList.add('invalid'); inp.focus(); return; }
-    localStorage.setItem('jhg-contact', v);
-    load(v);
-  };
-  if(saved) go.focus();
+  $('#l-in').onclick = () => viewSignIn();
+  $('#l-up').onclick = () => viewPhone();
 }
 
-async function load(contact){
-  render('<div class="card"><div class="spin">Loading your account…</div></div>');
-  let r;
-  try{ r = await (await fetch('/api/booking?phone='+encodeURIComponent(contact))).json(); }catch(e){ r=null; }
-  if(!(r && r.ok)){ askView("We couldn't find an account for that number — use the same phone you book with, or make a booking first."); return; }
-  accountView(r, contact);
-}
-
-function accountView(r, contact){
-  const a=r.account;
-  const upcoming=(r.bookings||[]).filter(b=>b.upcoming);
-  const past=(r.bookings||[]).filter(b=>!b.upcoming);
-  const mem = a.membership
-    ? `<div class="t-v" style="color:${esc(a.membership.color||'#c4e538')}">${esc(a.membership.name)}</div><div class="t-s">${a.membership.expires?('until '+fmtDate(a.membership.expires)):'no expiry'}</div>`
-    : `<div class="t-v" style="color:var(--dim)">None</div><div class="t-s"><a href="/membership" style="color:var(--muted)">See plans →</a></div>`;
-  const bkRow = b => `<div class="bk">
-      <div class="b-main"><b>${esc(fmtDate(b.date))}</b> · ${esc(b.start)} – ${esc(b.end)}<div class="b-sub">${esc(b.bay)}${b.status==='cancelled'?' · cancelled':''}</div></div>
-      ${b.upcoming?`<a href="/manage?b=${esc(b.id)}">Manage</a>`:`<span class="pill ${b.status==='cancelled'?'off':'ok'}">${b.status==='cancelled'?'Cancelled':'Played'}</span>`}
-    </div>`;
+/* ---------- SIGN IN — email + password, no code ---------- */
+function viewSignIn(msg){
   render(`<div class="card">
-    <h1>${a.name?('Hi, '+esc(a.name.split(' ')[0])+'!'):'Your account'}</h1>
-    <div class="sub" style="margin-bottom:14px">Everything tied to ${esc(contact)} — ${a.waiverSigned?'<span class="pill ok">Waiver on file</span>':'<span class="pill warn">Waiver not signed</span>'}</div>
-    <div class="tiles">
-      <div class="tile"><div class="t-k">Points</div><div class="t-v">${a.pointsBalance} pts</div></div>
-      <div class="tile"><div class="t-k">Hours bank</div><div class="t-v">${fmtHrs(a.hoursBalanceMin)}</div></div>
-      <div class="tile"><div class="t-k">Membership</div>${mem}</div>
-    </div>
-    ${a.waiverSigned?'':`<a class="btn btn-ghost" href="/waiver?p=${encodeURIComponent(contact)}" style="margin-top:12px">Sign the waiver before your visit</a>`}
-    <div class="sec-title">Upcoming bookings</div>
-    ${upcoming.length?upcoming.map(bkRow).join(''):'<div class="empty">Nothing booked — treat yourself to a session.</div>'}
-    ${past.length?`<div class="sec-title">Past bookings</div>${past.slice(0,8).map(bkRow).join('')}`:''}
-    <div class="row2">
-      <a class="btn btn-primary" href="/">Book a session</a>
-      <a class="btn btn-ghost" href="/hours">Buy an hours card</a>
-    </div>
-    <div class="switch">Not you? <a id="a-switch">Use a different phone number</a></div>
+    <h1>Sign in</h1>
+    <div class="sub">Use the email and password you signed up with.</div>
+    <label class="fld" for="s-email">Email</label>
+    <input class="input" id="s-email" type="email" autocomplete="email" placeholder="you@example.com" />
+    <label class="fld" for="s-pass" style="margin-top:14px">Password</label>
+    <input class="input" id="s-pass" type="password" autocomplete="current-password" placeholder="Your password" />
+    <div class="err" id="s-err">${esc(msg||'')}</div>
+    <button class="btn btn-primary" id="s-go">Sign in</button>
+    <button class="btn btn-ghost" id="s-up">Create an account instead</button>
+    <div class="switch">Forgotten it? <a id="s-reset">Email me a reset link</a></div>
   </div>`);
-  $('#a-switch').onclick=()=>{ localStorage.removeItem('jhg-contact'); askView(); };
+  const go = async () => {
+    const email = ($('#s-email').value||'').trim().toLowerCase(), password = $('#s-pass').value||'';
+    if(!email || !password){ setErr('#s-err','Enter your email and password.'); return; }
+    const sb = await supa();
+    if(!sb){ setErr('#s-err','Accounts are unavailable right now.'); return; }
+    $('#s-go').disabled = true; $('#s-go').textContent = 'Signing in…';
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    $('#s-go').disabled = false; $('#s-go').textContent = 'Sign in';
+    // One message for a wrong password and for an address with no account: saying which would
+    // turn this box into a way to test whether somebody is a customer.
+    if(error){ setErr('#s-err','That email and password do not match.'); return; }
+    viewProfile();
+  };
+  $('#s-go').onclick = go;
+  $('#s-pass').addEventListener('keydown', e => { if(e.key==='Enter') go(); });
+  $('#s-email').addEventListener('keydown', e => { if(e.key==='Enter') $('#s-pass').focus(); });
+  $('#s-up').onclick = () => viewPhone();
+  $('#s-reset').onclick = async () => {
+    const email = ($('#s-email').value||'').trim().toLowerCase();
+    if(!email){ setErr('#s-err','Type your email address first, then tap the reset link.'); return; }
+    const sb = await supa(); if(!sb) return;
+    await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/account' });
+    $('#s-err').innerHTML = '<span style="color:var(--ok)">If that address has an account, a reset link is on its way.</span>';
+  };
+  $('#s-email').focus();
 }
 
-const saved=localStorage.getItem('jhg-contact');
-if(saved && validPhone(saved)) load(saved); else askView();
+/* ---------- SIGN UP, step 1: the phone ---------- */
+function viewPhone(msg){
+  const saved = localStorage.getItem('jhg-contact') || '';
+  render(`<div class="card">
+    ${steps(1)}
+    <h1>Create an account</h1>
+    <div class="sub">Enter your mobile number and we'll text you a 6-digit code. If you've booked with us before, your prepaid hours come with you.</div>
+    <label class="fld" for="p-in">Mobile number</label>
+    <input class="input" id="p-in" type="tel" inputmode="tel" autocomplete="tel" placeholder="(204) 000-0000" value="${esc(saved)}" />
+    <div class="ph-hint" id="p-hint"></div>
+    <div class="err" id="p-err">${esc(msg||'')}</div>
+    <button class="btn btn-primary" id="p-go">Text me a code</button>
+    <button class="btn btn-ghost" id="p-in2">I already have an account</button>
+  </div>`);
+  wirePhoneHint($('#p-in'), $('#p-hint'));
+  const go = async () => {
+    const v = ($('#p-in').value||'').trim();
+    if(!validPhone(v)){ setErr('#p-err','Enter a valid mobile number, including your country code if you are outside Canada or the US.'); $('#p-in').classList.add('invalid'); return; }
+    $('#p-go').disabled = true; $('#p-go').textContent = 'Sending…';
+    const r = await api('start', { phone: v });
+    $('#p-go').disabled = false; $('#p-go').textContent = 'Text me a code';
+    if(!r.ok){ setErr('#p-err', r.error || 'Could not send a code. Please try again.'); return; }
+    localStorage.setItem('jhg-contact', v);
+    FLOW.phone = v;
+    viewCode();
+  };
+  $('#p-go').onclick = go;
+  $('#p-in2').onclick = () => viewSignIn();
+  $('#p-in').addEventListener('keydown', e => { if(e.key==='Enter') go(); });
+  $('#p-in').focus();
+}
+
+/* ---------- SIGN UP, step 2: the code ---------- */
+function viewCode(msg){
+  render(`<div class="card">
+    ${steps(2)}
+    <h1>Enter your code</h1>
+    <div class="sub">We sent a 6-digit code to <b>${esc(FLOW.phone)}</b>. It expires in 10 minutes.</div>
+    <label class="fld" for="c-in">Code</label>
+    <input class="input code-in" id="c-in" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="––––––" />
+    <div class="err" id="c-err">${esc(msg||'')}</div>
+    <button class="btn btn-primary" id="c-go">Continue</button>
+    <button class="btn btn-ghost" id="c-resend">Send a new code</button>
+    <div class="switch">Wrong number? <a id="c-back">Go back</a></div>
+  </div>`);
+  const go = async () => {
+    const code = ($('#c-in').value||'').replace(/\D/g,'');
+    if(code.length !== 6){ setErr('#c-err','Enter the 6-digit code.'); return; }
+    $('#c-go').disabled = true; $('#c-go').textContent = 'Checking…';
+    const r = await api('verify', { phone: FLOW.phone, code });
+    $('#c-go').disabled = false; $('#c-go').textContent = 'Continue';
+    if(!r.ok){ setErr('#c-err', r.error || 'That code did not work.'); return; }
+    FLOW.token = r.token; FLOW.name = r.name || '';
+    // That number is already claimed — send them to the sign-in door rather than letting them
+    // fill in a whole form the server is going to refuse.
+    if(r.hasAccount){ viewSignIn(`That number already has an account${r.emailHint ? ' (' + r.emailHint + ')' : ''} — sign in below.`); return; }
+    viewSignUp(r.knownCustomer, r.name);
+  };
+  $('#c-go').onclick = go;
+  $('#c-in').addEventListener('keydown', e => { if(e.key==='Enter') go(); });
+  $('#c-in').addEventListener('input', e => { if(e.target.value.replace(/\D/g,'').length===6) go(); });
+  $('#c-resend').onclick = async () => {
+    $('#c-resend').disabled = true;
+    const r = await api('start', { phone: FLOW.phone });
+    $('#c-resend').disabled = false;
+    setErr('#c-err', r.ok ? '' : (r.error||''));
+  };
+  $('#c-back').onclick = () => viewPhone();
+  $('#c-in').focus();
+}
+
+/* ---------- SIGN UP, step 3: the details ---------- */
+function viewSignUp(knownCustomer, name, msg){
+  render(`<div class="card">
+    ${steps(3)}
+    <h1>Almost done</h1>
+    <div class="sub">Your number is verified. Add an email and password so you can sign in from anywhere.</div>
+    ${knownCustomer ? `<div class="inherit"><b>We already know you${name ? ', '+esc(name.split(' ')[0]) : ''}.</b> Your booking history and prepaid hours will be attached to this account.</div>` : ''}
+    <label class="fld" for="n-name">Your name</label>
+    <input class="input" id="n-name" type="text" autocomplete="name" placeholder="First and last name" value="${esc(name||'')}" />
+    <label class="fld" for="n-address" style="margin-top:14px">Address <span class="opt">(optional)</span></label>
+    <input class="input" id="n-address" type="text" autocomplete="street-address" maxlength="200" placeholder="Street, city, postal code" />
+    <label class="fld" for="n-career" style="margin-top:14px">Career <span class="opt">(optional)</span></label>
+    <input class="input" id="n-career" type="text" autocomplete="organization-title" maxlength="120" placeholder="What you do for work" />
+    <label class="fld" for="n-email" style="margin-top:14px">Email</label>
+    <input class="input" id="n-email" type="email" autocomplete="email" placeholder="you@example.com" />
+    <label class="fld" for="n-pass" style="margin-top:14px">Password</label>
+    <input class="input" id="n-pass" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+    <div class="err" id="n-err">${esc(msg||'')}</div>
+    <button class="btn btn-primary" id="n-go">Create account</button>
+    <div class="muted-note">We use your email for booking confirmations and password resets.</div>
+  </div>`);
+  const go = async () => {
+    const nm = ($('#n-name').value||'').trim();
+    const email = ($('#n-email').value||'').trim().toLowerCase();
+    const password = $('#n-pass').value||'';
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ setErr('#n-err','Enter a valid email address.'); return; }
+    if(password.length < 8){ setErr('#n-err','Use a password of at least 8 characters.'); return; }
+    $('#n-go').disabled = true; $('#n-go').textContent = 'Creating…';
+    const r = await api('register', { token: FLOW.token, email, password, name: nm,
+      address: ($('#n-address').value||'').trim(), career: ($('#n-career').value||'').trim() });
+    if(!r.ok){
+      $('#n-go').disabled = false; $('#n-go').textContent = 'Create account';
+      if(r.status === 409) { viewSignIn(r.error); return; }
+      setErr('#n-err', r.error || 'Could not create your account.');
+      return;
+    }
+    const sb = await supa();
+    if(sb) await sb.auth.signInWithPassword({ email, password });
+    $('#n-go').disabled = false; $('#n-go').textContent = 'Create account';
+    viewProfile(r.inherited);
+  };
+  $('#n-go').onclick = go;
+  $('#n-pass').addEventListener('keydown', e => { if(e.key==='Enter') go(); });
+  $('#n-email').focus();
+}
+
+/* ---------- 4. the account itself ---------- */
+async function viewProfile(justInherited){
+  render('<div class="card"><div class="spin">Loading your account…</div></div>');
+  const sb = await supa();
+  if(!sb){ viewLanding('Accounts are unavailable right now.'); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ viewLanding(); return; }
+  // Signed in, and another page is waiting for them: go back to it rather than showing the account.
+  const nxt = nextUrl();
+  if(nxt){ location.replace(nxt); return; }
+
+  // RLS decides what comes back — the page asks for "customers" and the database returns exactly
+  // the caller's own row. There is no id in this query to get wrong.
+  const { data: rows, error } = await sb.from('customers').select('*').limit(1);
+  if(error || !rows || !rows.length){
+    render(`<div class="card"><h1>Almost there</h1>
+      <div class="sub">Your login works, but it is not linked to a customer record yet. Call the shop and we'll sort it out.</div>
+      <button class="btn btn-ghost" id="o-out">Sign out</button></div>`);
+    $('#o-out').onclick = signOut; return;
+  }
+  const { data: bks } = await sb.from('bookings')
+    .select('id,group_id,booking_date,start_min,end_min,bay_id,status,status_label,amount_cents')
+    .order('booking_date', { ascending:false }).limit(50);
+  // Answers already given (0027). A missing table just means nothing is answered yet.
+  const fb = await sb.from('booking_feedback').select('booking_id');
+  const mt = await loadMyTeams(session.access_token);
+  drawProfile(rows[0], bks, justInherited, { answered: fb.error ? [] : (fb.data||[]).map(r => r.booking_id),
+    teams: mt.teams, teamsError: mt.error, bays: mt.bays, myId: rows[0].id });
+}
+
+/* ---------- the league team (migration 0031) ----------
+   POST /api/leagues?action=my-teams → { ok, teams:[{ league, team, roster, weeks, missedWeeks,
+   currentWeek, standings, bays }] }. Migration 0031 may not be applied and the action may not
+   exist yet: a 404 means "leagues aren't switched on", which is not an error worth showing to a
+   customer who has no team — anything else is, because it could be hiding a team they do have. */
+// One way in to the leagues API. The account session travels with it; on localhost the no-login
+// dev account stands in for that session (server.js, /api/dev/my-account).
+async function leaguesPost(action, body, token){
+  const local = ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+  if(!token){
+    const sb = await supa();
+    if(sb){ const { data:{ session } } = await sb.auth.getSession(); token = session && session.access_token; }
+  }
+  let r;
+  try{
+    r = await fetch('/api/leagues?action='+action, { method:'POST', body: JSON.stringify(body || {}), headers:{
+      'Content-Type':'application/json', ...(token?{ Authorization:'Bearer '+token }:{}), ...(local?{ 'X-Dev-Account':'1' }:{}) } });
+  }catch(e){ return { status:0, ok:false, error:'Could not reach the server. Check your connection and try again.' }; }
+  let j = {};
+  try{ j = await r.json(); }catch(e){}
+  return { status:r.status, ok: r.ok && j.ok !== false, ...j };
+}
+
+async function loadMyTeams(token){
+  const j = await leaguesPost('my-teams', {}, token);
+  if(j.ok && Array.isArray(j.teams)) return { teams:j.teams, bays:j.bays || {} };
+  // 404/400: this server does not know the action (leagues are not deployed here). 401/403: not
+  // signed in. None of those is worth telling a customer who may well have no team at all.
+  if([404,400,401,403].includes(j.status)) return { teams:[], bays:{} };
+  if(j.status===503) return { teams:[], bays:{}, error:'Leagues are still being set up here, so we cannot show your team yet.' };
+  return { teams:[], bays:{}, error: j.error || 'We could not load your league team just now.' };
+}
+
+// Right now in the venue's time zone, as a date string and minutes past midnight, so "has this
+// session finished?" means the same thing here as on the server (lib/booking.js hoursUntilBooking).
+// A timestamp as a Winnipeg calendar date (YYYY-MM-DD). Slicing the UTC string would show a
+// 7 PM sign-up as the next day.
+const venueDate = ts => { try { return new Intl.DateTimeFormat('en-CA',{ timeZone:'America/Winnipeg', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(ts)); } catch(e){ return String(ts||'').slice(0,10); } };
+function venueNow(){
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone:'America/Winnipeg', year:'numeric', month:'2-digit',
+    day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).formatToParts(new Date()).map(x => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, min: (+p.hour % 24) * 60 + (+p.minute) };
+}
+
+// The one finished session still waiting for feedback: the most recent in the last 30 days that
+// went ahead and has no answer. A party across several bays counts once.
+function pendingFeedback(bks, answered){
+  const now = venueNow(), done = new Set(answered||[]);
+  const cutoff = new Date(Date.now() - 30*864e5).toISOString().slice(0,10);
+  const doneGroups = new Set((bks||[]).filter(b => b.group_id && done.has(b.id)).map(b => b.group_id));
+  return (bks||[])
+    .filter(b => b.id && !['cancelled','held','blocked'].includes(b.status) && !done.has(b.id)
+      && !(b.group_id && doneGroups.has(b.group_id)) && b.booking_date >= cutoff
+      && (b.booking_date < now.date || (b.booking_date === now.date && b.end_min <= now.min)))
+    .sort((a,b) => b.booking_date.localeCompare(a.booking_date) || b.end_min - a.end_min)[0] || null;
+}
+
+// Signed in, the session token proves who is answering; locally the dev route stands in for it.
+async function sendFeedback(body, dev){
+  let headers = { 'Content-Type':'application/json' }, url = '/api/dev/my-account/feedback';
+  if(!dev){
+    const sb = await supa(); const { data:{ session } } = await sb.auth.getSession();
+    headers.Authorization = 'Bearer ' + (session && session.access_token || '');
+    url = '/api/account?action=feedback';
+  }
+  try{ const r = await fetch(url, { method:'POST', headers, body: JSON.stringify(body) }); return await r.json(); }
+  catch(e){ return { error:'Could not reach the server. Try again in a moment.' }; }
+}
+
+// The account screen. Shared by the signed-in path above and the local no-login path below,
+// so both always show the same thing. opts.dev drops Sign out: there is no session to end.
+function drawProfile(c, bks, justInherited, opts){
+  const dev = !!(opts && opts.dev);
+  const bayName = id => ((opts && opts.bays) || {})[id] || id;
+  const ask = pendingFeedback(bks, opts && opts.answered);
+  const teams = (opts && opts.teams) || [];
+  const today = venueNow().date;
+  const list = (bks||[]).filter(b => b.status !== 'held');
+  const upcoming = list.filter(b => b.booking_date >= today && b.status !== 'cancelled');
+  const past = list.filter(b => b.booking_date < today || b.status === 'cancelled');
+  const hhmm = m => { const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
+  const bkRow = b => `<div class="bk">
+      <div class="b-main"><b>${esc(fmtDate(b.booking_date))}</b><div class="b-sub">${hhmm(b.start_min)}–${hhmm(b.end_min)} · ${esc(bayName(b.bay_id))}${b.status==='cancelled'?' · cancelled':''}</div></div>
+      <div>${b.amount_cents ? '$'+(b.amount_cents/100).toFixed(2) : ''}</div>
+    </div>`;
+
+  render(`
+    ${ask ? `<div class="card" id="fb-card">
+      <div class="sec-title" style="margin-top:0">How was your session?</div>
+      <div class="sub" style="margin-bottom:12px">${esc(fmtDate(ask.booking_date))} · ${hhmm(ask.start_min)}–${hhmm(ask.end_min)} · ${esc(bayName(ask.bay_id))}</div>
+      <div class="stars" role="radiogroup" aria-label="Your rating">${[1,2,3,4,5].map(n =>
+        `<button type="button" class="star" role="radio" aria-checked="false" aria-label="${n} star${n>1?'s':''}" data-n="${n}" tabindex="${n===1?0:-1}">★</button>`).join('')}</div>
+      <label class="fld" for="fb-comment">Comment <span class="opt">(optional)</span></label>
+      <textarea class="input" id="fb-comment" rows="3" maxlength="1000" placeholder="Anything you'd like us to know?"></textarea>
+      <div class="err" id="fb-err"></div>
+      <div class="row2">
+        <button class="btn btn-primary" id="fb-send" disabled>Send feedback</button>
+        <button class="btn btn-ghost" id="fb-skip">Skip this one</button>
+      </div>
+    </div>` : ''}
+    ${justInherited && justInherited.hoursMin ? `<div class="card" style="padding:18px 22px"><div class="inherit" style="margin:0">Welcome back — we've attached <b>${fmtHrs(justInherited.hoursMin)}</b> of prepaid time from your previous visits.</div></div>` : ''}
+    <div class="card">
+      <h1>${esc(c.name || 'My account')}</h1>
+      <div class="sub">${[c.email, c.phone].filter(Boolean).map(esc).join(' · ')}</div>
+      <div class="tiles">
+        <div class="tile"><div class="t-k">Prepaid hours</div><div class="t-v">${fmtHrs(c.hours_balance_min)}</div><div class="t-s">Use on any bay</div></div>
+        <div class="tile"><div class="t-k">League team</div><div class="t-v" style="font-size:16px">${teams.length ? esc((teams[0].team||{}).name || (teams[0].league||{}).name || 'Your team') + (teams.length>1 ? ` <span style="color:var(--dim)">+${teams.length-1}</span>` : '') : '—'}</div><div class="t-s">${teams.length ? esc((teams[0].league||{}).name || 'One free round a week') : '<a href="/leagues" style="color:var(--orange)">Start a team</a>'}</div></div>
+        <div class="tile"><div class="t-k">Waiver</div><div class="t-v" style="font-size:16px">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span>'}</div><div class="t-s">${c.waiver_signed_at ? '' : 'Required before you play'}</div></div>
+      </div>
+      <div class="details" id="details"></div>
+      <div class="row2">
+        <a class="btn btn-primary" href="/">Book a bay</a>
+        ${c.waiver_signed_at ? '' : '<a class="btn btn-ghost" href="/waiver">Sign the waiver</a>'}
+      </div>
+    </div>
+
+    ${teams.map((t,i) => teamCard(t, i, opts)).join('')}
+    ${(opts && opts.teamsError) ? `<div class="card"><div class="sec-title" style="margin-top:0">My team</div><div class="lg-note">${esc(opts.teamsError)} Reload the page, and if it keeps happening call the shop at 204-488-6177 — your team and your booked rounds are safe either way.</div></div>` : ''}
+    <div class="card" id="pm-card"><div class="sec-title" style="margin-top:0">Payment methods</div><div class="spin" style="padding:12px 0">Loading saved cards…</div></div>
+    <div class="card">
+      <div class="sec-title" style="margin-top:0">Upcoming</div>
+      ${upcoming.length ? upcoming.map(bkRow).join('') : '<div class="empty">Nothing booked yet.</div>'}
+      <div class="sec-title">Past visits</div>
+      ${past.length ? past.slice(0,10).map(bkRow).join('') : '<div class="empty">No visits yet.</div>'}
+      ${dev ? '' : '<button class="btn btn-ghost" id="o-out" style="margin-top:18px">Sign out</button>'}
+    </div>`);
+  if(!dev) $('#o-out').onclick = signOut;
+  drawDetails(c, dev);
+  if(ask) wireFeedback(ask, dev);
+  drawCards(dev);
+  wireTeams(teams);
+}
+
+/* ---------- saved cards (migration 0029) ----------
+   Card details never touch this page's code or the database: the list comes from Stripe through the
+   server, and adding a card uses Stripe's own Payment Element and a SetupIntent. */
+async function cardsApi(action, body, dev){
+  let url = '/api/dev/my-account/cards', headers = { 'Content-Type':'application/json' };
+  if(!dev){
+    const sb = await supa(); const { data:{ session } } = await sb.auth.getSession();
+    url = '/api/account?action=' + action;
+    headers.Authorization = 'Bearer ' + (session && session.access_token || '');
+  }
+  try{ const r = await fetch(url, { method:'POST', headers, body: JSON.stringify({ action, ...(body||{}) }) }); return await r.json(); }
+  catch(e){ return { error:'Could not reach the server. Try again in a moment.' }; }
+}
+const BRAND = { visa:'Visa', mastercard:'Mastercard', amex:'American Express', discover:'Discover', jcb:'JCB', diners:'Diners Club', unionpay:'UnionPay' };
+const WALLET = { apple_pay:'Apple Pay', google_pay:'Google Pay', link:'Link' };
+
+async function drawCards(dev){
+  const host = $('#pm-card'); if(!host) return;
+  const r = await cardsApi('cards', null, dev);
+  const head = '<div class="sec-title" style="margin-top:0">Payment methods</div>';
+  if(!r.ok){ host.innerHTML = head + `<div class="empty" style="padding:8px 0">${esc(r.error || 'Saved cards aren’t available right now.')}</div>`; return; }
+  host.innerHTML = head + (r.cards.length ? r.cards.map(k => `<div class="pm-row" data-id="${esc(k.id)}">
+      <div><div class="pm-name">${esc(BRAND[k.brand] || k.brand || 'Card')} •••• ${esc(k.last4)}</div>
+        <div class="pm-sub">Expires ${String(k.expMonth).padStart(2,'0')}/${String(k.expYear).slice(-2)}${k.wallet ? ' · ' + esc(WALLET[k.wallet] || k.wallet) : ''}</div></div>
+      <button class="btn btn-ghost pm-remove" aria-label="Remove ${esc(BRAND[k.brand] || 'card')} ending ${esc(k.last4)}">Remove</button>
+    </div>`).join('') : '<div class="empty" style="padding:8px 0 4px">No saved cards yet. Save one here, or tick “save” when you pay for a booking.</div>')
+    + '<div class="err" id="pm-err"></div><button class="btn btn-ghost" id="pm-add">Add a card</button><div id="pm-form"></div>';
+
+  host.querySelectorAll('.pm-row').forEach(row => {
+    const btn = row.querySelector('.pm-remove');
+    btn.onclick = async () => {
+      if(!btn.classList.contains('is-confirm')){ btn.classList.add('is-confirm'); btn.textContent = 'Tap again to remove'; return; }
+      btn.disabled = true;
+      const x = await cardsApi('card-remove', { paymentMethodId: row.dataset.id }, dev);
+      if(!x.ok){ btn.disabled = false; setErr('#pm-err', x.error || 'Could not remove that card.'); return; }
+      drawCards(dev);
+    };
+  });
+  $('#pm-add').onclick = () => addCardForm(dev);
+}
+
+// Stripe.js is only needed once someone adds a card, so viewing the account never waits on it.
+function loadStripeJs(){
+  if(window.Stripe) return Promise.resolve(true);
+  return new Promise(res => { const el = document.createElement('script'); el.src = 'https://js.stripe.com/v3/';
+    el.onload = () => res(!!window.Stripe); el.onerror = () => res(false); document.head.appendChild(el); });
+}
+
+async function addCardForm(dev){
+  setErr('#pm-err', '');
+  const cfg = await fetch('/api/config').then(r => r.json()).catch(() => ({}));
+  if(!cfg.stripeEnabled || !cfg.publishableKey || !(await loadStripeJs())){ setErr('#pm-err', 'Card saving isn’t available right now. Check your connection and try again.'); return; }
+  $('#pm-add').disabled = true;
+  const r = await cardsApi('card-setup', null, dev);
+  if(!r.ok){ $('#pm-add').disabled = false; setErr('#pm-err', r.error || 'Could not start adding a card.'); return; }
+  const stripe = window.Stripe(cfg.publishableKey);
+  const elements = stripe.elements({ clientSecret: r.clientSecret, appearance: { theme:'stripe', variables:{ colorPrimary:'#F0523D', borderRadius:'11px', fontFamily:'Raleway, system-ui, sans-serif' } } });
+  $('#pm-add').style.display = 'none';
+  $('#pm-form').innerHTML = '<div id="pm-element"></div><div class="row2"><button class="btn btn-primary" id="pm-save" disabled>Save card</button><button class="btn btn-ghost" id="pm-cancel">Cancel</button></div>';
+  const pe = elements.create('payment', { layout:'tabs' });
+  pe.mount('#pm-element');
+  pe.on('ready', () => { $('#pm-save').disabled = false; });
+  $('#pm-cancel').onclick = () => drawCards(dev);
+  $('#pm-save').onclick = async () => {
+    $('#pm-save').disabled = true; $('#pm-save').textContent = 'Saving…'; setErr('#pm-err', '');
+    const { error } = await stripe.confirmSetup({ elements, redirect:'if_required', confirmParams:{ return_url: location.origin + '/account' } });
+    if(error){ $('#pm-save').disabled = false; $('#pm-save').textContent = 'Save card'; setErr('#pm-err', error.message); return; }
+    drawCards(dev);
+  };
+}
+
+/* ---------- My team ----------
+   A league is sold by the team and has no fixed night (migration 0031): the team plays one round a
+   week, whenever it likes, booked from the ordinary booking page and free. So this card answers, in
+   this order: who is on the team, have we played this week, when did we miss, and where are we.
+
+   Every number comes from the server where the server sent one; where it did not, it is worked out
+   with the shared maths in /assets/leagues.js — never with a second copy of it here. */
+function teamCard(t, idx, opts){
+  const L = window.InvictusLeagues;
+  const lg = t.league || {}, team = t.team || {};
+  const strokes = lg.scoring === 'strokes';
+  const today = venueNow().date;
+  const thisMonday = L.weekOf(today);
+  const money = c => '$' + (c/100).toFixed(c % 100 ? 2 : 0);
+  const bayMap = { ...((opts && opts.bays) || {}), ...(t.bays || {}) };
+  const bayName = id => bayMap[id] || id || 'a bay';
+  const hhmm = m => { if(m==null) return ''; const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
+  const shortDay = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ weekday:'short', month:'short', day:'numeric' }); } catch(e){ return iso; } };
+  const shortDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ month:'short', day:'numeric' }); } catch(e){ return iso; } };
+
+  // The season week by week. The server sends this; if it did not, the shared maths builds it.
+  const weeks = (Array.isArray(t.weeks) && t.weeks.length ? t.weeks
+    : L.teamWeeks({ league: lg, todayISO: today, rounds: t.rounds || team.rounds || [] }))
+    .map(w => {
+      const round = w.round || null, past = w.past != null ? w.past : (w.end < today);
+      return { ...w, round, past, current: w.start === thisMonday, missed: w.missed != null ? w.missed : (past && !round) };
+    });
+  const cur = weeks.find(w => w.current) || null;
+  const missed = typeof t.missedWeeks === 'number' ? t.missedWeeks : weeks.filter(w => w.missed).length;
+  const standings = Array.isArray(t.standings) ? t.standings : [];
+  const roster = Array.isArray(t.roster) ? t.roster : [];
+
+  // Who is the captain, and am I them? The server may say so outright, or mark the roster; failing
+  // both, the invite control is still offered and the server is the one that refuses it.
+  const capId = team.captain_customer_id != null ? team.captain_customer_id : null;
+  const isCap = p => !!(p.isCaptain || p.is_captain || (capId && (p.customer_id || p.id) === capId));
+  const isMe  = p => !!(p.isMe || p.you || ((opts && opts.myId) && (p.customer_id || p.id) === (opts && opts.myId)));
+  const captain = roster.find(isCap) || null;
+  const iAmCaptain = team.captain != null ? !!team.captain
+    : (t.isCaptain != null ? !!t.isCaptain : (captain ? isMe(captain) : null));
+
+  const paidCents = team.paid_cents != null ? team.paid_cents : (t.paidCents || 0);
+  const paidAt = team.paid_at || t.paidAt || null;
+  const seasonPaid = !(lg.fee_cents > 0) || !!paidAt || paidCents > 0;
+  const paidPill = !(lg.fee_cents > 0) ? '<span class="pill ok">Free to play</span>'
+    : seasonPaid ? '<span class="pill ok">Season paid</span>' : '<span class="pill warn">Not paid yet</span>';
+
+  // This week: the whole point of the card. Either it is booked and here is where to turn up, or
+  // it is not and here is the button that fixes that.
+  let now;
+  if(!weeks.length){
+    now = `<div class="week-now"><div class="t-k">This week</div><div class="wn-main">Season dates to come</div>
+      <div class="wn-sub">The shop has not set this season's dates yet, so there is nothing to book against a week. Call 204-488-6177 if you were expecting to start.</div></div>`;
+  } else if(!cur){
+    const early = today < weeks[0].start;
+    now = `<div class="week-now"><div class="t-k">This week</div>
+      <div class="wn-main">${early ? 'The season has not started' : 'The season is over'}</div>
+      <div class="wn-sub">${early ? `Play starts the week of ${esc(fmtDate(weeks[0].start))} — ${weeks.length} week${weeks.length===1?'':'s'} in all.`
+        : `It finished ${esc(fmtDate(weeks[weeks.length-1].end))}. Your record is below.`}</div></div>`;
+  } else if(cur.round){
+    const r = cur.round;
+    now = `<div class="week-now is-booked"><div class="t-k">This week's round · week ${cur.number} of ${weeks.length}</div>
+      <div class="wn-main">${esc(fmtDate(r.booking_date))}${r.start_min!=null ? ' · ' + esc(hhmm(r.start_min)) + '–' + esc(hhmm(r.end_min)) : ''}</div>
+      <div class="wn-sub">${esc(bayName(r.bay_id))} · booked and free. Anyone on the team can turn up — you do not each need a booking.</div></div>`;
+  } else {
+    now = `<div class="week-now is-open"><div class="t-k">This week's round · week ${cur.number} of ${weeks.length}</div>
+      <div class="wn-main">Not booked yet</div>
+      <div class="wn-sub">Your team has until Sunday ${esc(shortDate(cur.end))}. Any bay, any time${lg.weekly_min_mins ? `, about ${Math.round((lg.weekly_min_mins/60)*10)/10} hours` : ''} — and it costs nothing, because the season is paid.
+        Any player on the team can book it.</div>
+      <a class="btn btn-primary" href="/?league-round=1">Book this week's round</a></div>`;
+  }
+
+  const weekRows = weeks.map(w => {
+    const what = w.round
+      ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${w.score!=null ? ` · <b>${esc(w.score)}</b>` : ''}`
+      : w.missed ? 'Missed — not played'
+      : w.current ? 'Not booked yet'
+      : 'To come';
+    return `<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}">
+      <span class="sd-n">${w.number}</span>
+      <span class="sd-date">${esc(shortDate(w.start))} – ${esc(shortDate(w.end))}</span>
+      <span class="sd-what">${what}</span></div>`;
+  }).join('');
+
+  const by = lg.team_mode === false ? 'Player' : 'Team';
+  const table = standings.some(r => r.played) ? `<div class="tbl-wrap"><table class="lg-table">
+      <thead><tr><th>#</th><th>${by}</th><th class="num">Played</th><th class="num">${strokes ? 'Average' : 'Points'}</th><th class="num">Best</th></tr></thead>
+      <tbody>${standings.map(r => { const you = r.you || r.key === team.id;
+        return `<tr class="${you?'is-you':''}"><td>${r.played ? r.rank : '—'}</td><td>${esc(r.name)}${you?' <span style="color:var(--dim)">(your team)</span>':''}</td>
+        <td class="num">${r.played}</td><td class="num">${r.played ? (strokes ? r.average : r.total) : '—'}</td><td class="num">${r.best == null ? '—' : r.best}</td></tr>`; }).join('')}</tbody></table></div>`
+    : '<div class="empty" style="padding:10px 0">No results yet — the table fills in once the shop enters the first scores.</div>';
+
+  const chips = roster.length
+    ? `<div class="chips">${roster.map(p => `<span class="chip${isMe(p)?' is-you':''}">${esc(L.publicName(p.name))}${isCap(p)?' · captain':''}${isMe(p)?' (you)':''}</span>`).join('')}</div>`
+    : '<div class="empty" style="padding:8px 0">Nobody else on the team yet.</div>';
+
+  const size = lg.team_size != null ? lg.team_size : lg.capacity;
+  const room = size ? Math.max(0, size - roster.length) : null;
+  // Not the captain: say who can add a player rather than showing a control the server will refuse.
+  const invite = iAmCaptain === false ? `
+    <div class="lg-note" style="margin-top:12px">${captain
+      ? `Only the captain can add players. Ask ${esc(L.publicName(captain.name))} to send an invite from their own My Account.`
+      : 'Only the team captain can add players, and the shop has not recorded one for this team. Call 204-488-6177 and we will add your player for you.'}</div>` : `
+    <div class="sec-title">Invite a player</div>
+    <div class="sub" style="margin-bottom:10px">${iAmCaptain === null ? 'If you are the captain, you' : 'You'} can add players by mobile number${room!=null ? ` — room for ${room} more` : ''}. We give you a link to send them; they tap it and they are on the team.</div>
+    <label class="fld" for="inv-phone-${idx}">Their mobile number</label>
+    <input class="input inv-phone" id="inv-phone-${idx}" type="tel" inputmode="tel" placeholder="(204) 000-0000" ${room===0?'disabled':''} />
+    <label class="fld" for="inv-name-${idx}" style="margin-top:12px">Their name <span class="opt">(optional)</span></label>
+    <input class="input inv-name" id="inv-name-${idx}" type="text" maxlength="120" placeholder="So you can tell the invites apart" ${room===0?'disabled':''} />
+    <div class="err inv-err"></div>
+    ${room===0
+      ? '<div class="lg-note">Your team is full, so there is nobody left to invite. If somebody has dropped out, call the shop at 204-488-6177 and we will free the place up.</div>'
+      : `<button class="btn btn-ghost inv-go" style="margin-top:12px">Create invite link</button>`}
+    <div class="inv-out"></div>`;
+
+  const details = [
+    ['Season', (lg.season_start && lg.season_end) ? `${fmtDate(lg.season_start)} – ${fmtDate(lg.season_end)}` : 'Dates to be announced'],
+    ['Weeks', weeks.length ? `${cur ? `Week ${cur.number} of ${weeks.length}` : `${weeks.length} weeks`}${missed ? ` · ${missed} missed` : ''}` : '—'],
+    ['How it works', L.scheduleLabel(lg)],
+    ['Format', `${lg.team_mode === false ? 'Individual play' : 'Teams'} · ${strokes ? 'strokes — lowest average wins' : 'points — most points wins'}`],
+    ['Captain', captain ? `${L.publicName(captain.name)}${isMe(captain) ? ' (you)' : ''}` : 'Not recorded'],
+    ['Season fee', lg.fee_cents > 0
+      ? (seasonPaid ? `${money(paidCents || lg.fee_cents)} paid for the team${paidAt ? ' ' + fmtDate(venueDate(paidAt)) : ''}` : `${money(lg.fee_cents)} for the team — not paid yet`)
+      : 'Free'],
+  ];
+
+  return `<div class="card" data-team-card="${idx}" data-team-id="${esc(team.id || '')}">
+    <div class="sec-title" style="margin-top:0">My team</div>
+    <h2 class="lg-name">${esc(team.name || 'Your team')} ${paidPill}</h2>
+    <div class="sub" style="margin-bottom:12px">${esc(lg.name || 'League')}${lg.description ? ' · ' + esc(lg.description) : ''}</div>
+    ${now}
+    <div class="sec-title">On the team</div>
+    ${chips}
+    ${invite}
+    <div class="sec-title">Week by week</div>
+    ${weeks.length ? `<div class="sched">${weekRows}</div>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`
+      : '<div class="empty" style="padding:8px 0">The shop has not set this season\'s dates yet.</div>'}
+    <div class="sec-title">Standings</div>
+    ${table}
+    <div class="sec-title">League details</div>
+    ${details.map(([k,v]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}
+  </div>`;
+}
+
+// The captain's invite control: a phone number in, a single-use link out.
+function wireTeams(teams){
+  document.querySelectorAll('[data-team-card]').forEach(card => {
+    const btn = card.querySelector('.inv-go');
+    if(!btn) return;
+    const phone = card.querySelector('.inv-phone'), nameEl = card.querySelector('.inv-name'),
+          err = card.querySelector('.inv-err'), out = card.querySelector('.inv-out');
+    phone.addEventListener('input', () => phone.classList.remove('invalid'));
+    btn.onclick = async () => {
+      const p = (phone.value || '').trim();
+      err.textContent = ''; out.innerHTML = '';
+      if(!validPhone(p)){
+        err.textContent = 'Enter their mobile number with the area code — or the country code if they are outside Canada and the US.';
+        phone.classList.add('invalid'); phone.focus(); return;
+      }
+      btn.disabled = true; btn.textContent = 'Making the link…';
+      const r = await leaguesPost('invite', { teamId: card.dataset.teamId, phone: p, name: (nameEl.value || '').trim() || undefined });
+      btn.disabled = false; btn.textContent = 'Create invite link';
+      if(r.ok && r.alreadyOnTeam){
+        out.innerHTML = `<div class="lg-note" style="margin-top:12px">${esc(p)} is already on your team — there is nothing to send. They will see the team on their own My Account.</div>`;
+        phone.value = ''; nameEl.value = '';
+        return;
+      }
+      if(!r.ok || !r.link){
+        err.textContent = r.status === 404 ? 'Invites are not switched on yet. Call the shop at 204-488-6177 and we will add your player for you.'
+          : r.status === 503 ? 'Leagues are still being set up here, so invites cannot be sent yet. Call the shop at 204-488-6177 and we will add your player by hand.'
+          : (r.status === 401 || r.status === 403) ? (r.error || 'Only the team captain can invite players. Ask your captain to send it, or call the shop at 204-488-6177.')
+          : (r.error || 'Could not make an invite link. Try again, or call the shop at 204-488-6177.');
+        return;
+      }
+      out.innerHTML = `<div class="inv-link"><input class="input inv-url" readonly value="${esc(r.link)}" aria-label="Invite link" />
+          <button type="button" class="btn btn-ghost inv-copy">Copy</button></div>
+        <div class="inv-ok">${r.resent ? `${esc(p)} already had an invitation open, so this is that same link again.` : `Send that link to ${esc(p)} however you like — we text it too if they can be texted.`} It works once, and only for them.</div>`;
+      const field = out.querySelector('.inv-url'), copy = out.querySelector('.inv-copy');
+      copy.onclick = async () => {
+        try{
+          await navigator.clipboard.writeText(field.value);
+          copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1800);
+        }catch(e){
+          field.focus(); field.select();
+          err.textContent = 'This browser would not let us copy for you. The link is selected — press ⌘C (or Ctrl+C) to copy it.';
+        }
+      };
+      phone.value = ''; nameEl.value = '';
+    };
+  });
+}
+
+// Address and career: shown on the account, editable in place.
+function drawDetails(c, dev, editing){
+  const host = $('#details'); if(!host) return;
+  const row = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v${v?'':' is-empty'}">${v ? esc(v) : 'Not added'}</span></div>`;
+  if(!editing){
+    host.innerHTML = row('Address', c.address) + row('Career', c.career) +
+      '<button class="btn btn-ghost" id="d-edit" style="margin-top:8px;padding:10px">Edit details</button>';
+    $('#d-edit').onclick = () => drawDetails(c, dev, true);
+    return;
+  }
+  host.innerHTML = `
+    <label class="fld" for="d-address">Address <span class="opt">(optional)</span></label>
+    <input class="input" id="d-address" type="text" autocomplete="street-address" maxlength="200" value="${esc(c.address||'')}" placeholder="Street, city, postal code" />
+    <label class="fld" for="d-career" style="margin-top:12px">Career <span class="opt">(optional)</span></label>
+    <input class="input" id="d-career" type="text" autocomplete="organization-title" maxlength="120" value="${esc(c.career||'')}" placeholder="What you do for work" />
+    <div class="err" id="d-err"></div>
+    <div class="row2"><button class="btn btn-primary" id="d-save">Save</button><button class="btn btn-ghost" id="d-cancel">Cancel</button></div>`;
+  $('#d-cancel').onclick = () => drawDetails(c, dev);
+  $('#d-address').focus();
+  $('#d-save').onclick = async () => {
+    const patch = { address: $('#d-address').value.trim() || null, career: $('#d-career').value.trim() || null };
+    $('#d-save').disabled = true; $('#d-save').textContent = 'Saving…';
+    let error = null;
+    if(dev){
+      try{ const r = await fetch('/api/dev/my-account/profile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch) });
+        const j = await r.json(); if(!j.ok) error = j.error || 'Could not save.'; }
+      catch(e){ error = 'Could not reach the server.'; }
+    } else {
+      const sb = await supa();
+      const r = await sb.from('customers').update(patch).eq('id', c.id);
+      if(r.error) error = r.error.message;
+    }
+    if(error){ $('#d-save').disabled = false; $('#d-save').textContent = 'Save'; setErr('#d-err', 'Not saved: ' + error); return; }
+    Object.assign(c, patch);
+    drawDetails(c, dev);
+  };
+}
+
+// Stars behave as a radio group: Tab reaches the group, arrow keys move the choice.
+function wireFeedback(b, dev){
+  const stars = [...document.querySelectorAll('#fb-card .star')];
+  let rating = 0;
+  const pick = n => {
+    rating = n;
+    stars.forEach(s => { const on = +s.dataset.n <= n; s.classList.toggle('is-on', on);
+      s.setAttribute('aria-checked', String(+s.dataset.n === n)); s.tabIndex = +s.dataset.n === n ? 0 : -1; });
+    $('#fb-send').disabled = false;
+  };
+  stars.forEach(s => {
+    s.onclick = () => pick(+s.dataset.n);
+    s.onkeydown = e => {
+      const d = (e.key==='ArrowRight'||e.key==='ArrowUp') ? 1 : (e.key==='ArrowLeft'||e.key==='ArrowDown') ? -1 : 0;
+      if(!d) return;
+      e.preventDefault();
+      const n = Math.min(5, Math.max(1, (rating || +s.dataset.n) + d));
+      pick(n); stars[n-1].focus();
+    };
+  });
+  const finish = async (skipped) => {
+    const btn = skipped ? $('#fb-skip') : $('#fb-send');
+    btn.disabled = true;
+    const r = await sendFeedback({ bookingId: b.id, rating, comment: $('#fb-comment').value.trim(), skipped }, dev);
+    if(!r.ok){ btn.disabled = false; setErr('#fb-err', r.error || 'Could not save your feedback.'); return; }
+    $('#fb-card').innerHTML = skipped
+      ? '<div class="sub" style="margin:0">No problem — we won\'t ask about that session again.</div>'
+      : '<div class="sec-title" style="margin-top:0">Thank you</div><div class="sub" style="margin:0">Your feedback went straight to the team.</div>';
+  };
+  $('#fb-send').onclick = () => finish(false);
+  $('#fb-skip').onclick = () => finish(true);
+}
+
+// LOCAL ONLY: open the account for DEV_ACCOUNT_PHONE without signing in (server.js,
+// /api/dev/my-account). That route does not exist on the live site, so there the 404 sends
+// this straight back to the normal sign-in. Returns true when it has drawn something.
+async function devProfile(){
+  if(!['localhost','127.0.0.1','[::1]'].includes(location.hostname)) return false;
+  let r, j;
+  try{ r = await fetch('/api/dev/my-account'); j = await r.json(); }catch(e){ return false; }
+  if(r.status===404) return false;
+  if(!j.ok){
+    render(`<div class="card"><h1>Could not load the account</h1><div class="sub">${esc(j.error||'Unknown error.')} Check the server window for details.</div></div>`);
+    return true;
+  }
+  // The team comes from the leagues API like it does for a signed-in customer, not from this dev
+  // route, so the panel below is the same one the live site draws.
+  const mt = await loadMyTeams();
+  drawProfile(j.customer, j.bookings, null, { dev:true, answered: j.answered,
+    teams: mt.teams, teamsError: mt.error, bays: { ...(j.bays || {}), ...(mt.bays || {}) }, myId: j.customerId || null });
+  return true;
+}
+
+async function signOut(){
+  const sb = await supa();
+  if(sb) await sb.auth.signOut();
+  FLOW = { phone:'', token:'', name:'' };
+  viewLanding();
+}
+
+/* ---------- boot: an existing session skips straight to the account ---------- */
+(async () => {
+  const sb = await supa();
+  let session = null;
+  if(sb) ({ data:{ session } } = await sb.auth.getSession());
+  // Sent here by another page (a league invite, say) purely to sign in: if they already are,
+  // hand them straight back rather than showing them an account they did not ask for.
+  const nxt = nextUrl();
+  if(nxt){
+    if(session){ location.replace(nxt); return; }
+    // On localhost the no-login dev account counts as being signed in.
+    if(['localhost','127.0.0.1','[::1]'].includes(location.hostname)){
+      try{ const r = await fetch('/api/dev/my-account'); if(r.ok){ location.replace(nxt); return; } }catch(e){}
+    }
+  }
+  if(await devProfile()) return;
+  if(session){ viewProfile(); return; }
+  viewLanding();
+})();
 </script>
 </body>
 </html>

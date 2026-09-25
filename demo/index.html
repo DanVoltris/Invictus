@@ -110,6 +110,9 @@
     transition: border-color .12s, box-shadow .12s, background .12s, color .12s, height .45s cubic-bezier(.4,0,.2,1), font-size .45s; }
   .cal-day.empty { background: transparent; border: none; cursor: default; }
   .cal-day.past { opacity: .45; cursor: not-allowed; }
+  .cal-day.is-beyond { opacity: .3; cursor: not-allowed; }
+  .cal-hint { font-size: 12.5px; color: var(--dim); margin-top: 12px; line-height: 1.5; }
+  .cal-hint a { color: var(--orange); }
   .cal-day.today:not(.sel) { border-color: var(--dim); color: var(--green); }
   .cal-day.sel { background: var(--green); border-color: var(--green); color: #fff; }
   .cal-day:hover:not(.sel):not(.past):not(.empty) { border-color: var(--green); }
@@ -139,7 +142,13 @@
   .grid-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px; -webkit-overflow-scrolling: touch; }
   .promo-note { background: rgba(240,82,61,.09); border: 1px solid rgba(240,82,61,.38); color: #A8321F;
     border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 14.5px; font-weight: 500; }
-  .grid { width: 100%; min-width: 680px; border-collapse: separate; border-spacing: 6px; }
+  /* table-layout:fixed so every bay column is the same width. With the default (auto) the
+     browser sizes each column to its content, so "Assiniboine Credit Union Bay #1" got a
+     visibly wider column of slots than "Public Bay #4" — the grid read as though the bays
+     were different sizes. Fixed divides the space after the 70px time column equally, and
+     long names wrap instead of stretching their column. */
+  .grid { width: 100%; min-width: 680px; border-collapse: separate; border-spacing: 6px;
+    table-layout: fixed; }
   .grid th { font-family: 'Space Grotesk'; font-weight: 700; font-size: 13.5px; text-align: center; padding: 4px 6px 10px;
     color: var(--white); vertical-align: bottom; }
   .grid th .bmeta { display: block; font-family: 'Raleway'; font-weight: 500; font-size: 11px; color: var(--dim); margin-top: 3px; letter-spacing: .02em; }
@@ -178,6 +187,9 @@
   .cell.sel { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
   .cell.sel .price, .cell.sel .per { color: #fff; }
   .closed-note { color: var(--dim); padding: 30px 0; text-align: center; font-size: 14px; }
+  /* "Christmas — open 5:00 AM to 11:00 PM today": why the usual hours are not on offer. */
+  .short-day { margin: 0 0 12px; padding: 10px 12px; border-radius: 9px; font-size: 13.5px;
+    background: rgba(240,82,61,.08); border: 1px solid rgba(240,82,61,.25); color: var(--white); }
 
   /* Sticky checkout bar */
   .checkbar {
@@ -254,6 +266,7 @@
   .input { width: 100%; padding: 13px 14px; background: var(--near-black); border: 1px solid var(--border);
     border-radius: 10px; color: var(--white); font-family: inherit; font-size: 14px; margin-bottom: 12px; }
   .input:focus { outline: none; border-color: var(--green); }
+  textarea.input { resize: vertical; min-height: 64px; line-height: 1.45; }
   .stripe-badge { display: flex; align-items: center; gap: 8px; justify-content: center;
     color: var(--dim); font-size: 12px; margin: 14px 0 18px; }
   .card-row { display: flex; gap: 12px; }
@@ -302,13 +315,95 @@
   .hours-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
   .hours-opt .ho-txt b { color: var(--white); }
   .hours-opt .btn { width: 100%; }
-  /* Loyalty points option in checkout (green accent to read as a reward) */
-  .points-opt { margin-top: 14px; background: rgba(78,192,106,.08); border: 1px solid rgba(78,192,106,.4); border-radius: 12px; padding: 13px 14px; }
-  .points-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
-  .points-opt .ho-txt b { color: var(--white); }
-  .points-opt .btn { width: 100%; }
-  .points-opt .applied { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: #067647; }
-  .points-opt .applied a { color: var(--dim); cursor: pointer; text-decoration: underline; font-size: 12px; }
+  /* "This gift card covers the whole session" option in checkout (green accent to read as credit) */
+  .gift-opt { margin-top: 14px; background: rgba(78,192,106,.08); border: 1px solid rgba(78,192,106,.4); border-radius: 12px; padding: 13px 14px; }
+  .gift-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
+  .gift-opt .ho-txt b { color: var(--white); }
+  .gift-opt .btn { width: 100%; }
+
+  /* League round (migration 0031): a team's one free round a week, booked from this page.
+     The banner sits under the hero; the panel is the first thing inside checkout. */
+  .lg-bar { display: none; margin: 20px 0 0; background: rgba(240,82,61,.08); border: 1px solid rgba(240,82,61,.4);
+    border-left: 4px solid var(--orange); border-radius: var(--radius); padding: 16px 18px; }
+  .lg-bar.is-booked { background: rgba(6,118,71,.07); border-color: rgba(6,118,71,.35); border-left-color: #067647; }
+  .lg-bar .lg-k { font-family: 'Space Grotesk'; font-weight: 700; font-size: 11px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--orange); margin-bottom: 7px; }
+  .lg-bar.is-booked .lg-k { color: #067647; }
+  .lg-bar .lg-line { font-size: 14.5px; line-height: 1.55; color: var(--muted); margin-bottom: 4px; }
+  .lg-bar .lg-line:last-of-type { margin-bottom: 0; }
+  .lg-bar .lg-line b { color: var(--white); }
+  .lg-bar .btn { margin-top: 12px; padding: 11px 18px; font-size: 14px; }
+  .lg-panel { border-radius: 12px; padding: 15px 16px; margin-bottom: 18px; font-size: 13.5px; line-height: 1.55; }
+  .lg-panel.is-offer { background: rgba(240,82,61,.08); border: 1px solid rgba(240,82,61,.4); }
+  .lg-panel.is-armed { background: rgba(6,118,71,.09); border: 1px solid rgba(6,118,71,.4); }
+  .lg-panel.is-note { background: var(--near-black); border: 1px solid var(--border); color: var(--muted); }
+  .lg-panel .lg-t { font-family: 'Space Grotesk'; font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+  .lg-panel.is-armed .lg-t { color: #067647; font-size: 18px; }
+  .lg-panel .lg-d { color: var(--muted); }
+  .lg-panel .lg-d b { color: var(--white); }
+  .lg-facts { list-style: none; margin: 11px 0 0; padding: 0; }
+  .lg-facts li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 13px;
+    border-bottom: 1px dashed rgba(16,24,40,.12); }
+  .lg-facts li:last-child { border-bottom: none; }
+  .lg-facts .k { color: var(--muted); }
+  .lg-facts .v { font-weight: 700; text-align: right; }
+  .lg-panel .btn { width: 100%; margin-top: 12px; }
+  .lg-panel .btn + .btn { margin-top: 8px; }
+  .lg-panel .lg-off { display: block; text-align: center; margin-top: 10px; font-size: 12.5px; color: var(--dim);
+    cursor: pointer; text-decoration: underline; }
+  .lg-panel .lg-err { color: var(--danger); font-size: 13px; margin-top: 10px; line-height: 1.5; }
+
+  /* THE applied-credit strip. One block, one row per credit the server reported — member %,
+     promo, gift card. Adding a fourth credit is a new entry in the CREDIT_ROWS loop in
+     renderCredits(), never another sibling div beside this one. */
+  .credits { margin-top: 14px; background: rgba(78,192,106,.08); border: 1px solid rgba(78,192,106,.4);
+    border-radius: 12px; padding: 6px 14px; display: none; }
+  .credits.on { display: block; }
+  .credit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-size: 13px; color: #067647; padding: 8px 0; border-bottom: 1px solid rgba(78,192,106,.22); }
+  .credit-row:last-child { border-bottom: none; }
+  .credit-row .cr-txt { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .credit-row .cr-amt { font-family: 'Space Grotesk'; font-weight: 700; white-space: nowrap; }
+  .credit-row a.cr-x { color: var(--dim); cursor: pointer; text-decoration: underline; font-size: 12px; flex: none; }
+  .credit-row a.cr-x:hover { color: var(--danger); }
+
+  /* Promo-code + gift-card entry. Same shape for both; only the labels differ. */
+  .code-box { margin-top: 14px; }
+  .code-row { display: flex; gap: 8px; align-items: stretch; }
+  .code-row .input { margin-bottom: 0; text-transform: uppercase; letter-spacing: .06em; font-family: 'Space Grotesk', monospace; }
+  .code-row .btn { flex: none; padding: 13px 15px; }
+  .code-lbl { font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .code-msg { font-size: 12.5px; margin-top: 7px; line-height: 1.45; min-height: 1px; }
+  .code-msg.err { color: var(--danger); }
+  .code-msg.ok { color: #067647; }
+  .code-msg.info { color: var(--muted); }
+  .code-toggle { background: none; border: none; padding: 0; color: var(--muted); font-family: inherit;
+    font-size: 12.5px; text-decoration: underline; cursor: pointer; }
+  .code-toggle:hover { color: var(--orange); }
+  .code-fields { margin-top: 12px; display: none; }
+  .code-fields.on { display: block; }
+  .code-fields .code-box:first-child { margin-top: 0; }
+
+  /* Waiting list — the "that slot is full" path */
+  .cell.booked.waitable { cursor: pointer; }
+  .cell.booked.waitable:hover { border-color: #B3261E; box-shadow: 0 0 0 1px rgba(179,38,30,.5) inset; }
+  .cell.booked .wl-hint { display: block; font-family: 'Raleway'; font-weight: 600; font-size: 9px;
+    letter-spacing: .04em; text-transform: uppercase; color: var(--dim); margin-top: 3px; }
+  .cell.booked.shut .shut-why { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; font-family: 'Raleway'; font-weight: 600; font-size: 9px; letter-spacing: .04em;
+    line-height: 1.25; color: var(--dim); margin-top: 3px; overflow-wrap: anywhere; text-transform: none; }
+  .wl-row { display: flex; gap: 12px; }
+  .wl-row > * { flex: 1; min-width: 0; }
+  .wl-lbl { font-size: 12px; color: var(--muted); margin: 2px 0 6px; font-weight: 600; }
+  .wl-bays { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+  .wl-bay { font-size: 12px; padding: 7px 11px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--near-black); color: var(--muted); cursor: pointer; user-select: none; transition: .12s; }
+  .wl-bay.on { border-color: var(--green); color: var(--green); background: rgba(240,82,61,.09); }
+  .wl-consent { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: var(--muted);
+    line-height: 1.45; margin-bottom: 10px; cursor: pointer; }
+  .wl-consent input { flex: none; margin-top: 2px; width: 16px; height: 16px; accent-color: var(--green); }
+  .wl-note { font-size: 12px; color: var(--dim); line-height: 1.5; margin-top: 4px; }
+
   .conf .recap { text-align: left; background: var(--near-black); border: 1px solid var(--border);
     border-radius: 12px; padding: 16px; margin: 20px 0; }
   .conf .recap .row { display:flex; justify-content: space-between; padding: 7px 0; font-size: 14px; }
@@ -396,7 +491,7 @@
     </div>
     <div class="nav-links">
       <a class="nav-mem" href="/hours">Hours Cards</a>
-      <a class="nav-mem" href="/membership">Memberships</a>
+      <a class="nav-mem" href="/leagues">Leagues</a>
       <a class="nav-mem nav-acct" href="/account">My Account</a>
     </div>
   </div>
@@ -416,6 +511,9 @@
     <span class="sep">›</span>
     <div class="step" data-s="4"><span class="dot">4</span> Confirmed</div>
   </div>
+
+  <!-- League round banner — filled in by renderLeagueBar() for a customer who is on a team. -->
+  <div class="lg-bar" id="lg-bar"></div>
 </div>
 
 <div class="wrap stack">
@@ -436,6 +534,7 @@
           </div>
         </div>
         <div class="cal-grid" id="cal-grid"></div>
+        <div class="cal-hint" id="cal-hint"></div>
       </div>
       <div class="day-summary" id="day-summary"></div>
     </div>
@@ -479,6 +578,10 @@
 
     <div class="mini-recap" id="pay-recap"></div>
 
+    <!-- League round: outside both payment modes on purpose, because claiming the team's weekly
+         round replaces paying rather than being one way of doing it. -->
+    <div id="league-round"></div>
+
     <!-- Real Stripe (Payment Element, dark theme) — used when the server is running with keys -->
     <div id="stripe-mode" style="display:none">
       <div class="hold-timer" id="hold-timer" style="display:none"></div>
@@ -488,19 +591,47 @@
           <input class="input" id="sc-email" placeholder="Email" type="email" />
           <input class="input" id="sc-phone" placeholder="Phone" type="tel" />
           <div class="ph-hint" id="sc-ph-hint"></div>
+          <!-- CASL express consent. UNTICKED on purpose: a pre-ticked box is not consent, and
+               customers.sms_consent is what lib/notify.js checks before any text goes out. The
+               wording has to say who is texting and how to stop — do not shorten it. -->
           <label class="sms-toggle">
-            <input type="checkbox" id="sc-sms" checked />
+            <input type="checkbox" id="sc-sms" />
             <span class="sms-track"><span class="sms-thumb"></span></span>
-            <span class="sms-txt">Text me updates about this booking<small>Standard message rates may apply</small></span>
+            <span class="sms-txt">Yes, Invictus Golf can text me about this booking and other offers<small>Reply STOP to any text to stop them. Standard message rates may apply.</small></span>
           </label>
-          <div id="member-pay" style="display:none"></div>
+          <textarea class="input" id="sc-note" rows="2" maxlength="500" aria-label="Note for the shop (optional)"
+            placeholder="Note for the shop (optional) — e.g. bringing our own clubs, it's a birthday"></textarea>
+          <!-- ONE applied-credit strip for every discount the server reports (member %, promo,
+               gift card). Built by renderCredits() as a loop — see the comment there. -->
+          <div class="credits" id="credit-strip"></div>
+          <!-- Offers, not credits: each one is a different way to PAY, not money off this charge. -->
           <div id="hours-pay" style="display:none"></div>
-          <div id="points-pay" style="display:none"></div>
+          <div id="gift-cover" style="display:none"></div>
+          <div class="code-box">
+            <button type="button" class="code-toggle" id="code-open">Have a promo code or a gift card?</button>
+            <div class="code-fields" id="code-fields">
+              <div class="code-box">
+                <div class="code-lbl">Promo code</div>
+                <div class="code-row">
+                  <input class="input" id="promo-code" placeholder="SUMMER20" autocomplete="off" spellcheck="false" />
+                  <button type="button" class="btn btn-line" id="promo-apply">Apply</button>
+                </div>
+                <div class="code-msg" id="promo-msg"></div>
+              </div>
+              <div class="code-box">
+                <div class="code-lbl">Gift card</div>
+                <div class="code-row">
+                  <input class="input" id="gift-code" placeholder="XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" />
+                  <button type="button" class="btn btn-line" id="gift-apply">Apply</button>
+                </div>
+                <div class="code-msg" id="gift-msg"></div>
+              </div>
+            </div>
+          </div>
           <div class="good-to-know">
             <div class="gtk-title">Good to know</div>
             <ul>
-              <li>You earn loyalty points for time played. Check your balance any time under My Account.</li>
-              <li>Have an hours card or a membership? Enter the phone number it's linked to and we'll recognize it here.</li>
+              <li>Have an hours card or a league spot? Enter the phone number it's linked to and we'll recognize it here.</li>
               <li>First visit? Sign the participant waiver online before you arrive and skip the front desk.</li>
             </ul>
           </div>
@@ -539,6 +670,48 @@
   </div>
 </div>
 
+<!-- WAITING LIST MODAL — opened by clicking a full slot in the grid -->
+<div class="overlay" id="wl-overlay">
+  <div class="modal" id="wl-modal">
+    <button class="modal-close" id="wl-close" aria-label="Close waiting list">✕</button>
+    <h3>Join the waiting list</h3>
+    <div class="sub" id="wl-sub"></div>
+
+    <div id="wl-form">
+      <input class="input" id="wl-name" placeholder="Full name" />
+      <input class="input" id="wl-email" placeholder="Email" type="email" />
+      <input class="input" id="wl-phone" placeholder="Mobile number" type="tel" />
+      <div class="ph-hint" id="wl-ph-hint"></div>
+
+      <div class="wl-lbl">Which bays would you take?</div>
+      <div class="wl-bays" id="wl-bays"></div>
+
+      <div class="wl-lbl">How wide is your window?</div>
+      <div class="wl-row">
+        <div>
+          <input class="input" id="wl-from" type="time" step="1800" />
+        </div>
+        <div>
+          <input class="input" id="wl-to" type="time" step="1800" />
+        </div>
+      </div>
+      <div class="wl-lbl">Session length</div>
+      <div id="wl-dur-host"></div>
+
+      <!-- CASL: two separate, unticked boxes. api/waitlist.js refuses an entry with neither. -->
+      <label class="wl-consent"><input type="checkbox" id="wl-email-ok" /><span>Email me when a bay opens up on this date.</span></label>
+      <label class="wl-consent"><input type="checkbox" id="wl-sms-ok" /><span>Text me when a bay opens up. Standard message rates may apply.</span></label>
+
+      <div class="pay-error" id="wl-error"></div>
+      <button class="btn btn-primary btn-block" id="wl-join" style="margin-top:6px">Join the list</button>
+      <div class="wl-note">We tell one person at a time and hold the bay for them, so an offer is a real slot — not a race. You can leave the list from the link we send.</div>
+    </div>
+
+    <div id="wl-done" style="display:none"></div>
+    <button class="btn btn-ghost btn-block" id="wl-cancel" style="margin-top:10px">Back</button>
+  </div>
+</div>
+
 <!-- CONFIRMATION MODAL -->
 <div class="overlay" id="conf-overlay">
   <div class="modal conf">
@@ -557,6 +730,8 @@
   <a class="vb-link" href="https://www.voltrisbooking.com" target="_blank" rel="noopener">Voltris Booking</a>
 </footer>
 
+<!-- The week/standings maths a league leans on, shared with My Account and the manager portal. -->
+<script src="/assets/leagues.js"></script>
 <script>
 /* ---------- Fallback configuration ----------
    Invictus Golf's real bays, CA$20/hour rate and 24-hour opening.
@@ -600,6 +775,10 @@ let bookedRanges = {};   // { bayId: [[startMin,endMin], …] } for the selected
 let closedRanges = {};   // { bayId: [[startMin,endMin], …] } closed by the recurring weekly status pattern
 let heldRanges = {};     // { bayId: [[startMin,endMin], …] } another customer has in their cart right now
 let dateHoursOverride = null;  // [open,close] from a schedule override for state.date, or null
+let unavailableRanges = {};  // { bayId: [[startMin,endMin], …] } the VENUE closed (override or weekly band) — never "Booked"
+let closedReasons = {};      // { bayId: [[startMin,endMin,reason], …] } only reasons staff marked public (0032)
+let closedDayReason = null;  // why the whole day is shut, when staff chose to say; else null
+let shortDayReason  = null;  // …or why today's hours are shorter than usual (e.g. "Christmas")
 
 function applySettings(s){
   if(!s) return;
@@ -654,6 +833,40 @@ function winnipegNow(){
 const dayRank = (y, mIdx, d) => y*10000 + mIdx*100 + d;           // mIdx = 0-based month
 const winnipegToday = () => { const w = winnipegNow(); return { rank: dayRank(w.y, w.mo-1, w.d), w }; };
 
+/* ---------- Advance-booking window (migration 0028) ----------
+   Regular players book up to BOOK_WINDOW.days ahead; league players further. The page learns which
+   from the My Account session saved in this browser (or, on localhost, the no-login dev account),
+   and sends that session with every booking request. The server applies the same limit to every
+   booking, so this only saves people from picking a date they cannot have. */
+let BOOK_WINDOW = { days: 10, leagueDays: 60, league: false, signedIn: false, token: null, devPhone: null };
+function accountToken(){
+  try{
+    const s = JSON.parse(localStorage.getItem('invictus-customer') || 'null');
+    return (s && s.access_token && (!s.expires_at || s.expires_at*1000 > Date.now())) ? s.access_token : null;
+  }catch(e){ return null; }
+}
+// The account session travels with booking requests: it unlocks the league window and, at checkout,
+// the customer's saved cards. On localhost the no-login dev account is named instead (server.js).
+const authHeaders = () => ({ ...(BOOK_WINDOW.token ? { Authorization: 'Bearer ' + BOOK_WINDOW.token } : {}),
+                             ...(BOOK_WINDOW.devPhone ? { 'X-Dev-Account': '1' } : {}) });
+function lastBookableRank(){
+  const w = winnipegToday().w, d = new Date(w.y, w.mo-1, w.d + BOOK_WINDOW.days);
+  return dayRank(d.getFullYear(), d.getMonth(), d.getDate());
+}
+async function loadBookingWindow(){
+  BOOK_WINDOW.token = accountToken();
+  let j = null;
+  if(['localhost','127.0.0.1'].includes(location.hostname)){
+    try{ const r = await fetch('/api/dev/window'); if(r.ok) j = await r.json(); }catch(e){}
+    if(j && j.ok) BOOK_WINDOW.devPhone = j.phone || null;
+  }
+  if(!(j && j.ok)){
+    try{ j = await (await fetch('/api/leagues?action=window', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() } })).json(); }catch(e){}
+  }
+  if(j && j.ok) Object.assign(BOOK_WINDOW, { days: j.days, leagueDays: j.leagueDays || BOOK_WINDOW.leagueDays, league: !!j.league, signedIn: !!(j.signedIn || BOOK_WINDOW.devPhone) });
+  buildCalendar();
+}
+
 // Fallback when no DB: every slot shows as free. (This previously marked ~20% of slots
 // "booked" via a per-day/bay hash so the grid looked busy — removed so the page starts clean.)
 function bookedSubFallback(){
@@ -669,10 +882,16 @@ function isSlotBooked(date, bayId, m){
   return bookedSubFallback(date.toDateString(), bayId, m);
 }
 
-// A slot the venue marked Closed (recurring weekly status) — unavailable, shown distinctly.
+// A slot the venue closed — recurring weekly status, or a schedule override. Unavailable, never "Booked".
 function isSlotClosed(bayId, m){
-  const ranges = closedRanges[bayId] || [];
-  return ranges.some(([s,e]) => m < e && (m + CONFIG.slotStep) > s);
+  const hit = ([s,e]) => m < e && (m + CONFIG.slotStep) > s;
+  return (closedRanges[bayId] || []).some(hit) || (unavailableRanges[bayId] || []).some(hit);
+}
+
+// The reason staff chose to show customers for a closed slot, or '' when there is none to show.
+function slotClosedReason(bayId, m){
+  const r = (closedReasons[bayId] || []).find(([s,e]) => m < e && (m + CONFIG.slotStep) > s);
+  return (r && r[2]) ? String(r[2]).trim() : '';
 }
 
 // A slot another customer currently has in their cart (a live hold) — temporarily unavailable.
@@ -719,7 +938,9 @@ async function loadAvailability(){
     const r = await fetch('/api/availability?date='+isoDate(state.date));
     if(!r.ok) return;
     const d = await r.json();
-    if(d.dbEnabled){ applySettings(d.settings); bookedRanges = d.booked || {}; closedRanges = d.closed || {}; heldRanges = d.held || {}; dateHoursOverride = d.dateHours || null; }
+    if(d.dbEnabled){ applySettings(d.settings); bookedRanges = d.booked || {}; closedRanges = d.closed || {}; heldRanges = d.held || {}; dateHoursOverride = d.dateHours || null;
+      unavailableRanges = d.unavailable || {}; closedReasons = d.reasons || {}; closedDayReason = d.closedReason || null;
+      shortDayReason = d.hoursReason || null; }
   }catch(e){}
 }
 
@@ -744,6 +965,12 @@ function buildCalendar(){
   const viewRank = dayRank(view.getFullYear(), view.getMonth(), 1);
   const curMonthRank = dayRank(winnipegToday().w.y, winnipegToday().w.mo-1, 1);
   $('#cal-prev').disabled = viewRank <= curMonthRank;
+  const lastRank = lastBookableRank();
+  // Ranks compare correctly even for "month 12" of a year: y*10000 + 12*100 + 1 sorts before next January.
+  $('#cal-next').disabled = dayRank(view.getFullYear(), view.getMonth()+1, 1) > lastRank;
+  $('#cal-hint').innerHTML = BOOK_WINDOW.league
+    ? `As a league player you can book up to ${BOOK_WINDOW.days} days ahead.`
+    : `Bookings open ${BOOK_WINDOW.days} days ahead.${BOOK_WINDOW.signedIn ? '' : ` League players can book up to ${BOOK_WINDOW.leagueDays} days ahead — <a href="/account">sign in</a> or <a href="/leagues">join a league</a>.`}`;
 
   ['S','M','T','W','T','F','S'].forEach(d=>{
     const el=document.createElement('div'); el.className='cal-dow'; el.textContent=d; grid.appendChild(el);
@@ -758,12 +985,14 @@ function buildCalendar(){
     const rank = dayRank(view.getFullYear(), view.getMonth(), d);
     const el = document.createElement('div'); el.className='cal-day'; el.textContent=d;
     const isPast = rank < todayRank;
+    const isBeyond = rank > lastRank;
     const isToday = rank === todayRank;
     const isSel = state.date && date.toDateString()===state.date.toDateString();
     if(isPast) el.classList.add('past');
+    if(isBeyond){ el.classList.add('is-beyond'); el.title = `Not open yet — bookings open ${BOOK_WINDOW.days} days ahead`; }
     if(isToday) el.classList.add('today');
     if(isSel) el.classList.add('sel');
-    if(!isPast) el.onclick=async ()=>{ state.date=date; clearSelection(); bookedRanges={}; closedRanges={}; heldRanges={}; dateHoursOverride=null; renderAll(); scrollToTimes(); await loadAvailability(); renderAll(); };
+    if(!isPast && !isBeyond) el.onclick=async ()=>{ state.date=date; clearSelection(); bookedRanges={}; closedRanges={}; heldRanges={}; dateHoursOverride=null; unavailableRanges={}; closedReasons={}; closedDayReason=null; shortDayReason=null; renderAll(); scrollToTimes(); await loadAvailability(); renderAll(); };
     grid.appendChild(el);
   }
 }
@@ -807,6 +1036,11 @@ function buildGrid(){
   const isToday = dayRank(state.date.getFullYear(), state.date.getMonth(), state.date.getDate()) === tw.rank;
   const minStart = isToday ? tw.w.min : -1;
 
+  // Shorter hours than usual, with a reason staff chose to share: the missing morning is
+  // explained rather than left as a gap the customer has to interpret.
+  const shortNote = (shortDayReason && close > open)
+    ? `<div class="short-day">${escHtml(shortDayReason)} — open ${fmtFull(open*60)} to ${fmtFull(close*60)} today.</div>` : '';
+
   let bodyRows='';
   for(let m=open*60; m + CONFIG.minMins <= close*60; m += CONFIG.slotStep){
     if(m < minStart) continue;                 // skip slots earlier than "now"
@@ -823,7 +1057,16 @@ function buildGrid(){
         const shut = isSlotClosed(b.id, m);
         const held = !shut && isSlotHeld(b.id, m);
         const label = shut ? 'Closed' : held ? 'Held' : 'Booked';
-        bodyRows+=`<td class="cell booked${shut?' shut':held?' held':''}"><span class="price">${label}</span></td>`;
+        const why = shut ? slotClosedReason(b.id, m) : '';   // staff's own words, or nothing at all
+        // A taken slot can free up, so it is a way onto the waiting list. A CLOSED one cannot —
+        // the venue shut it — so it stays inert rather than promising a call that will never come.
+        const waitable = DB && !shut;
+        bodyRows+=`<td class="cell booked${shut?' shut':held?' held':''}${waitable?' waitable':''}"`
+            + (waitable?` data-wait-bay="${b.id}" data-wait-min="${m}"`:'')
+            + (why?` title="${escHtml(/^closed\b/i.test(why) ? why : 'Closed — ' + why)}"`:'')   // staff who wrote "Closed for X" don't get "Closed — Closed for X"
+            + `><span class="price">${label}</span>`
+            + (why?`<span class="shut-why">${escHtml(why)}</span>`:'')
+            + (waitable?`<span class="wl-hint">Wait&nbsp;list</span>`:'')+`</td>`;
       } else {
         // free, but not enough room for a full session (next booking/close is under the minimum) —
         // let the customer phone the shop to grab the short slot.
@@ -834,7 +1077,14 @@ function buildGrid(){
   }
 
   if(!bodyRows){
-    host.innerHTML='<div class="closed-note">No more start times today — pick another date above.</div>';
+    // Nothing to show: either the venue is shut for the whole day, or today's remaining times have passed.
+    const shutAllDay = close <= open;
+    const msg = shutAllDay
+      ? (closedDayReason
+          ? `Closed for ${escHtml(closedDayReason)} — please pick another date above.`
+          : 'Closed all day — please pick another date above.')
+      : 'No more start times today — pick another date above.';
+    host.innerHTML=`<div class="closed-note">${msg}</div>`;
     return;
   }
 
@@ -845,7 +1095,7 @@ function buildGrid(){
   });
   html+='</tr></thead><tbody>'+bodyRows+'</tbody></table>';
   const note=CONFIG.rates&&CONFIG.rates.note;   // standard note applies to all bays
-  host.innerHTML=(note?`<div class="promo-note">${escHtml(note)}</div>`:'')+html;
+  host.innerHTML=(note?`<div class="promo-note">${escHtml(note)}</div>`:'')+shortNote+html;
 
   host.querySelectorAll('.cell[data-bay]').forEach(c=>{
     c.onclick=()=>{
@@ -855,6 +1105,10 @@ function buildGrid(){
       state.endMin = opts.reduce((a,b)=>Math.abs(b-target)<Math.abs(a-target)?b:a, opts[0]);
       renderAll();
     };
+  });
+
+  host.querySelectorAll('.cell[data-wait-bay]').forEach(c=>{
+    c.onclick=()=>openWaitlist(c.dataset.waitBay, +c.dataset.waitMin);
   });
 }
 
@@ -872,21 +1126,35 @@ function cbSelectHTML(kind, value, options){
     </div>
   </div>`;
 }
-function closeAllCbSel(){ document.querySelectorAll('.cbsel.open').forEach(s=>s.classList.remove('open')); }
-function wireCbSelects(){
-  document.querySelectorAll('#cb-info .cbsel').forEach(sel=>{
-    sel.querySelector('.cbsel-btn').onclick = e => {
-      e.stopPropagation();
-      const open = sel.classList.contains('open');
-      closeAllCbSel();
-      if(!open) sel.classList.add('open');
+function closeAllCbSel(){ document.querySelectorAll('.cbsel.open').forEach(s=>{ s.classList.remove('open'); s.querySelector('.cbsel-btn').setAttribute('aria-expanded','false'); }); }
+// One dropdown component for the whole page. `root` scopes it; `onPick(value, sel)` runs on choose.
+// Keyboard: arrows move, Enter/Space choose, Escape closes, Tab leaves — a native select's manners
+// without the OS's white menu on a dark page.
+function wireCbSelects(root, onPick){
+  (root || document.querySelector('#cb-info') || document).querySelectorAll('.cbsel').forEach(sel=>{
+    const btn = sel.querySelector('.cbsel-btn'), opts = [...sel.querySelectorAll('.cbsel-opt')];
+    btn.setAttribute('aria-haspopup','listbox'); btn.setAttribute('aria-expanded','false');
+    const open = (yes) => { closeAllCbSel(); sel.classList.toggle('open', yes); btn.setAttribute('aria-expanded', String(yes)); if(yes) focusOpt(opts.findIndex(o=>o.classList.contains('sel'))); };
+    const focusOpt = (i) => { const el = opts[Math.max(0, Math.min(opts.length-1, i))]; if(!el) return; opts.forEach(o=>o.tabIndex=-1); el.tabIndex=0; el.focus(); };
+    const choose = (opt) => {
+      const val = +opt.dataset.val;
+      opts.forEach(o=>o.classList.toggle('sel', o===opt));
+      if(onPick) onPick(val, sel);
+      else if(sel.dataset.kind==='end'){ state.endMin = val; renderCheckbar(); }
+      else { state.party = val; renderCheckbar(); }
+      open(false); btn.focus();
     };
-    sel.querySelectorAll('.cbsel-opt').forEach(opt=>{
-      opt.onclick = e => {
-        e.stopPropagation();
-        const val = +opt.dataset.val;
-        if(sel.dataset.kind==='end') state.endMin = val; else state.party = val;
-        renderCheckbar();
+    btn.onclick = e => { e.stopPropagation(); open(!sel.classList.contains('open')); };
+    btn.onkeydown = e => { if(['ArrowDown','ArrowUp','Enter',' '].includes(e.key)){ e.preventDefault(); open(true); } };
+    opts.forEach((opt,i)=>{
+      opt.onclick = e => { e.stopPropagation(); choose(opt); };
+      opt.onkeydown = e => {
+        if(e.key==='ArrowDown'){ e.preventDefault(); focusOpt(i+1); }
+        else if(e.key==='ArrowUp'){ e.preventDefault(); focusOpt(i-1); }
+        else if(e.key==='Home'){ e.preventDefault(); focusOpt(0); }
+        else if(e.key==='End'){ e.preventDefault(); focusOpt(opts.length-1); }
+        else if(e.key==='Enter'||e.key===' '){ e.preventDefault(); choose(opt); }
+        else if(e.key==='Escape'||e.key==='Tab'){ open(false); if(e.key==='Escape'){ e.preventDefault(); btn.focus(); } }
       };
     });
   });
@@ -911,7 +1179,6 @@ function renderCheckbar(){
     <div class="cb-item"><div class="k">Group size</div>${cbSelectHTML('party', state.party, partyOpts)}</div>
     <div class="cb-item cb-total"><div class="k">Total</div><div class="v">${money(price)}</div></div>`;
   bar.classList.add('show');
-  if(typeof prefetchPI==='function') prefetchPI();
   wireCbSelects();
 }
 
@@ -946,7 +1213,10 @@ function recapHTML(){
     <div class="row"><span class="k">Date</span><span class="v">${dateStr}</span></div>
     <div class="row"><span class="k">Time</span><span class="v">${fmtFull(state.startMin)} – ${fmtFull(state.endMin)} · ${durLabel}</span></div>
     <div class="row"><span class="k">Group</span><span class="v">${state.party} ${state.party>1?'players':'player'}</span></div>
-    <div class="row tot"><span class="k">Total</span><span class="v">${money(price)}</span></div>`;
+    ${LG.armed
+      ? `<div class="row"><span class="k">League round</span><span class="v">${escHtml(LG.armed.teamName)} · week ${LG.armed.week.number} of ${LG.armed.weeksTotal}</span></div>
+         <div class="row tot"><span class="k">Total</span><span class="v">Free — $0.00</span></div>`
+      : `<div class="row tot"><span class="k">Total</span><span class="v">${money(price)}</span></div>`}`;
 }
 /* ---------- Stripe wiring (Payment Element, dark theme) ---------- */
 let STRIPE=null, stripeReady=false, elements=null, paying=false;
@@ -983,44 +1253,255 @@ const STRIPE_APPEARANCE = {
   },
 };
 
-/* Prefetch the PaymentIntent as soon as a slot is chosen, so checkout opens instantly. */
-let piCache=null, prefetchTimer=null;
-const bookingKey = () => [isoDate(state.date), state.bay, state.startMin, state.endMin].join('|');
+/* ---------- PaymentIntent ----------
+   There is deliberately NO speculative prefetch. A PaymentIntent — and the cart hold behind it —
+   is created only when the customer actually opens checkout, or when something repriced the
+   booking. The old prefetch built a PaymentIntent on every slot change and abandoned the previous
+   one; that is unsafe now that a gift card can attach real stored value to a PaymentIntent. */
+let piCache=null;
+// Applied-code state. All of it records what the SERVER accepted, never a local guess.
+let PROMO_CODE=null, PROMO_RESERVATION=null;
+let GIFT_CODE=null, GIFT_RESERVED=false, GIFT_LAST4=null;
+
+// Every input that changes the price is in the key, so a repriced booking can never reuse a
+// PaymentIntent built for the old total.
+const bookingKey = () => [isoDate(state.date), state.bay, state.startMin, state.endMin,
+                          PROMO_CODE||'', GIFT_CODE||''].join('|');
+// A PaymentIntent's id is the part of its client secret before "_secret".
+const piIdOf = cs => String(cs||'').split('_secret')[0] || null;
+
+async function post(url, body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json', ...authHeaders()},body:JSON.stringify(body||{})});
+  let d=null; try{ d=await r.json(); }catch(e){}
+  return { ok:r.ok, status:r.status, data:d||{} };
+}
+const contactBody = () => ({ email:($('#sc-email')?.value||'').trim(), phone:($('#sc-phone')?.value||'').trim() || BOOK_WINDOW.devPhone || '' });
+const slotBody = () => ({ dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin, ...contactBody() });
+
+/* Hand back anything held against the PaymentIntent we are about to replace or abandon. Stored
+   value must never stay reserved against a payment nobody is going to complete. Best-effort — the
+   5-minute TTL on both reservations is the real backstop. */
+async function releaseCredits(){
+  const pid = piCache && piCache.paymentIntentId;
+  const jobs=[];
+  if(pid && GIFT_RESERVED) jobs.push(post('/api/gift-cards?action=release',{ paymentIntentId:pid, code:GIFT_CODE||undefined }));
+  if(PROMO_RESERVATION) jobs.push(post('/api/promos?action=release',{ reservationId:PROMO_RESERVATION }));
+  GIFT_RESERVED=false; PROMO_RESERVATION=null;
+  try{ await Promise.all(jobs); }catch(e){}
+}
 
 async function createPI(){
+  await releaseCredits();   // never abandon a PaymentIntent that still holds a card or a promo use
   const key=bookingKey();
-  // hold:true locks the slot for ~5 min while the customer checks out (Ticketmaster-style cart hold).
-  const body={ dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin, party:state.party, hold:true };
-  // Always send the typed contact: the server needs it to spot an active membership, not just
-  // to spend points. Without this a member is billed full price with no indication why.
+  const slot={ dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin };
+  const sameSlot = !!HELD && HELD.dateISO===slot.dateISO && HELD.bayId===slot.bayId
+                   && HELD.startMin===slot.startMin && HELD.endMin===slot.endMin;
+  // Moved to a different slot mid-checkout: give the old one back before taking the new one.
+  if(HELD && !sameSlot) await releaseHeldSlot();
+  // hold:true locks the slot for ~5 min while the customer checks out (Ticketmaster-style cart
+  // hold). Applying a code REBUILDS the PaymentIntent for the same slot, and asking for
+  // a second hold on a slot we already hold collides with our own hold on the exclusion
+  // constraint — which the server reports as "that time was just taken". So hold only when we do
+  // not already have one; the original hold and its timer keep running, unextended.
+  const needHold = !sameSlot;
+  const body={ ...slot, party:state.party, hold:needHold };
+  // Always send the typed contact: the server needs it to spot a member or a league player.
+  // Without this a member is billed full price with no indication why.
   body.email=($('#sc-email')?.value||'').trim();
-  body.phone=($('#sc-phone')?.value||'').trim();
-  if(POINTS_APPLY) body.applyPoints=true;
-  const r=await fetch('/api/create-payment-intent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  body.phone=($('#sc-phone')?.value||'').trim() || BOOK_WINDOW.devPhone || '';
+  if(PROMO_CODE) body.promoCode=PROMO_CODE;
+  if(GIFT_CODE) body.giftCode=GIFT_CODE;
+  // Pass the promo reservation through so it lands in the PaymentIntent metadata and the
+  // webhook can redeem it server-side. Without it, a tab that dies after payment leaves the
+  // reservation to lapse and the customer keeps the discount AND the unused code.
+  if(PROMO_RESERVATION) body.promoReservationId=PROMO_RESERVATION;
+  const r=await fetch('/api/create-payment-intent',{method:'POST',headers:{'Content-Type':'application/json', ...authHeaders()},body:JSON.stringify(body)});
   const data=await r.json();
   if(r.status===409){ const e=new Error(data.error||'That time was just taken — pick another slot.'); e.taken=true; throw e; }
   if(!r.ok) throw new Error(data.error||'error');
-  piCache={ key, clientSecret:data.clientSecret, amount:data.amount,
-            memberPct:data.memberPct||0, memberDiscountCents:data.memberDiscountCents||0 };
-  renderMemberDiscount(piCache);
+  piCache={ key, clientSecret:data.clientSecret, paymentIntentId:piIdOf(data.clientSecret),
+            customerSessionClientSecret:data.customerSessionClientSecret||null,
+            amount:data.amount, fullAmount:data.fullAmount,
+            memberPct:data.memberPct||0, memberDiscountCents:data.memberDiscountCents||0,
+            // Present only once /api/create-payment-intent applies these itself. While it does
+            // not, they stay 0 — so nothing is displayed and nothing is reserved. See applyPromo
+            // and applyGift, which refuse to claim a code the charge does not reflect.
+            promoDiscountCents:data.promoDiscountCents||0,
+            giftUsedCents:data.giftUsedCents||0 };
+  if(needHold) HELD={ ...slot };
+  renderCredits();
   if(data.expiresAt) startHoldTimer(data.expiresAt);
   return piCache;
 }
-// Holds are created only when the customer actually opens checkout — never on hover/selection —
-// so browsing the grid doesn't lock slots.
-function prefetchPI(){}
 
-// Show the member saving at checkout. Without this the total simply drops with no explanation,
-// which reads as a bug rather than a benefit they are paying a monthly fee for.
-function renderMemberDiscount(q){
-  const host=$('#member-pay'); if(!host) return;
-  if(!q || !(q.memberDiscountCents>0)){ host.style.display='none'; host.innerHTML=''; return; }
+/* ---------- The applied-credit strip ----------
+   ONE control for every discount on this booking — member %, promo code, gift card.
+   A new kind of credit is a new entry in the list below; it is never another div beside
+   #credit-strip. (That trap is called out by name in TIER2_BUILD_PLAN.md section 3.)
+
+   Every amount rendered here is a number the SERVER sent back. This page never computes a
+   discount: if the server did not report it, the row does not appear, and the customer is never
+   shown a saving they are not actually getting. */
+function creditRows(){
+  const q=piCache||{};
+  return [
+    { key:'member', label:`Member discount (${q.memberPct}% off)`, amountCents:q.memberDiscountCents,
+      show:q.memberDiscountCents>0 },
+    { key:'promo',  label:`Promo code ${PROMO_CODE||''}`.trim(), amountCents:q.promoDiscountCents,
+      show:q.promoDiscountCents>0, onRemove:removePromo },
+    { key:'gift',   label:`Gift card${GIFT_LAST4?' ••'+GIFT_LAST4:''}`, amountCents:q.giftUsedCents,
+      show:q.giftUsedCents>0, onRemove:removeGift },
+  ].filter(r=>r.show && r.amountCents>0);
+}
+function renderCredits(){
+  const host=$('#credit-strip'); if(!host) return;
+  const rows=creditRows();
+  host.classList.toggle('on', rows.length>0);
+  host.innerHTML=rows.map((r,i)=>
+    `<div class="credit-row"><span class="cr-txt">✓ ${escHtml(r.label)}`
+    + `<span class="cr-amt">−${escHtml(money(r.amountCents/100))}</span></span>`
+    + (r.onRemove?`<a class="cr-x" data-i="${i}">remove</a>`:'')
+    + `</div>`).join('');
+  host.querySelectorAll('a.cr-x').forEach(a=>{ a.onclick=()=>rows[+a.dataset.i].onRemove(); });
+}
+
+/* ---------- Promo codes and gift cards ---------- */
+function setCodeMsg(el, kind, text){ if(!el) return; el.className='code-msg'+(kind?' '+kind:''); el.textContent=text||''; }
+// Lock a code field once it has been accepted, so the same code cannot be applied twice.
+function lockCode(inputSel, btnSel, locked){
+  const i=$(inputSel), b=$(btnSel);
+  if(i) i.disabled=locked;
+  if(b){ b.disabled=false; b.style.display=locked?'none':''; }
+}
+// A code is only worth applying if the server can tell who is asking: the per-customer limits are
+// counted against the contact details, so an anonymous checkout cannot hold one.
+function contactReady(){
+  const c=contactBody();
+  return validEmail(c.email) || validPhone(c.phone);
+}
+
+async function applyPromo(){
+  const msg=$('#promo-msg'), btn=$('#promo-apply');
+  const code=(($('#promo-code')||{}).value||'').trim().toUpperCase();
+  if(!code) return setCodeMsg(msg,'err','Enter a code.');
+  if(!contactReady()) return setCodeMsg(msg,'err','Enter your email or phone above first — a code is tied to one customer.');
+  btn.disabled=true; setCodeMsg(msg,'info','Checking…');
+  // 1. Ask the server what the code is worth here. Reserves nothing, so a wrong guess costs nothing.
+  const v=await post('/api/promos?action=validate',{ ...slotBody(), code });
+  if(!v.data.ok){ btn.disabled=false; return setCodeMsg(msg,'err', v.data.error||'That code cannot be used on this booking.'); }
+  // 2. Rebuild the PaymentIntent WITH the code, so the amount Stripe will charge is the discounted
+  //    one. Nothing is claimed until that has actually happened.
+  PROMO_CODE=code; piCache=null;
+  await mountStripe();
+  // Slot gone: mountStripe has already closed checkout and toasted why, so just clear up here.
+  if(!piCache){ PROMO_CODE=null; btn.disabled=false; setCodeMsg(msg,'',''); return; }
+  if(!(piCache.promoDiscountCents>0)){
+    // The charge does not reflect the code, so claiming a use would burn it while the customer
+    // still pays full price. Refuse, put the price back, and say so plainly.
+    PROMO_CODE=null; piCache=null; await mountStripe(); btn.disabled=false;
+    return setCodeMsg(msg,'err','Promo codes cannot be applied to a card payment yet — please call the shop to use this code.');
+  }
+  // 3. Only now claim one use, for the length of the cart hold.
+  const rsv=await post('/api/promos?action=reserve',{ ...slotBody(), code, paymentIntentId:piCache.paymentIntentId });
+  if(!rsv.data.ok){
+    PROMO_CODE=null; piCache=null; await mountStripe(); btn.disabled=false;
+    return setCodeMsg(msg,'err', rsv.data.error||'That code cannot be used on this booking.');
+  }
+  PROMO_RESERVATION=rsv.data.reservationId;
+  lockCode('#promo-code','#promo-apply',true);
+  setCodeMsg(msg,'ok','Code applied.');
+  renderCredits();
+}
+async function removePromo(){
+  if(PROMO_RESERVATION) await post('/api/promos?action=release',{ reservationId:PROMO_RESERVATION });
+  PROMO_RESERVATION=null; PROMO_CODE=null;
+  const i=$('#promo-code'); if(i) i.value='';
+  lockCode('#promo-code','#promo-apply',false);
+  setCodeMsg($('#promo-msg'),'','');
+  piCache=null; await mountStripe();
+}
+
+async function applyGift(){
+  const msg=$('#gift-msg'), btn=$('#gift-apply');
+  const code=(($('#gift-code')||{}).value||'').trim();
+  if(!code) return setCodeMsg(msg,'err','Enter a gift-card code.');
+  btn.disabled=true; setCodeMsg(msg,'info','Checking…');
+  // partialOnly:false — ask whether the card covers the WHOLE session, because that case has its
+  // own path (?action=book) with no Stripe payment involved at all.
+  const q=await post('/api/gift-cards?action=quote',{ ...slotBody(), code, partialOnly:false });
+  if(!q.data.ok){ btn.disabled=false; return setCodeMsg(msg,'err', q.data.error||'We do not recognise that gift-card code.'); }
+  GIFT_LAST4=q.data.last4||null;
+  if(q.data.coversWholeBooking){
+    btn.disabled=false;
+    setCodeMsg(msg,'ok','This card covers the whole session.');
+    showGiftCover(code, q.data);
+    return;
+  }
+  // Part payment: rebuild the PaymentIntent with the card applied, then reserve the value.
+  GIFT_CODE=code; piCache=null;
+  await mountStripe();
+  if(!piCache){ GIFT_CODE=null; btn.disabled=false; setCodeMsg(msg,'',''); return; }   // slot gone
+  if(!(piCache.giftUsedCents>0)){
+    GIFT_CODE=null; piCache=null; await mountStripe(); btn.disabled=false;
+    return setCodeMsg(msg,'err','Part-paying by gift card is not available at checkout yet — please call the shop to use this card.');
+  }
+  const rsv=await post('/api/gift-cards?action=reserve',{ ...contactBody(), code, paymentIntentId:piCache.paymentIntentId });
+  if(!rsv.data.ok){
+    GIFT_CODE=null; piCache=null; await mountStripe(); btn.disabled=false;
+    return setCodeMsg(msg,'err', rsv.data.message||rsv.data.error||'That card could not be applied.');
+  }
+  GIFT_RESERVED=true; GIFT_LAST4=rsv.data.last4||GIFT_LAST4;
+  lockCode('#gift-code','#gift-apply',true);
+  setCodeMsg(msg,'ok','Gift card applied.');
+  renderCredits();
+}
+async function removeGift(){
+  if(GIFT_RESERVED && piCache && piCache.paymentIntentId)
+    await post('/api/gift-cards?action=release',{ paymentIntentId:piCache.paymentIntentId, code:GIFT_CODE||undefined });
+  GIFT_RESERVED=false; GIFT_CODE=null; GIFT_LAST4=null;
+  const i=$('#gift-code'); if(i) i.value='';
+  lockCode('#gift-code','#gift-apply',false);
+  setCodeMsg($('#gift-msg'),'','');
+  hideGiftCover();
+  piCache=null; await mountStripe();
+}
+
+/* The zero-charge path: the card covers the whole session, so no PaymentIntent is created at all
+   and /api/gift-cards?action=book debits the card and writes the booking in one step. */
+function hideGiftCover(){ const h=$('#gift-cover'); if(h){ h.style.display='none'; h.innerHTML=''; } }
+function showGiftCover(code, q){
+  const host=$('#gift-cover'); if(!host) return;
   host.style.display='block';
-  host.innerHTML=`<div class="points-opt"><div class="applied"><span>\u2713 Member discount (${q.memberPct}% off) \u2014 you save ${money(q.memberDiscountCents/100)}</span></div></div>`;
+  host.innerHTML=`<div class="gift-opt"><div class="ho-txt">This gift card covers the whole session — `
+    + `<b>${escHtml(money((q.giftUsedCents||0)/100))}</b>. No card payment needed.</div>`
+    + `<button type="button" class="btn btn-line" id="gift-book">Book with this gift card</button></div>`;
+  $('#gift-book').onclick=()=>bookWithGiftNow(code);
+}
+async function bookWithGiftNow(code){
+  if(paying) return;
+  if(!checkContact($('#sc-email'), $('#sc-phone'), $('#pay-error'))) return;
+  const btn=$('#gift-book'); paying=true; btn.disabled=true; btn.textContent='Booking…'; $('#pay-error').textContent='';
+  // Give our own cart hold back FIRST, and wait for it: ?action=book re-checks the slot against
+  // every live booking row, and a hold this checkout is holding would clash with itself.
+  await releaseHeldSlot();
+  const r=await post('/api/gift-cards?action=book',{ ...slotBody(), code,
+    promoCode:PROMO_CODE||undefined, name:(($('#sc-name')||{}).value||'').trim() });
+  paying=false;
+  if(r.data && r.data.ok){
+    $('#pay-overlay').classList.remove('show');
+    showConfirmation((($('#sc-name')||{}).value||'').trim()||'Guest', 0);
+    return;
+  }
+  btn.disabled=false; btn.textContent='Book with this gift card';
+  $('#pay-error').textContent=(r.data && (r.data.message||r.data.error)) || 'Could not book with that gift card.';
+  piCache=null; await mountStripe();   // the hold is gone — take it back while they decide
 }
 
 /* ---------- Cart hold timer ---------- */
-let holdTimer=null, holdExpiresAt=0, holdActive=false;
+// HELD is the exact slot this checkout currently holds, or null. Releasing uses these stored
+// values rather than the live selection, so changing the selection can never release the wrong
+// slot — or fail to release the one we actually took.
+let holdTimer=null, holdExpiresAt=0, holdActive=false, HELD=null;
 function startHoldTimer(expiresAt){
   holdActive=true;
   holdExpiresAt=new Date(expiresAt).getTime();
@@ -1038,14 +1519,24 @@ function tickHold(){
   if(left<=0) onHoldExpired();
 }
 function stopHoldTimer(){ if(holdTimer){ clearInterval(holdTimer); holdTimer=null; } const el=$('#hold-timer'); if(el) el.style.display='none'; }
+// Fire-and-forget: used from pagehide, where the tab is going away and nothing can be awaited.
 function releaseCurrentHold(){
-  if(!holdActive || !selectionValid()) return;
-  holdActive=false;
-  const body=JSON.stringify({ dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin });
+  if(!HELD) return;
+  const body=JSON.stringify(HELD);
+  HELD=null; holdActive=false;
   try{ fetch('/api/release-hold',{method:'POST',headers:{'Content-Type':'application/json'},body,keepalive:true}); }catch(e){}
 }
+// The same thing, but awaited. The zero-charge booking paths (?action=book on gift cards and
+// hour cards) re-check the slot against every live booking row — including the hold this very
+// checkout is holding — so the hold has to be actually gone before they run, not just in flight.
+async function releaseHeldSlot(){
+  if(!HELD) return;
+  const slot=HELD;
+  HELD=null; holdActive=false; stopHoldTimer();
+  try{ await post('/api/release-hold', slot); }catch(e){}
+}
 async function onHoldExpired(){
-  holdActive=false; stopHoldTimer(); piCache=null; elements=null;
+  HELD=null; holdActive=false; stopHoldTimer(); piCache=null; elements=null;
   $('#pay-overlay').classList.remove('show'); setStep(2);
   await loadAvailability(); renderAll();
   toast('Your hold expired and the slot was released — please pick a time again.');
@@ -1068,7 +1559,10 @@ async function mountStripe(){
     peEl.innerHTML='<div class="loading">Could not start checkout: '+err.message+'</div>'; return;
   }
   $('#sc-amt').textContent=money(data.amount/100);
-  elements=STRIPE.elements({ clientSecret:data.clientSecret, appearance:STRIPE_APPEARANCE });
+  // With a customer session (signed-in customers only) the Payment Element lists their saved cards
+  // and Apple Pay / Google Pay, and offers to save a new card for next time.
+  elements=STRIPE.elements({ clientSecret:data.clientSecret, appearance:STRIPE_APPEARANCE,
+    ...(data.customerSessionClientSecret ? { customerSessionClientSecret:data.customerSessionClientSecret } : {}) });
   peEl.innerHTML='';
   const pe=elements.create('payment', { layout:'tabs' });
   pe.mount('#payment-element');
@@ -1080,6 +1574,12 @@ async function openPayment(){
   $('#pay-overlay').classList.add('show');
   setStep(3);
   const modal=$('#pay-modal');
+  // The team's weekly round is not a way of paying, it is a booking that costs nothing — so when
+  // it is claimed, the whole payment side of this modal goes away rather than sitting there
+  // showing a price nobody is being asked for.
+  renderLeaguePanel();
+  if(LG.armed){ showLeagueOnly(true); return; }
+  showLeagueOnly(false);   // put the payment side back if a previous checkout hid it
   if(stripeReady){
     modal.classList.add('stripe');
     $('#stripe-mode').style.display='block';
@@ -1087,7 +1587,6 @@ async function openPayment(){
     $('#pay-note').innerHTML='<b>Test mode.</b> Pay with card <b>4242&nbsp;4242&nbsp;4242&nbsp;4242</b> — any future expiry date, any 3-digit CVC, any postal code.';
     await mountStripe();
     checkHoursOption();   // show "use my hours" if the entered contact has enough balance
-    checkPointsOption();  // and the loyalty-points offer
   }else{
     modal.classList.remove('stripe');
     $('#stripe-mode').style.display='none';
@@ -1099,13 +1598,21 @@ async function openPayment(){
 
 function closePayment(){
   releaseCurrentHold();   // give the slot back if they backed out before paying
+  releaseCredits();       // and give back any gift-card value / promo use held against the payment
   stopHoldTimer();
   piCache=null;
   elements=null;
   const hp=$('#hours-pay'); if(hp){ hp.style.display='none'; hp.innerHTML=''; }
-  POINTS_APPLY=false; POINTS_QUOTE=null;
-  const pp=$('#points-pay'); if(pp){ pp.style.display='none'; pp.innerHTML=''; }
-  const mp=$('#member-pay'); if(mp){ mp.style.display='none'; mp.innerHTML=''; }
+  // Codes are per-checkout: a reopened cart starts clean rather than silently re-applying.
+  PROMO_CODE=null; GIFT_CODE=null; GIFT_LAST4=null;
+  ['#promo-code','#gift-code'].forEach(s=>{ const i=$(s); if(i){ i.value=''; i.disabled=false; } });
+  ['#promo-apply','#gift-apply'].forEach(s=>{ const b=$(s); if(b){ b.disabled=false; b.style.display=''; } });
+  setCodeMsg($('#promo-msg'),'',''); setCodeMsg($('#gift-msg'),'','');
+  hideGiftCover();
+  renderCredits();
+  LG.armed=null; LG.intent=false;
+  const lgh=$('#league-round'); if(lgh) lgh.innerHTML='';
+  showLeagueOnly(false);
   $('#pay-overlay').classList.remove('show');
   setStep(2);
   loadAvailability().then(renderAll);   // reflect the released slot
@@ -1172,6 +1679,11 @@ $('#pay-btn').onclick=()=>{
   showConfirmation(name);
 };
 
+/* Express consent to be texted, as ticked on the checkout form. Sent with every booking path so
+   the server can record it against customers.sms_consent (migration 0019) — an untouched box is
+   a hard `false`, never "unknown", because the absence of a tick is the customer saying no. */
+const smsConsentGiven = () => !!($('#sc-sms') && $('#sc-sms').checked);
+
 /* Real Stripe Pay button */
 $('#sc-pay').onclick=async ()=>{
   if(paying || !elements) return;
@@ -1199,12 +1711,30 @@ $('#sc-pay').onclick=async ()=>{
       await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         paymentIntentId: paymentIntent.id,
         name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim(),
-        sms: $('#sc-sms') ? $('#sc-sms').checked : undefined }) });
+        note:($('#sc-note')?.value||'').trim(),
+        sms: $('#sc-sms') ? $('#sc-sms').checked : undefined,
+        smsConsent: smsConsentGiven() }) });
     }catch(e){ /* payment already succeeded; the webhook backup can still catch it */ }
+    await settleCredits(paymentIntent.id);
     $('#pay-overlay').classList.remove('show');
-    showConfirmation($('#sc-name').value.trim()||'Guest');
+    showConfirmation($('#sc-name').value.trim()||'Guest', paymentIntent.amount);
   }else{ btn.innerHTML=label; btn.disabled=false; }
 };
+
+/* Turn the reservations into real debits, now that Stripe says the payment succeeded. Both
+   endpoints re-read the PaymentIntent from Stripe and both are idempotent, so calling them from
+   here is safe even if a Stripe webhook calls them too — the same deliberate double-cover this
+   repo already uses for confirm-booking. The gift-card code is not sent: settlement finds the
+   reservations by payment id. */
+async function settleCredits(paymentIntentId){
+  if(!paymentIntentId) return;
+  const jobs=[];
+  if(GIFT_RESERVED) jobs.push(post('/api/gift-cards?action=redeem',{ paymentIntentId }));
+  if(PROMO_RESERVATION) jobs.push(post('/api/promos?action=redeem',{ paymentIntentId, reservationId:PROMO_RESERVATION }));
+  // Cleared either way: the payment is done, so nothing here may be released afterwards.
+  GIFT_RESERVED=false; PROMO_RESERVATION=null;
+  try{ await Promise.all(jobs); }catch(e){}
+}
 
 /* Pay with prepaid hours instead of a card, when the customer's email has enough balance. */
 let hoursCheckTimer=null;
@@ -1214,7 +1744,13 @@ async function checkHoursOption(){
   const email=($('#sc-email')?.value||'').trim(), phone=($('#sc-phone')?.value||'').trim();
   const dur=(state.endMin!=null && state.startMin!=null) ? (state.endMin-state.startMin) : 0;
   if((!validPhone(phone) && !validEmail(email)) || !(dur>0)){ host.style.display='none'; host.innerHTML=''; return; }
-  let r; try{ r=await (await fetch('/api/hour-cards?action=balance',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email, phone }) })).json(); }catch(e){ r=null; }
+  // Balances are only shown to a signed-in account: a typed number is not proof of whose they are.
+  if(!BOOK_WINDOW.signedIn){
+    host.style.display='block';
+    host.innerHTML='<div class="hours-opt"><div class="ho-txt">Have prepaid hours? <a href="/account">Sign in to My Account</a> to use them on this booking.</div></div>';
+    return;
+  }
+  let r; try{ r=await (await fetch('/api/hour-cards?action=balance',{ method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({}) })).json(); }catch(e){ r=null; }
   if(r && r.found && r.balanceMin>=dur){
     const bal=Math.round(r.balanceMin/6)/10, need=Math.round(dur/6)/10;
     host.style.display='block';
@@ -1227,71 +1763,31 @@ async function payWithHours(){
   if(!checkContact($('#sc-email'), $('#sc-phone'), $('#pay-error'))) return;
   const btn=$('#pay-hours'); paying=true; btn.disabled=true; btn.textContent='Booking…'; $('#pay-error').textContent='';
   let r;
-  try{ r=await (await fetch('/api/hour-cards?action=book',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+  try{ r=await (await fetch('/api/hour-cards?action=book',{ method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({
     dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin,
-    name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim() }) })).json(); }
+    name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim(),
+    note:($('#sc-note')?.value||'').trim(), smsConsent:smsConsentGiven() }) })).json(); }
   catch(e){ r={ ok:false, error:'Network error — please try again.' }; }
   paying=false;
   if(r && r.ok){ $('#pay-overlay').classList.remove('show'); showConfirmation($('#sc-name').value.trim()||'Guest'); return; }
   btn.disabled=false; btn.textContent='Use my hours';
   $('#pay-error').textContent = (r&&r.error==='insufficient') ? 'Not enough hours for this session.'
-    : (r&&r.error==='no_account') ? 'No hours found for that phone number.' : ((r&&r.error)||'Could not book with hours — please try again.');
+    : (r&&r.error==='no_account') ? 'No hours found on your account.' : ((r&&r.error)||'Could not book with hours — please try again.');
 }
 if($('#sc-email')) $('#sc-email').addEventListener('input', scheduleHoursCheck);
 if($('#sc-phone')) $('#sc-phone').addEventListener('input', scheduleHoursCheck);
 
-/* Loyalty points at checkout: dollars off (partial) or book the whole session with points. */
-let POINTS_APPLY=false, POINTS_QUOTE=null;
-async function checkPointsOption(){
-  const host=$('#points-pay'); if(!host) return;
-  if(POINTS_APPLY) return;   // applied state is managed by applyPointsNow/removePoints
-  const email=($('#sc-email')?.value||'').trim(), phone=($('#sc-phone')?.value||'').trim();
-  if((!validPhone(phone) && !validEmail(email)) || state.startMin==null){ host.style.display='none'; host.innerHTML=''; return; }
-  let r; try{ r=await (await fetch('/api/points?action=quote',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
-    dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin, email, phone }) })).json(); }catch(e){ r=null; }
-  if(!(r && r.found && r.pointsUsed>0)){ host.style.display='none'; host.innerHTML=''; return; }
-  POINTS_QUOTE=r; host.style.display='block';
-  if(r.fullCover){
-    host.innerHTML=`<div class="points-opt"><div class="ho-txt">You have <b>${r.balance} pts</b> — this session is fully covered (<b>${r.pointsUsed} pts</b>).</div><button type="button" class="btn btn-line" id="points-book">Book with my points</button></div>`;
-    $('#points-book').onclick=bookWithPointsNow;
-  }else{
-    host.innerHTML=`<div class="points-opt"><div class="ho-txt">You have <b>${r.balance} pts</b> — apply <b>${r.pointsUsed} pts</b> for <b>−${money(r.discountCents/100)}</b> off.</div><button type="button" class="btn btn-line" id="points-apply">Apply my points</button></div>`;
-    $('#points-apply').onclick=applyPointsNow;
-  }
-}
-async function applyPointsNow(){
-  const host=$('#points-pay'); POINTS_APPLY=true; piCache=null;
-  host.innerHTML='<div class="points-opt"><div class="ho-txt">Applying your points…</div></div>';
-  await mountStripe();   // recreate the PaymentIntent with the discount; updates the Pay amount
-  const q=POINTS_QUOTE||{};
-  host.innerHTML=`<div class="points-opt"><div class="applied"><span>✓ ${q.pointsUsed||''} pts applied — you save ${money((q.discountCents||0)/100)}</span><a id="points-remove">remove</a></div></div>`;
-  $('#points-remove').onclick=removePoints;
-}
-async function removePoints(){
-  POINTS_APPLY=false; piCache=null;
-  const host=$('#points-pay'); host.style.display='none'; host.innerHTML='';
-  await mountStripe();
-  checkPointsOption();
-}
-async function bookWithPointsNow(){
-  if(paying) return;
-  if(!checkContact($('#sc-email'), $('#sc-phone'), $('#pay-error'))) return;
-  const btn=$('#points-book'); paying=true; btn.disabled=true; btn.textContent='Booking…'; $('#pay-error').textContent='';
-  let r;
-  try{ r=await (await fetch('/api/points?action=book',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
-    dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin,
-    name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim() }) })).json(); }
-  catch(e){ r={ ok:false, error:'Network error — please try again.' }; }
-  paying=false;
-  if(r && r.ok){ $('#pay-overlay').classList.remove('show'); showConfirmation($('#sc-name').value.trim()||'Guest'); return; }
-  btn.disabled=false; btn.textContent='Book with my points';
-  $('#pay-error').textContent = (r&&r.error==='insufficient') ? 'Not enough points for this session.'
-    : (r&&r.error==='no_account') ? 'No points found for that phone number.' : ((r&&r.error)||'Could not book with points — please try again.');
-}
-let pointsCheckTimer=null;
-function schedulePointsCheck(){ clearTimeout(pointsCheckTimer); pointsCheckTimer=setTimeout(checkPointsOption, 450); }
-if($('#sc-email')) $('#sc-email').addEventListener('input', schedulePointsCheck);
-if($('#sc-phone')) $('#sc-phone').addEventListener('input', schedulePointsCheck);
+/* ---------- Code fields ---------- */
+if($('#code-open')) $('#code-open').onclick=()=>{
+  const f=$('#code-fields'); const open=f.classList.toggle('on');
+  $('#code-open').textContent = open ? 'Hide promo code / gift card' : 'Have a promo code or a gift card?';
+  if(open) $('#promo-code').focus();
+};
+if($('#promo-apply')) $('#promo-apply').onclick=applyPromo;
+if($('#gift-apply')) $('#gift-apply').onclick=applyGift;
+['#promo-code','#gift-code'].forEach(s=>{ const el=$(s); if(el) el.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); (s==='#promo-code'?applyPromo:applyGift)(); }
+}); });
 
 /* Return from a redirect-based payment method (test cards don't redirect). */
 async function handleReturn(){
@@ -1323,7 +1819,7 @@ function fillWaiverCTA(email, phone, name){
   </div>`;
 }
 function showStripeConfirmation(pi){
-  holdActive=false; stopHoldTimer();   // hold is now a confirmed booking (flipped by the webhook)
+  HELD=null; holdActive=false; stopHoldTimer();   // hold is now a confirmed booking (flipped by the webhook)
   const code='JH-'+Math.abs([...pi.id].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
   piCache=null;
   $('#conf-code').textContent=code;
@@ -1337,10 +1833,12 @@ function showStripeConfirmation(pi){
   setStep(4);
 }
 
-function showConfirmation(name){
-  holdActive=false; stopHoldTimer();
+// paidCents: what was actually charged to a card, when the caller knows it (a gift-card-covered
+// booking charges nothing). Left undefined, the recap falls back to the list price as before.
+function showConfirmation(name, paidCents){
+  HELD=null; holdActive=false; stopHoldTimer();
   const bay=CONFIG.bays.find(b=>b.id===state.bay);
-  const price=priceRange(state.date, state.startMin, state.endMin);
+  const price = paidCents!=null ? paidCents/100 : priceRange(state.date, state.startMin, state.endMin);
   const dateStr=state.date.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
   const code='JH-'+Math.abs([...(name+dateStr+state.startMin+bay.id)].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
   piCache=null;
@@ -1362,9 +1860,357 @@ $('#conf-done').onclick=()=>{
   window.location.href='/';
 };
 
+/* ---------- Waiting list ----------
+   Reached by clicking a slot that is already taken. The whole point of the feature is that ONE
+   person is told about a freed bay and it is genuinely held for them, so this form only collects
+   what waitlist_process() needs to match them: which bays would do, how wide their window is, and
+   how long they want. Everything it says back to the customer comes from the server's own reply. */
+let WL_BAYS = new Set();
+const hhmm = m => pad(Math.floor(m/60)) + ':' + pad(m%60);
+const minOf = v => { const p=/^(\d{1,2}):(\d{2})/.exec(String(v||'')); return p ? (+p[1])*60 + (+p[2]) : null; };
+
+function renderWlBays(){
+  const host=$('#wl-bays'); if(!host) return;
+  host.innerHTML=CONFIG.bays.map(b=>
+    `<span class="wl-bay${WL_BAYS.has(b.id)?' on':''}" data-bay="${escHtml(b.id)}">${escHtml(b.name)}</span>`).join('')
+    + `<span class="wl-bay${WL_BAYS.size===0?' on':''}" data-bay="">Any bay</span>`;
+  host.querySelectorAll('.wl-bay').forEach(el=>{
+    el.onclick=()=>{
+      const id=el.dataset.bay;
+      if(!id) WL_BAYS.clear();                                    // "Any bay" clears the preference
+      else if(WL_BAYS.has(id)) WL_BAYS.delete(id); else WL_BAYS.add(id);
+      renderWlBays();
+    };
+  });
+}
+
+// Session lengths on offer: the venue's own minimum, in its own slot steps, up to four hours.
+function wlDurations(){
+  const step=Math.max(15, CONFIG.slotStep||30), min=Math.max(15, CONFIG.minMins||60);
+  const out=[];
+  for(let d=min; d<=Math.max(min, 240); d+=step) out.push(d);
+  return out;
+}
+
+function openWaitlist(bayId, startMin){
+  if(!state.date) return;
+  const dateStr=state.date.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
+  $('#wl-sub').textContent=`That bay is taken on ${dateStr}. Tell us what would work and we will message you the moment something frees up.`;
+  $('#wl-form').style.display='';
+  const done=$('#wl-done'); done.style.display='none'; done.innerHTML='';
+  $('#wl-error').textContent='';
+  const btn=$('#wl-join'); btn.disabled=false; btn.textContent='Join the list';
+
+  WL_BAYS = new Set(bayId ? [bayId] : []);
+  renderWlBays();
+
+  // Prefill a sensible window around the slot they actually wanted, clamped to the day's hours.
+  const dur=Math.max(15, CONFIG.minMins||60);
+  const [open, close]=dayHours(state.date);
+  const anchor = startMin!=null ? startMin : open*60;
+  $('#wl-from').value=hhmm(Math.max(open*60, anchor-60));
+  $('#wl-to').value=hhmm(Math.min(close*60, anchor+dur+60));
+  // The page's own dropdown, never the browser's: a native menu renders in the OS's colours and
+  // ignores this page's styling entirely. #wl-dur stays an input so the value is read the same way.
+  $('#wl-dur-host').innerHTML = cbSelectHTML('wl-dur', dur, wlDurations().map(d=>({ val:d, label:escHtml(fmtDur(d)) })))
+    + `<input type="hidden" id="wl-dur" value="${dur}" />`;
+  wireCbSelects($('#wl-dur-host'), (val, sel) => {
+    $('#wl-dur').value = val;
+    sel.querySelector('.cbsel-btn').firstChild.textContent = fmtDur(val);
+  });
+
+  // Reuse anything already typed at checkout rather than asking for it twice.
+  [['#wl-name','#sc-name'],['#wl-email','#sc-email'],['#wl-phone','#sc-phone']].forEach(([dst,src])=>{
+    const d=$(dst), s=$(src);
+    if(d && s && !d.value) d.value=(s.value||'').trim();
+  });
+  wirePhoneHint($('#wl-phone'), $('#wl-ph-hint'));
+  $('#wl-overlay').classList.add('show');
+}
+function closeWaitlist(){ $('#wl-overlay').classList.remove('show'); }
+
+async function joinWaitlist(){
+  const err=$('#wl-error'); err.textContent='';
+  const email=(($('#wl-email')||{}).value||'').trim();
+  const phone=(($('#wl-phone')||{}).value||'').trim();
+  if(!email && !phone){ err.textContent='We need an email or a mobile number to reach you on.'; return; }
+  if(email && !validEmail(email)){ err.textContent='That email address does not look right.'; return; }
+  if(phone && !validPhone(phone)){ err.textContent='That phone number does not look right.'; return; }
+  // CASL: two separate boxes, neither ticked by default. The server refuses an entry with neither,
+  // and refuses email consent without an email; this is only the friendlier first pass.
+  const emailOk=!!($('#wl-email-ok')||{}).checked, smsOk=!!($('#wl-sms-ok')||{}).checked;
+  if(!emailOk && !smsOk){ err.textContent='Tick email or text so we can tell you when a bay opens — that is the whole point of the list.'; return; }
+  if(emailOk && !email){ err.textContent='Add your email address, or untick "email me".'; return; }
+  if(smsOk && !phone){ err.textContent='Add your mobile number, or untick "text me".'; return; }
+  const from=minOf(($('#wl-from')||{}).value), to=minOf(($('#wl-to')||{}).value);
+  if(from==null || to==null || to<=from){ err.textContent='Give us an earliest and a latest time.'; return; }
+
+  const btn=$('#wl-join'); btn.disabled=true; btn.textContent='Joining…';
+  const r=await post('/api/waitlist?action=join',{
+    dateISO:isoDate(state.date),
+    bayIds:[...WL_BAYS],
+    windowStartMin:from, windowEndMin:to,
+    durationMin:Number((($('#wl-dur')||{}).value)||CONFIG.minMins||60),
+    name:(($('#wl-name')||{}).value||'').trim(),
+    email, phone, emailOk, smsOk, players:state.party,
+  });
+  btn.disabled=false; btn.textContent='Join the list';
+  if(!(r.data && r.data.ok)){
+    err.textContent=(r.data && r.data.error) || 'Could not join the waiting list — please try again.';
+    return;
+  }
+  showWaitlistDone(r.data);
+}
+
+// Everything shown here is the server's description of the entry it actually stored — never the
+// values typed into the form, which may have been clamped or normalised on the way in.
+function showWaitlistDone(d){
+  const e=d.entry||{};
+  const bays=(e.bays && e.bays.length) ? e.bays.join(', ') : 'Any bay';
+  const quiet=d.quietHours ? `<div class="row"><span class="k">Quiet hours</span><span>${escHtml(fmtMin(d.quietHours.startMin))} – ${escHtml(fmtMin(d.quietHours.endMin))}</span></div>` : '';
+  $('#wl-form').style.display='none';
+  const done=$('#wl-done');
+  done.style.display='block';
+  done.innerHTML=`<div class="conf">
+      <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <h3>${d.already?'You are already on the list':'You are on the list'}</h3>
+      <div class="conf-msg">We will contact you as soon as a bay opens up${d.claimMinutes?`, and hold it for ${escHtml(String(d.claimMinutes))} minutes while you decide`:''}.</div>
+      <div class="recap">
+        <div class="row"><span class="k">Date</span><span>${escHtml(e.dateISO||'')}</span></div>
+        <div class="row"><span class="k">Between</span><span>${escHtml(e.window||'')}</span></div>
+        <div class="row"><span class="k">Session</span><span>${escHtml(fmtDur(e.durationMin||0))}</span></div>
+        <div class="row"><span class="k">Bays</span><span>${escHtml(bays)}</span></div>
+        ${quiet}
+      </div>
+    </div>`;
+}
+
+if($('#wl-join')) $('#wl-join').onclick=joinWaitlist;
+if($('#wl-close')) $('#wl-close').onclick=closeWaitlist;
+if($('#wl-cancel')) $('#wl-cancel').onclick=closeWaitlist;
+if($('#wl-overlay')) $('#wl-overlay').addEventListener('click', e=>{ if(e.target===$('#wl-overlay')) closeWaitlist(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && $('#wl-overlay').classList.contains('show')) closeWaitlist(); });
+
+/* ---------- The league round (migration 0031) ----------
+   A league is sold by the team and has no fixed night: each team plays once a week, whenever it
+   likes, in whichever bay is free — booked HERE, from the ordinary booking page, and free, because
+   the team paid for the season up front.
+
+   So this page has to do two things for a customer who is on a team:
+     · say, before they pick anything, whether their team has played this week;
+     · at checkout, let them say "this one is our round" and make it unmistakable what that means —
+       what it costs (nothing), which team it is for, and which week it counts as.
+
+   POST /api/booking?action=league-round { teamId, dateISO, bayId, startMin, endMin } → { ok, bookingId }
+   The week is the server's to decide (bookings.league_week is generated from the date), so nothing
+   here sends one; the week shown is worked out with the same shared maths, for the customer's sake.
+
+   Migration 0031 may not be applied and neither action may exist yet. Everything below is skipped
+   silently in that case: no banner, no panel, and the page books exactly as it did before. */
+let LG = { teams: [], armed: null, intent: false };
+
+const todayISO = () => { const w = winnipegNow(); return `${w.y}-${pad(w.mo)}-${pad(w.d)}`; };
+const bayLabel = id => { const b = CONFIG.bays.find(x => x.id === id); return (b && b.name) || id || 'a bay'; };
+const shortDate = iso => { try{ return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ month:'short', day:'numeric' }); }catch(e){ return iso; } };
+const longDate  = iso => { try{ return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ weekday:'short', month:'short', day:'numeric' }); }catch(e){ return iso; } };
+const weekLabel = w => `${shortDate(w.start)} – ${shortDate(w.end)}`;
+const roundLine = r => [longDate(r.booking_date), r.start_min!=null ? `${fmtFull(r.start_min)}–${fmtFull(r.end_min)}` : '', bayLabel(r.bay_id)].filter(Boolean).join(' · ');
+
+async function loadLeagueRound(){
+  const LEA = window.InvictusLeagues;
+  if(!LEA) return;                                             // the shared maths did not load
+  if(!(BOOK_WINDOW.signedIn || BOOK_WINDOW.token || BOOK_WINDOW.devPhone)) return;   // nobody to ask about
+  let j = null;
+  try{
+    const r = await fetch('/api/leagues?action=my-teams', { method:'POST',
+      headers:{ 'Content-Type':'application/json', ...authHeaders() }, body:'{}' });
+    if(r.ok) j = await r.json();
+  }catch(e){ /* offline or not deployed: the page carries on as an ordinary booking page */ }
+  if(!(j && j.ok && Array.isArray(j.teams))) return;
+  const today = todayISO(), thisWeek = LEA.weekOf(today);
+  LG.teams = j.teams.map(t => {
+    const lg = t.league || {}, team = t.team || {};
+    const weeks = (Array.isArray(t.weeks) && t.weeks.length ? t.weeks
+      : LEA.teamWeeks({ league: lg, todayISO: today, rounds: t.rounds || team.rounds || [] }))
+      .map(w => ({ ...w, round: w.round || null, current: w.start === thisWeek }));
+    return { teamId: team.id, teamName: team.name || 'your team', leagueName: lg.name || 'the league',
+             minMins: lg.weekly_min_mins || 180, weeks };
+  }).filter(t => t.teamId);
+  renderLeagueBar();
+  if(LG.intent) scrollToTimes();
+}
+
+// The banner under the hero: has our team played this week, and what do I do about it?
+function renderLeagueBar(){
+  const host = $('#lg-bar'); if(!host) return;
+  if(!LG.teams.length){ host.style.display='none'; host.innerHTML=''; return; }
+  const open = LG.teams.filter(t => { const c = t.weeks.find(w => w.current); return c && !c.round; });
+  const lines = LG.teams.map(t => {
+    const c = t.weeks.find(w => w.current);
+    if(!c) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> — ${escHtml(t.leagueName)} is not running this week, so a booking now is an ordinary paid session.</div>`;
+    if(c.round) return `<div class="lg-line">✓ <b>${escHtml(t.teamName)}</b> has this week's round booked — <b>${escHtml(roundLine(c.round))}</b>. That is week ${c.number} of ${t.weeks.length} done; anything you book here now is a normal paid session.</div>`;
+    return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> has not played week ${c.number} of ${t.weeks.length} yet — you have until Sunday ${escHtml(shortDate(c.end))}. Pick any open time below and claim it at checkout: it costs <b>nothing</b>, and any player on the team can book it.</div>`;
+  });
+  host.className = 'lg-bar' + (open.length ? '' : ' is-booked');
+  host.style.display = 'block';
+  host.innerHTML = `<div class="lg-k">${open.length ? "Your league round this week" : "Your league round"}</div>${lines.join('')}`
+    + (open.length ? '<button class="btn btn-primary" id="lg-pick">Pick a time for our round</button>' : '');
+  const pick = $('#lg-pick');
+  if(pick) pick.onclick = () => { LG.intent = true; scrollToTimes(); toast('Pick any open start time — we make it free at checkout.'); };
+}
+
+// Which teams could this booking's week belong to? A team already has a round that week, or it
+// does not; a date outside a team's season belongs to neither list.
+function leagueChoices(){
+  const LEA = window.InvictusLeagues;
+  const out = { open: [], taken: [] };
+  if(!LEA || !LG.teams.length || !state.date) return out;
+  const wk = LEA.weekOf(isoDate(state.date));
+  for(const t of LG.teams){
+    const w = (t.weeks || []).find(x => x.start === wk);
+    if(!w) continue;
+    const entry = { teamId:t.teamId, teamName:t.teamName, leagueName:t.leagueName, minMins:t.minMins,
+                    week:w, round:w.round, weeksTotal:t.weeks.length };
+    (w.round ? out.taken : out.open).push(entry);
+  }
+  return out;
+}
+
+function renderLeaguePanel(){
+  const host = $('#league-round'); if(!host) return;
+  if(!LG.teams.length || !selectionValid()){ host.innerHTML=''; return; }
+
+  if(LG.armed){
+    const a = LG.armed;
+    host.innerHTML = `<div class="lg-panel is-armed">
+      <div class="lg-t">League round — nothing to pay</div>
+      <div class="lg-d">This booking is <b>${escHtml(a.teamName)}</b>'s round for the week. Everyone on the team sees it, and any of you can turn up.</div>
+      <ul class="lg-facts">
+        <li><span class="k">Team</span><span class="v">${escHtml(a.teamName)} · ${escHtml(a.leagueName)}</span></li>
+        <li><span class="k">Counts as</span><span class="v">Week ${a.week.number} of ${a.weeksTotal} · ${escHtml(weekLabel(a.week))}</span></li>
+        <li><span class="k">When</span><span class="v">${escHtml(longDate(isoDate(state.date)))} · ${escHtml(fmtFull(state.startMin))}–${escHtml(fmtFull(state.endMin))}</span></li>
+        <li><span class="k">Bay</span><span class="v">${escHtml(bayLabel(state.bay))}</span></li>
+        <li><span class="k">You pay</span><span class="v" style="color:#067647">Nothing — the season is paid</span></li>
+      </ul>
+      <button class="btn btn-primary" id="lg-confirm">Confirm our free league round</button>
+      <a class="lg-off" id="lg-off">No — book this as a normal paid session</a>
+      <div class="lg-err" id="lg-err"></div>
+    </div>`;
+    $('#lg-confirm').onclick = confirmLeagueRound;
+    $('#lg-off').onclick = disarmLeague;
+    return;
+  }
+
+  const { open, taken } = leagueChoices();
+  if(open.length){
+    // They came here from "Book this week's round", so the answer is already yes.
+    if(LG.intent && open.length === 1){ armLeague(open[0]); return; }
+    const one = open.length === 1;
+    host.innerHTML = `<div class="lg-panel is-offer">
+      <div class="lg-t">Is this your league round?</div>
+      <div class="lg-d">${one
+        ? `<b>${escHtml(open[0].teamName)}</b> has not played week ${open[0].week.number} of ${escHtml(open[0].leagueName)} (${escHtml(weekLabel(open[0].week))}) yet. Claim it here and <b>this booking is free</b> — your team paid for the season up front.`
+        : 'You are on more than one team with a round still to play that week. Say which team this booking is for and it is <b>free</b>.'}</div>
+      ${open.map((o,i) => `<button type="button" class="btn btn-line" data-arm="${i}">${one
+        ? 'Yes — this is our league round' : `${escHtml(o.teamName)} · week ${o.week.number}`}</button>`).join('')}
+    </div>`;
+    host.querySelectorAll('[data-arm]').forEach(b => { b.onclick = () => armLeague(open[+b.dataset.arm]); });
+    return;
+  }
+  if(taken.length){
+    host.innerHTML = taken.map(t => `<div class="lg-panel is-note">
+      <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)} has already played that week</div>
+      <div class="lg-d">Week ${t.week.number} is booked: <b>${escHtml(roundLine(t.round))}</b>. A team gets one free round a week, so this one is an ordinary session and is charged as one.</div>
+    </div>`).join('');
+    return;
+  }
+  host.innerHTML = '';
+}
+
+// When the round is claimed, the payment side of the modal goes away entirely: there is no price
+// to show and nothing to type. Restoring it puts back whichever mode this page is running in.
+function showLeagueOnly(on){
+  const modal = $('#pay-modal');
+  $('#stripe-mode').style.display = on ? 'none' : (stripeReady ? 'block' : 'none');
+  $('#sim-mode').style.display    = on ? 'none' : (stripeReady ? 'none'  : 'block');
+  $('#pay-note').style.display    = on ? 'none' : '';
+  modal.classList.toggle('stripe', !on && stripeReady);
+}
+
+function armLeague(choice){
+  LG.armed = choice; LG.intent = false;
+  $('#pay-recap').innerHTML = recapHTML();
+  renderLeaguePanel();
+  showLeagueOnly(true);
+}
+async function disarmLeague(){
+  LG.armed = null; LG.intent = false;
+  $('#pay-recap').innerHTML = recapHTML();
+  renderLeaguePanel();
+  showLeagueOnly(false);
+  if(stripeReady) await mountStripe();
+  else $('#pay-amt').textContent = money(priceRange(state.date, state.startMin, state.endMin));
+}
+
+async function confirmLeagueRound(){
+  if(paying || !LG.armed) return;
+  const a = LG.armed, btn = $('#lg-confirm'), err = $('#lg-err');
+  paying = true; btn.disabled = true; btn.textContent = 'Booking…'; err.textContent = '';
+  // Give our own cart hold back first and wait for it: the server re-checks this slot against every
+  // live booking row, and a hold this checkout is holding would clash with itself.
+  await releaseHeldSlot();
+  await releaseCredits();
+  const r = await post('/api/booking?action=league-round', { teamId:a.teamId, dateISO:isoDate(state.date),
+    bayId:state.bay, startMin:state.startMin, endMin:state.endMin });
+  paying = false;
+  if(r.data && r.data.ok){
+    $('#pay-overlay').classList.remove('show');
+    showLeagueConfirmation(a, r.data.bookingId);
+    LG.armed = null;
+    loadAvailability().then(renderAll);
+    loadLeagueRound();
+    return;
+  }
+  btn.disabled = false; btn.textContent = 'Confirm our free league round';
+  const d = r.data || {};
+  err.textContent = r.status === 409 ? (d.error || 'Somebody took that time while you were deciding. Close this, pick another open slot, and claim the round there.')
+    : r.status === 404 ? (d.error || 'Booking a league round online is not switched on yet. Call the shop at 204-488-6177 and we will book it for you — it is still free.')
+    : r.status === 503 ? 'Leagues are still being set up here, so we cannot book the round for you yet. Call the shop at 204-488-6177 — it is still free.'
+    : (r.status === 401 || r.status === 403) ? (d.error || 'Your sign-in has expired, so we cannot tell this is your team. Open My Account, sign in again, then come back and try once more.')
+    : (d.error || 'We could not book your league round. Try again in a moment, or call the shop at 204-488-6177.');
+  // The server names the round they already have; the banner and the panel should stop offering
+  // one the moment we learn that.
+  if(d.code === 'round_booked'){ loadLeagueRound(); }
+}
+
+function showLeagueConfirmation(a, bookingId){
+  HELD=null; holdActive=false; stopHoldTimer(); piCache=null;
+  const seed = String(bookingId || (a.teamId + isoDate(state.date) + state.startMin));
+  const code = 'JH-'+Math.abs([...seed].reduce((x,c)=>x*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
+  $('#conf-code').textContent = code;
+  $('#conf-msg').textContent = `${a.teamName} is booked in for week ${a.week.number} — nothing to pay. Everyone on the team can see it on My Account.`;
+  $('#conf-recap').innerHTML = `
+    <div class="row"><span class="k">Team</span><span>${escHtml(a.teamName)}</span></div>
+    <div class="row"><span class="k">League week</span><span>Week ${a.week.number} of ${a.weeksTotal} · ${escHtml(weekLabel(a.week))}</span></div>
+    <div class="row"><span class="k">Bay</span><span>${escHtml(bayLabel(state.bay))}</span></div>
+    <div class="row"><span class="k">Date</span><span>${escHtml(longDate(isoDate(state.date)))}</span></div>
+    <div class="row"><span class="k">Time</span><span>${escHtml(fmtFull(state.startMin))} – ${escHtml(fmtFull(state.endMin))}</span></div>
+    <div class="row"><span class="k">Paid</span><span>Free — the season is paid for</span></div>`;
+  $('#conf-waiver').innerHTML = '';
+  $('#conf-overlay').classList.add('show');
+  setStep(4);
+}
+
 /* ---------- Init ---------- */
 { const w = winnipegNow(); state.calMonth = new Date(w.y, w.mo-1, 1); }
 renderAll();
+// "Book this week's round" on My Account or the leagues page lands here: the customer has already
+// said this booking is their team's round, so checkout claims it without asking them twice.
+if(new URLSearchParams(location.search).get('league-round')==='1'){
+  LG.intent = true;
+  history.replaceState({}, '', location.pathname);
+}
+loadBookingWindow().then(loadLeagueRound);
 loadStripeConfig().then(handleReturn);
 loadSettings();   // pull live bays/hours/rates from the manager's settings (if DB is on)
 </script>
