@@ -33,7 +33,6 @@
   .btn-primary:disabled{background:#E4E7EC;color:#98A2B3;cursor:not-allowed}
   .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:var(--white);border-color:var(--dim)}
   .err{color:var(--danger);font-size:13px;margin-top:10px;min-height:16px}
-  #pm-err:empty{min-height:0;margin-top:0}   /* no blank strip above "Add a card" until there is an error */
   .ph-hint{font-size:12px;color:var(--dim);margin:5px 0 0 2px;min-height:15px;letter-spacing:.01em}
   .ph-hint.on{color:#067647}
   .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:4px 0 4px}
@@ -120,14 +119,6 @@
   .inv-link .btn{width:auto;margin:0;padding:0 16px;font-size:13px;white-space:nowrap}
   .inv-ok{color:var(--ok);font-size:12.5px;margin-top:8px;line-height:1.5}
   .lg-note{border-radius:12px;padding:13px 15px;font-size:13px;line-height:1.55;background:var(--near-black);border:1px solid var(--border);color:var(--muted)}
-  /* Saved cards (migration 0029) */
-  .pm-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--border)}
-  .pm-row:last-of-type{border-bottom:none}
-  .pm-name{font-weight:700;font-size:14.5px}
-  .pm-sub{font-size:12.5px;color:var(--dim);margin-top:2px}
-  .pm-row .btn{width:auto;margin:0;padding:8px 14px;font-size:13px}
-  .pm-row .btn.is-confirm{border-color:var(--danger);color:var(--danger)}
-  #pm-element{margin-top:12px}
 </style>
 </head>
 <body>
@@ -553,7 +544,6 @@ function drawProfile(c, bks, justInherited, opts){
 
     ${teams.map((t,i) => teamCard(t, i, opts)).join('')}
     ${(opts && opts.teamsError) ? `<div class="card"><div class="sec-title" style="margin-top:0">My team</div><div class="lg-note">${esc(opts.teamsError)} Reload the page, and if it keeps happening call the shop at 204-488-6177 — your team and your booked rounds are safe either way.</div></div>` : ''}
-    <div class="card" id="pm-card"><div class="sec-title" style="margin-top:0">Payment methods</div><div class="spin" style="padding:12px 0">Loading saved cards…</div></div>
     <div class="card">
       <div class="sec-title" style="margin-top:0">Upcoming</div>
       ${upcoming.length ? upcoming.map(bkRow).join('') : '<div class="empty">Nothing booked yet.</div>'}
@@ -564,79 +554,7 @@ function drawProfile(c, bks, justInherited, opts){
   if(!dev) $('#o-out').onclick = signOut;
   drawDetails(c, dev);
   if(ask) wireFeedback(ask, dev);
-  drawCards(dev);
   wireTeams(teams);
-}
-
-/* ---------- saved cards (migration 0029) ----------
-   Card details never touch this page's code or the database: the list comes from Stripe through the
-   server, and adding a card uses Stripe's own Payment Element and a SetupIntent. */
-async function cardsApi(action, body, dev){
-  let url = '/api/dev/my-account/cards', headers = { 'Content-Type':'application/json' };
-  if(!dev){
-    const sb = await supa(); const { data:{ session } } = await sb.auth.getSession();
-    url = '/api/account?action=' + action;
-    headers.Authorization = 'Bearer ' + (session && session.access_token || '');
-  }
-  try{ const r = await fetch(url, { method:'POST', headers, body: JSON.stringify({ action, ...(body||{}) }) }); return await r.json(); }
-  catch(e){ return { error:'Could not reach the server. Try again in a moment.' }; }
-}
-const BRAND = { visa:'Visa', mastercard:'Mastercard', amex:'American Express', discover:'Discover', jcb:'JCB', diners:'Diners Club', unionpay:'UnionPay' };
-const WALLET = { apple_pay:'Apple Pay', google_pay:'Google Pay', link:'Link' };
-
-async function drawCards(dev){
-  const host = $('#pm-card'); if(!host) return;
-  const r = await cardsApi('cards', null, dev);
-  const head = '<div class="sec-title" style="margin-top:0">Payment methods</div>';
-  if(!r.ok){ host.innerHTML = head + `<div class="empty" style="padding:8px 0">${esc(r.error || 'Saved cards aren’t available right now.')}</div>`; return; }
-  host.innerHTML = head + (r.cards.length ? r.cards.map(k => `<div class="pm-row" data-id="${esc(k.id)}">
-      <div><div class="pm-name">${esc(BRAND[k.brand] || k.brand || 'Card')} •••• ${esc(k.last4)}</div>
-        <div class="pm-sub">Expires ${String(k.expMonth).padStart(2,'0')}/${String(k.expYear).slice(-2)}${k.wallet ? ' · ' + esc(WALLET[k.wallet] || k.wallet) : ''}</div></div>
-      <button class="btn btn-ghost pm-remove" aria-label="Remove ${esc(BRAND[k.brand] || 'card')} ending ${esc(k.last4)}">Remove</button>
-    </div>`).join('') : '<div class="empty" style="padding:8px 0 4px">No saved cards yet. Save one here, or tick “save” when you pay for a booking.</div>')
-    + '<div class="err" id="pm-err"></div><button class="btn btn-ghost" id="pm-add">Add a card</button><div id="pm-form"></div>';
-
-  host.querySelectorAll('.pm-row').forEach(row => {
-    const btn = row.querySelector('.pm-remove');
-    btn.onclick = async () => {
-      if(!btn.classList.contains('is-confirm')){ btn.classList.add('is-confirm'); btn.textContent = 'Tap again to remove'; return; }
-      btn.disabled = true;
-      const x = await cardsApi('card-remove', { paymentMethodId: row.dataset.id }, dev);
-      if(!x.ok){ btn.disabled = false; setErr('#pm-err', x.error || 'Could not remove that card.'); return; }
-      drawCards(dev);
-    };
-  });
-  $('#pm-add').onclick = () => addCardForm(dev);
-}
-
-// Stripe.js is only needed once someone adds a card, so viewing the account never waits on it.
-function loadStripeJs(){
-  if(window.Stripe) return Promise.resolve(true);
-  return new Promise(res => { const el = document.createElement('script'); el.src = 'https://js.stripe.com/v3/';
-    el.onload = () => res(!!window.Stripe); el.onerror = () => res(false); document.head.appendChild(el); });
-}
-
-async function addCardForm(dev){
-  setErr('#pm-err', '');
-  const cfg = await fetch('/api/config').then(r => r.json()).catch(() => ({}));
-  if(!cfg.stripeEnabled || !cfg.publishableKey || !(await loadStripeJs())){ setErr('#pm-err', 'Card saving isn’t available right now. Check your connection and try again.'); return; }
-  $('#pm-add').disabled = true;
-  const r = await cardsApi('card-setup', null, dev);
-  if(!r.ok){ $('#pm-add').disabled = false; setErr('#pm-err', r.error || 'Could not start adding a card.'); return; }
-  const stripe = window.Stripe(cfg.publishableKey);
-  const elements = stripe.elements({ clientSecret: r.clientSecret, appearance: { theme:'stripe', variables:{ colorPrimary:'#F0523D', borderRadius:'11px', fontFamily:'Raleway, system-ui, sans-serif' } } });
-  $('#pm-add').style.display = 'none';
-  $('#pm-form').innerHTML = '<div id="pm-element"></div><div class="row2"><button class="btn btn-primary" id="pm-save" disabled>Save card</button><button class="btn btn-ghost" id="pm-cancel">Cancel</button></div>';
-  const pe = elements.create('payment', { layout:'tabs' });
-  pe.mount('#pm-element');
-  pe.on('ready', () => { $('#pm-save').disabled = false; });
-  $('#pm-cancel').onclick = () => drawCards(dev);
-  $('#pm-save').onclick = async () => {
-    $('#pm-save').disabled = true; $('#pm-save').textContent = 'Saving…'; setErr('#pm-err', '');
-    const { error } = await stripe.confirmSetup({ elements, redirect:'if_required', confirmParams:{ return_url: location.origin + '/account' } });
-    if(error){ $('#pm-save').disabled = false; $('#pm-save').textContent = 'Save card'; setErr('#pm-err', error.message); return; }
-    drawCards(dev);
-  };
 }
 
 /* ---------- My team ----------

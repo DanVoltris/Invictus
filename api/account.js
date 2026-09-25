@@ -7,9 +7,7 @@
 //   3b. the browser signs in with Supabase Auth directly using email + password
 //   4. POST ?action=feedback { bookingId, rating, comment, skipped }  (Authorization: Bearer <session>)
 //      -> rates a finished session on My Account (migration 0027)
-//   5. POST ?action=cards | card-setup | card-remove { paymentMethodId }   (Authorization: Bearer <session>)
-//      -> the signed-in customer's saved cards, a SetupIntent to add one, or removing one (migration 0029)
-//   6. GET/POST ?action=waiver  -> the participant waiver (was api/sign-waiver.js; see the foot of
+//   5. GET/POST ?action=waiver  -> the participant waiver (was api/sign-waiver.js; see the foot of
 //      this file). It lives here because a waiver belongs to a CUSTOMER, which is what this file
 //      is about, and because Vercel's Hobby plan allows 12 Serverless Functions while api/ held
 //      16 — the project could not deploy at all. /api/sign-waiver is unchanged as a URL:
@@ -27,9 +25,7 @@
 //   it numbers, learn who is a customer. The answer comes back from ?action=verify, which only
 //   somebody holding the phone can reach.
 import crypto from 'node:crypto';
-import { getSettings, admin, customerHoursByContact, normPhone, saveBookingFeedback,
-  accountCustomerForRequest, stripeCustomerIdFor, listSavedCards, removeSavedCard, cardSetupIntent } from '../lib/db.js';
-import { stripeStatus, stripeClient } from '../lib/booking.js';
+import { getSettings, admin, customerHoursByContact, normPhone, saveBookingFeedback } from '../lib/db.js';
 import { enqueue } from '../lib/notify.js';
 
 const CODE_TTL_MIN = 10;        // a code is good for ten minutes
@@ -67,7 +63,9 @@ function actionOf(req, known) {
 
 // `forced` is how server.js names the action for a path it mounts directly (/api/sign-waiver).
 // Vercel only ever passes (req, res), so the ?action= read applies there.
-const ACTIONS = ['start', 'verify', 'register', 'feedback', 'cards', 'card-setup', 'card-remove', 'waiver'];
+// 'cards', 'card-setup' and 'card-remove' are gone (saved cards retired): they now fall through
+// to the "Unknown action." 400 below, exactly like any other name this file does not serve.
+const ACTIONS = ['start', 'verify', 'register', 'feedback', 'waiver'];
 export default async function handler(req, res, forced) {
   const action = forced || actionOf(req, ACTIONS);
   // The waiver is the one action here that answers a GET (a status check), and it has its own
@@ -84,7 +82,6 @@ export default async function handler(req, res, forced) {
     if (action === 'verify')   return await verify(req, res, db);
     if (action === 'register') return await register(req, res, db);
     if (action === 'feedback') return await feedback(req, res, db);
-    if (action === 'cards' || action === 'card-setup' || action === 'card-remove') return await cards(req, res, action);
     return json(res, 400, { error: 'Unknown action.' });
   } catch (err) {
     console.error(`account?action=${action}:`, err.message);
@@ -300,26 +297,14 @@ async function feedback(req, res, db) {
   return r.ok ? json(res, 200, r) : json(res, r.code || 400, { error: r.error });
 }
 
-// ---- 5. saved cards ----------------------------------------------------------------------------
-// Only for a proven customer (lib/db.js accountCustomerForRequest). Card details stay at Stripe.
-async function cards(req, res, action) {
-  if (!stripeStatus(process.env).enabled) return json(res, 503, { error: 'Card payments aren’t set up yet — please call the shop.' });
-  const cust = await accountCustomerForRequest(req);
-  if (!cust) return json(res, 401, { error: 'Sign in to manage your saved cards.' });
-  const stripe = stripeClient(process.env);
-  if (action === 'cards') return json(res, 200, { ok: true, cards: await listSavedCards(stripe, cust.stripe_customer_id) });
+// ---- saved cards (migration 0029): RETIRED -------------------------------------------------
+// The venue does not offer saved cards. The ?action=cards / card-setup / card-remove handler lived
+// here: it listed the signed-in customer's cards, opened a SetupIntent to add one, and detached one
+// to remove it, all off customers.stripe_customer_id. Nothing reads that column any more; it is
+// left in the database, unused, the same way memberships (0028) and loyalty points were retired.
+// The three actions now answer 400 "Unknown action." from the dispatcher above.
 
-  // Removing a card needs an existing Stripe link — nobody without one has a card to remove, and
-  // creating a Stripe Customer just to say 404 would be a pointless write.
-  if (action === 'card-remove' && !cust.stripe_customer_id) return json(res, 404, { error: 'That card isn’t on your account.' });
-  const stripeCustomerId = await stripeCustomerIdFor(stripe, cust);
-  if (!stripeCustomerId) return json(res, 503, { error: 'Saved cards aren’t switched on yet. Please try again later.' });
-  if (action === 'card-setup') return json(res, 200, { ok: true, clientSecret: await cardSetupIntent(stripe, stripeCustomerId) });
-  const r = await removeSavedCard(stripe, stripeCustomerId, (req.body || {}).paymentMethodId);
-  return r.ok ? json(res, 200, r) : json(res, r.code || 400, { error: r.error });
-}
-
-// ---- 6. the participant waiver (was api/sign-waiver.js) ----------------------------------------
+// ---- 5. the participant waiver (was api/sign-waiver.js) ----------------------------------------
 // GET  ?action=waiver&c=&b=&e=&p=   has this person already signed?
 // POST ?action=waiver { name, version, customerId, bookingId, email, phone }   sign it
 //

@@ -1,6 +1,5 @@
 import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, winnipegTodayISO, bookingWindowError } from '../lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
-         checkoutStripeCustomer, paymentElementSession,
          confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
          releaseHold } from '../lib/db.js';
 
@@ -117,11 +116,11 @@ export async function createPaymentIntent(req, res) {
     });
     const charge = q.charge;
 
-    // A signed-in customer's saved cards and wallets (migration 0029). Null for everyone else.
-    const stripeCustomerId = await checkoutStripeCustomer(stripe, req);
-
+    // Saved cards (migration 0029) are retired: no Stripe Customer is created or attached here,
+    // and no Customer Session is opened, so customers.stripe_customer_id is never read. Apple Pay
+    // and Google Pay are unaffected — they come from automatic_payment_methods below, which has
+    // nothing to do with a Customer.
     const pi = await stripe.paymentIntents.create({
-      ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
       amount: charge,
       currency: settings.currency,
       automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
@@ -144,13 +143,7 @@ export async function createPaymentIntent(req, res) {
       },
     });
 
-    let customerSessionClientSecret = null;
-    if (stripeCustomerId) {
-      try { customerSessionClientSecret = await paymentElementSession(stripe, stripeCustomerId); }
-      catch (err) { console.warn('create-payment-intent: saved cards unavailable —', err.message); }
-    }
-
-    res.status(200).json({ clientSecret: pi.client_secret, customerSessionClientSecret, amount: charge, fullAmount: amount,
+    res.status(200).json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount,
       memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
       promoDiscountCents: q.promoDiscountCents || 0, promoBlocked: q.promoBlocked || null,
       giftUsedCents: q.giftUsedCents || 0, expiresAt });

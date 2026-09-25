@@ -139,7 +139,8 @@ app.all('/api/checkout', (req, res) => checkout(req, res));
 // PaymentIntent creation (pricing, availability, cart hold, promo + gift card) — shared module handler.
 app.all('/api/create-payment-intent', (req, res) => {
   // LOCAL ONLY: the booking page on localhost checks out as the no-login dev account (see below),
-  // so its saved cards show. Vercel never runs this file; req.devAccountPhone is set nowhere else.
+  // so its league booking window applies (lib/db.js leaguePlayerForRequest). Vercel never runs this
+  // file; req.devAccountPhone is set nowhere else.
   const devPhone = devAccountPhone(req);
   if (devPhone && req.get('x-dev-account') === '1') req.devAccountPhone = process.env.DEV_ACCOUNT_PHONE;
   return checkout(req, res, 'create-payment-intent');
@@ -239,19 +240,8 @@ app.post('/api/dev/my-account/feedback', async (req, res) => {
   return r.ok ? res.json(r) : res.status(r.code || 400).json({ error: r.error });
 });
 
-// Saved cards for the dev account: the same handler as the live site, with the identity filled in.
-app.post('/api/dev/my-account/cards', async (req, res) => {
-  if (!devAccountPhone(req)) return res.status(404).json({ error: 'Not found.' });
-  const action = String((req.body || {}).action || 'cards');
-  if (!['cards', 'card-setup', 'card-remove'].includes(action)) return res.status(400).json({ error: 'Unknown action.' });
-  // Cards hang off a customer record. On a fresh database the dev account has none yet, so make it
-  // here, the same way saving an address does.
-  const up = await upsertCustomer({ name: process.env.DEV_ACCOUNT_NAME, phone: process.env.DEV_ACCOUNT_PHONE });
-  if (!up.id) return res.status(500).json({ error: `Could not find or create the dev customer record: ${up.error || 'unknown'}` });
-  req.devAccountPhone = process.env.DEV_ACCOUNT_PHONE;
-  req.query.action = action;
-  return account(req, res);
-});
+// Saved cards are retired, so the dev account's /api/dev/my-account/cards route is gone with them;
+// the path now 404s like any other unknown one.
 
 app.post('/api/dev/my-account/profile', async (req, res) => {
   const phone = devAccountPhone(req);

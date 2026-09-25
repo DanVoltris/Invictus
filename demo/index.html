@@ -834,8 +834,8 @@ function accountToken(){
     return (s && s.access_token && (!s.expires_at || s.expires_at*1000 > Date.now())) ? s.access_token : null;
   }catch(e){ return null; }
 }
-// The account session travels with booking requests: it unlocks the league window and, at checkout,
-// the customer's saved cards. On localhost the no-login dev account is named instead (server.js).
+// The account session travels with booking requests: it unlocks the league window. On localhost the
+// no-login dev account is named instead (server.js).
 const authHeaders = () => ({ ...(BOOK_WINDOW.token ? { Authorization: 'Bearer ' + BOOK_WINDOW.token } : {}),
                              ...(BOOK_WINDOW.devPhone ? { 'X-Dev-Account': '1' } : {}) });
 function lastBookableRank(){
@@ -1321,7 +1321,6 @@ async function createPI(){
   if(r.status===409){ const e=new Error(data.error||'That time was just taken — pick another slot.'); e.taken=true; throw e; }
   if(!r.ok) throw new Error(data.error||'error');
   piCache={ key, clientSecret:data.clientSecret, paymentIntentId:piIdOf(data.clientSecret),
-            customerSessionClientSecret:data.customerSessionClientSecret||null,
             amount:data.amount, fullAmount:data.fullAmount,
             memberPct:data.memberPct||0, memberDiscountCents:data.memberDiscountCents||0,
             // Present only once /api/create-payment-intent applies these itself. While it does
@@ -1560,10 +1559,10 @@ async function mountStripe(){
     peEl.innerHTML='<div class="loading">Could not start checkout: '+err.message+'</div>'; return;
   }
   $('#sc-amt').textContent=money(data.amount/100);
-  // With a customer session (signed-in customers only) the Payment Element lists their saved cards
-  // and Apple Pay / Google Pay, and offers to save a new card for next time.
-  elements=STRIPE.elements({ clientSecret:data.clientSecret, appearance:STRIPE_APPEARANCE,
-    ...(data.customerSessionClientSecret ? { customerSessionClientSecret:data.customerSessionClientSecret } : {}) });
+  // The venue does not keep cards, so the Payment Element is given no Customer Session: nothing is
+  // listed from a previous visit and nothing is offered to save. Apple Pay / Google Pay are unaffected —
+  // the Payment Element offers them from the PaymentIntent itself.
+  elements=STRIPE.elements({ clientSecret:data.clientSecret, appearance:STRIPE_APPEARANCE });
   peEl.innerHTML='';
   const pe=elements.create('payment', { layout:'tabs' });
   pe.mount('#payment-element');

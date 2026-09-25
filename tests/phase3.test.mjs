@@ -1,4 +1,7 @@
-// Phase 3: saved cards. The real lib/db.js, lib/booking.js, api/account.js and api/checkout.js
+// Phase 3: saved cards, RETIRED. The venue does not offer them, so what is pinned down here is
+// that they are GONE and that nothing else went with them — no Stripe Customer, no Customer
+// Session, no card endpoints, and Apple Pay / Google Pay still offered via automatic_payment_methods.
+// The real lib/db.js, lib/booking.js, api/account.js and api/checkout.js
 // (?action=create-payment-intent, formerly api/create-payment-intent.js)
 // run end to end; only the Stripe SDK and the Supabase client underneath are fake and record every call.
 import { test, mock } from 'node:test';
@@ -101,108 +104,82 @@ test('accountCustomerForRequest: session token, dev marker, forged token, nothin
   assert.equal(await db.accountCustomerForRequest({ headers: {} }), null);
 });
 
-test('stripeCustomerIdFor: reuses, creates and links, loses a race cleanly, survives a missing column', async () => {
-  world();
-  assert.equal(await db.stripeCustomerIdFor(new FakeStripe(), S.db.customers[0]), 'cus_murad');
-  assert.ok(!names().includes('customers.create'), 'existing link reused without calling Stripe');
-
-  const created = await db.stripeCustomerIdFor(new FakeStripe(), { ...S.db.customers[1] });
-  assert.match(created, /^cus_/); assert.equal(S.db.customers[1].stripe_customer_id, created);
-  assert.equal(S.stripe.find((c) => c[0] === 'customers.create')[1].metadata.invictus_customer_id, 'c-new');
-
-  world(); S.stripe = [];
-  const stale = { ...S.db.customers[1] };                 // our copy says "no link yet"...
-  S.db.customers[1].stripe_customer_id = 'cus_winner';    // ...but another checkout just linked one
-  assert.equal(await db.stripeCustomerIdFor(new FakeStripe(), stale), 'cus_winner');
-  assert.ok(names().includes('customers.del'), 'the duplicate Stripe Customer is deleted');
-
-  world(); S.fail['customers:update'] = { message: 'column "stripe_customer_id" does not exist' };
-  assert.equal(await db.stripeCustomerIdFor(new FakeStripe(), { ...S.db.customers[1] }), null);
-  assert.ok(names().includes('customers.del'), 'no orphan Stripe Customer left behind');
+test('the saved-card helpers are gone from lib/db.js', () => {
+  for (const name of ['stripeCustomerIdFor', 'checkoutStripeCustomer', 'paymentElementSession',
+                      'listSavedCards', 'removeSavedCard', 'cardSetupIntent']) {
+    assert.equal(db[name], undefined, `${name} should no longer be exported`);
+  }
+  assert.equal(typeof db.accountCustomerForRequest, 'function', 'proving who a request speaks for stays');
 });
 
-test('listSavedCards: cards only, shaped for the page', async () => {
+test('api/account: cards, card-setup and card-remove are no longer actions, signed in or out', async () => {
   world();
-  assert.deepEqual(await db.listSavedCards(new FakeStripe(), 'cus_murad'),
-    [{ id: 'pm_mine', brand: 'visa', last4: '4242', expMonth: 4, expYear: 2028, wallet: 'apple_pay' }]);
-  assert.deepEqual(await db.listSavedCards(new FakeStripe(), null), []);
-});
+  for (const action of ['cards', 'card-setup', 'card-remove']) {
+    const out = await run(accountApi, { query: { action } });
+    assert.equal(out.code, 400, action);
+    assert.equal(out.out.error, 'Unknown action.', action);
 
-test("removeSavedCard: cannot remove someone else's card", async () => {
-  world();
-  assert.equal((await db.removeSavedCard(new FakeStripe(), 'cus_murad', 'pm_other')).code, 404);
-  assert.equal((await db.removeSavedCard(new FakeStripe(), 'cus_murad', 'pm_nope')).code, 404);
-  assert.ok(!names().includes('paymentMethods.detach'));
-  assert.equal((await db.removeSavedCard(new FakeStripe(), 'cus_murad', 'pm_mine')).ok, true);
-  assert.deepEqual(S.stripe.find((c) => c[0] === 'paymentMethods.detach'), ['paymentMethods.detach', 'pm_mine']);
-});
+    const signedIn = await run(accountApi, { query: { action }, headers: { authorization: 'Bearer tok-murad' },
+      body: { paymentMethodId: 'pm_mine' } });
+    assert.equal(signedIn.code, 400, `${action} signed in`);
+    assert.equal(signedIn.out.error, 'Unknown action.', `${action} signed in`);
 
-test('SetupIntent and Customer Session parameters follow Stripe guidance (no payment_method_types)', async () => {
-  world();
-  await db.cardSetupIntent(new FakeStripe(), 'cus_murad');
-  await db.paymentElementSession(new FakeStripe(), 'cus_murad');
-  const si = S.stripe.find((c) => c[0] === 'setupIntents.create')[1];
-  assert.deepEqual(si, { customer: 'cus_murad', usage: 'off_session' });
-  const cs = S.stripe.find((c) => c[0] === 'customerSessions.create')[1];
-  assert.equal(cs.customer, 'cus_murad');
-  assert.equal(cs.components.payment_element.enabled, true);
-  assert.equal(cs.components.payment_element.features.payment_method_save, 'enabled');
-  assert.equal(cs.components.payment_element.features.payment_method_redisplay, 'enabled');
-  assert.ok(JSON.stringify(S.stripe).indexOf('payment_method_types') === -1);
-});
-
-test('api/account cards: signed out 401; list; add; remove only own', async () => {
-  world();
-  assert.equal((await run(accountApi, { query: { action: 'cards' } })).code, 401);
-  const list = await run(accountApi, { query: { action: 'cards' }, headers: { authorization: 'Bearer tok-murad' } });
-  assert.equal(list.out.cards.length, 1);
-  const setup = await run(accountApi, { query: { action: 'card-setup' }, headers: { authorization: 'Bearer tok-murad' } });
-  assert.equal(setup.out.clientSecret, 'seti_secret');
-  const theirs = await run(accountApi, { query: { action: 'card-remove' }, headers: { authorization: 'Bearer tok-murad' }, body: { paymentMethodId: 'pm_other' } });
-  assert.equal(theirs.code, 404);
-  const mine = await run(accountApi, { query: { action: 'card-remove' }, dev: '2049906530', body: { paymentMethodId: 'pm_mine' } });
-  assert.equal(mine.out.ok, true);
+    const dev = await run(accountApi, { query: { action }, dev: '2049906530', body: { paymentMethodId: 'pm_mine' } });
+    assert.equal(dev.code, 400, `${action} dev account`);
+  }
+  // Nothing reached Stripe, so the restricted key never needs "Customer Session: write" again,
+  // and no card was listed, attached or detached on the way to that 400.
+  assert.deepEqual(S.stripe, []);
+  // The card that belongs to c-murad is still at Stripe, untouched — retiring is not deleting.
+  assert.ok(S.pms.some((pm) => pm.id === 'pm_mine' && pm.customer === 'cus_murad'));
 });
 
 const futureDate = (n) => { const d = new Date(`${winnipegTodayISO()}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const slot = (n = 3) => ({ dateISO: futureDate(n), bayId: 'B1', startMin: 600, endMin: 660, party: 1, hold: false });
 
-test('checkout, signed out: no Stripe Customer, no customer session', async () => {
+// The one price in this file that is checked in full: 10:00-11:00 on a weekday-or-weekend day at
+// $20/$25 an hour. What matters below is that removing saved cards did not disturb it.
+test('checkout, signed out: a client secret, the right price, no Stripe Customer, no Customer Session', async () => {
   world();
   const r = await run(createPI, { body: slot() });
   assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.clientSecret, 'pi_1_secret_x');
   const pi = S.stripe.find((c) => c[0] === 'paymentIntents.create')[1];
-  assert.equal(pi.customer, undefined); assert.equal(r.out.customerSessionClientSecret, null);
+  assert.equal(pi.amount, r.out.amount);
+  assert.ok([2000, 2500].includes(pi.amount), `one hour at the configured rate, got ${pi.amount}`);
+  assert.equal(pi.customer, undefined);
+  assert.equal('customerSessionClientSecret' in r.out, false, 'the field is gone from the answer');
+  assert.deepEqual(names(), ['paymentIntents.create'], 'the only Stripe call checkout makes');
 });
 
-test("checkout: typing a customer's phone does NOT expose their saved cards", async () => {
+// The point of the old feature was that saved cards were shown only to a PROVEN customer. Retired,
+// the guarantee is stronger and simpler: nobody's Stripe Customer is touched at checkout at all.
+test('checkout: neither a typed phone nor a real session attaches a Stripe Customer', async () => {
   world();
-  const r = await run(createPI, { body: { ...slot(), phone: '(204) 990-6530', email: 'murad@voltrisai.com' } });
-  assert.equal(r.code, 200, JSON.stringify(r.out));
-  assert.equal(S.stripe.find((c) => c[0] === 'paymentIntents.create')[1].customer, undefined);
-  assert.equal(r.out.customerSessionClientSecret, null);
-  assert.ok(!names().includes('customerSessions.create'));
+  const typed = await run(createPI, { body: { ...slot(), phone: '(204) 990-6530', email: 'murad@voltrisai.com' } });
+  assert.equal(typed.code, 200, JSON.stringify(typed.out));
+
+  world();
+  const signedIn = await run(createPI, { body: slot(), headers: { authorization: 'Bearer tok-murad' } });
+  assert.equal(signedIn.code, 200, JSON.stringify(signedIn.out));
+  assert.equal(S.stripe.find((c) => c[0] === 'paymentIntents.create')[1].customer, undefined,
+    'c-murad already has cus_murad on file and it is still not used');
+  assert.ok(!names().includes('customerSessions.create'), 'no Customer Session — the restricted key never needs that permission');
+  assert.ok(!names().includes('customers.create'), 'no new Stripe Customer either');
+  assert.equal(S.db.customers[0].stripe_customer_id, 'cus_murad', 'the retired column is left exactly as it was');
 });
 
-test('checkout, signed in: PaymentIntent attached to their Stripe Customer, session returned', async () => {
-  world();
-  const r = await run(createPI, { body: slot(), headers: { authorization: 'Bearer tok-murad' } });
-  assert.equal(r.code, 200, JSON.stringify(r.out));
-  assert.equal(S.stripe.find((c) => c[0] === 'paymentIntents.create')[1].customer, 'cus_murad');
-  assert.equal(r.out.customerSessionClientSecret, 'cuss_secret');
-  assert.ok(JSON.stringify(S.stripe).indexOf('payment_method_types') === -1);
-});
-
-test('checkout: a Stripe failure on saved cards still lets the customer pay', async () => {
-  world();
-  const orig = FakeStripe.prototype;
-  S.db.customers[0].stripe_customer_id = null;
-  const r0 = { ...FakeStripe };
-  // Make customer creation fail for this run only.
-  const StripeMod = await import(ROOT + 'node_modules/stripe/esm/stripe.esm.node.js');
-  const failing = new StripeMod.default(); failing.customers.create = async () => { throw new Error('Stripe is down'); };
-  assert.equal(await db.checkoutStripeCustomer(failing, { headers: { authorization: 'Bearer tok-murad' } }), null);
-  void orig; void r0;
+// Apple Pay and Google Pay come from automatic_payment_methods on the PaymentIntent. They never
+// depended on the Customer Session, so removing it must not change this line.
+test('wallets survive: automatic_payment_methods on, no payment_method_types, signed in or out', async () => {
+  for (const headers of [{}, { authorization: 'Bearer tok-murad' }]) {
+    world();
+    const r = await run(createPI, { body: slot(), headers });
+    assert.equal(r.code, 200, JSON.stringify(r.out));
+    const pi = S.stripe.find((c) => c[0] === 'paymentIntents.create')[1];
+    assert.deepEqual(pi.automatic_payment_methods, { enabled: true });
+    assert.equal(JSON.stringify(S.stripe).includes('payment_method_types'), false);
+  }
 });
 
 test('checkout: past the booking window is refused before anything touches Stripe', async () => {
@@ -210,17 +187,6 @@ test('checkout: past the booking window is refused before anything touches Strip
   const r = await run(createPI, { body: slot(30), headers: { authorization: 'Bearer tok-murad' } });
   assert.equal(r.code, 400); assert.equal(r.out.code, 'booking_window');
   assert.equal(S.stripe.length, 0);
-});
-
-test('card-remove for a customer with no Stripe link -> 404 and NO Stripe customer created', async () => {
-  world();
-  const r = await run(accountApi, { query: { action: 'card-remove' }, headers: { authorization: 'Bearer tok-new' }, body: { paymentMethodId: 'pm_fake' } });
-  assert.equal(r.code, 401, 'tok-new is not a known token in this world');
-  S.tokens['tok-new'] = 'user-new';
-  const r2 = await run(accountApi, { query: { action: 'card-remove' }, headers: { authorization: 'Bearer tok-new' }, body: { paymentMethodId: 'pm_fake' } });
-  assert.equal(r2.code, 404);
-  assert.ok(!names().includes('customers.create'), 'no Stripe customer was created just to say 404');
-  assert.equal(S.db.customers[1].stripe_customer_id, null);
 });
 
 test('checkout: malformed dates are refused by the window check before Stripe', async () => {
