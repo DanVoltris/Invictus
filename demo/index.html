@@ -276,6 +276,15 @@
   .pay-down .pd-call { display: block; width: 100%; text-align: center; text-decoration: none; }
   #payment-element { min-height: 200px; margin-top: 4px; }
   .pay-error { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 1px; }
+  /* The one line that says which of the two things is about to happen to the card — a hold, or a
+     charge taken now. It has no resting state on purpose: invisible until the server has actually
+     said which, so it can never be the thing that guesses. See renderPayMode(). */
+  .pay-mode { display: none; margin-top: 14px; padding: 11px 13px; border-radius: 10px;
+    font-size: 13px; line-height: 1.55; background: var(--near-black); border: 1px solid var(--border);
+    color: var(--muted); }
+  .pay-mode.is-shown { display: block; }
+  .pay-mode.is-hold { background: rgba(240,82,61,.06); border-color: rgba(240,82,61,.35); }
+  .pay-mode b { color: var(--white); font-weight: 700; }
   .loading { color: var(--dim); font-size: 14px; text-align: center; padding: 40px 0; }
 
   /* Confirmation */
@@ -634,6 +643,8 @@
         </div>
         <div class="col-pay">
           <div id="payment-element"><div class="loading">Loading secure checkout…</div></div>
+          <!-- Held or charged. Filled in by renderPayMode() only when the server said which. -->
+          <div class="pay-mode" id="pay-mode"></div>
           <div class="pay-error" id="pay-error"></div>
           <button class="btn btn-primary btn-block" id="sc-pay" style="margin-top:14px" disabled>Pay <span id="sc-amt"></span></button>
         </div>
@@ -1271,6 +1282,40 @@ const bookingKey = () => [isoDate(state.date), state.bay, state.startMin, state.
 // A PaymentIntent's id is the part of its client secret before "_secret".
 const piIdOf = cs => String(cs||'').split('_secret')[0] || null;
 
+/* ---------- Held, or charged? ----------
+   Two different things can now happen to a customer's card at checkout, and they have to be told
+   which one BEFORE they commit:
+     • HOLD   — a booking soon. The money is set aside on the card and only taken on arrival.
+     • CHARGE — a booking far enough ahead that a card authorisation would lapse before the tee
+                time. Taken in full at booking, exactly as every booking worked until now.
+
+   This page never decides which — the date does, and api/checkout.js decides it (holdPlan() in
+   lib/booking.js: a session inside settings.pay.hold.cutoffDays is held, anything further ahead is
+   charged, because a card authorisation only survives about a week). ?action=create-payment-intent
+   answers with `payment: { mode, message, captureBy, … }` and repeats the one word as `paymentMode`.
+   Both are read here; neither is guessed at.
+
+   ANYTHING NOT RECOGNISED IS UNKNOWN, and unknown says nothing at all — no hold wording, no charge
+   wording, the page exactly as it read before holds existed. An older deploy of the API, or a
+   response that lost the field, must never be filled in with the likely answer: telling a customer
+   their money is merely held when it has in fact been taken is the mistake this function exists to
+   make impossible, and a confident guess is how it would happen. */
+function payModeOf(src){
+  const m = (src && src.payment && src.payment.mode) || (src && src.paymentMode) || null;
+  if(m==='hold') return 'hold';
+  if(m==='charge') return 'charge';
+  return null;
+}
+/* Once the card has been confirmed, Stripe's own status on the returned PaymentIntent is the last
+   word on what happened to the money: 'requires_capture' means it is held and untaken, 'succeeded'
+   means it is gone. Neither is inferred from anything the page hoped would happen. */
+function payModeOfPI(pi){
+  if(!pi) return null;
+  if(pi.status==='requires_capture') return 'hold';
+  if(pi.status==='succeeded') return 'charge';
+  return payModeOf(pi);
+}
+
 async function post(url, body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json', ...authHeaders()},body:JSON.stringify(body||{})});
   let d=null; try{ d=await r.json(); }catch(e){}
@@ -1322,6 +1367,11 @@ async function createPI(){
   if(!r.ok) throw new Error(data.error||'error');
   piCache={ key, clientSecret:data.clientSecret, paymentIntentId:piIdOf(data.clientSecret),
             amount:data.amount, fullAmount:data.fullAmount,
+            // 'hold', 'charge', or null when the server did not say — see payModeOf().
+            payMode:payModeOf(data),
+            // The venue's own sentence for this booking, written server-side by holdPlan(). Shown
+            // as it arrives; this page adds the amount and never rewrites the policy.
+            payMessage:(data.payment && data.payment.message) || '',
             memberPct:data.memberPct||0, memberDiscountCents:data.memberDiscountCents||0,
             // Present only once /api/create-payment-intent applies these itself. While it does
             // not, they stay 0 — so nothing is displayed and nothing is reserved. See applyPromo
@@ -1547,6 +1597,33 @@ function toast(msg){
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'), 3800);
 }
 
+/* The line above the Pay button, and the Pay button's own label. Both are driven by the one value
+   payModeOf() returned, so they can never disagree with each other.
+
+   'hold'   → says a hold is a hold, in one line, and the button stops saying "Pay".
+   anything else → the button and the page exactly as they have always read. A booking that is
+   charged at once needs no new explanation, and a mode the server did not state gets no wording
+   at all rather than a plausible-sounding guess. */
+function renderPayMode(mode, amountCents, serverMessage){
+  const host=$('#pay-mode'), btn=$('#sc-pay'), amt=money(amountCents/100);
+  if(host){ host.className='pay-mode'; host.innerHTML=''; }
+  if(mode==='hold'){
+    if(host){
+      // The amount is this page's to state, because the server's sentence does not carry one and
+      // "a hold" without a figure is exactly the ambiguity being fixed. The rest of the sentence is
+      // the venue's, verbatim, so the policy lives in one place — with a plain fallback if an older
+      // deploy sends the mode but no message.
+      host.innerHTML=`<b>${escHtml(amt)} hold on your card.</b> `
+        + escHtml(serverMessage
+          || `Your card is held, not charged — the money is set aside and stays yours, and we take the ${amt} when you check in.`);
+      host.className='pay-mode is-shown is-hold';
+    }
+    if(btn) btn.innerHTML=`Hold <span id="sc-amt">${escHtml(amt)}</span>`;
+  }else{
+    if(btn) btn.innerHTML=`Pay <span id="sc-amt">${escHtml(amt)}</span>`;
+  }
+}
+
 async function mountStripe(){
   const peEl=$('#payment-element');
   peEl.innerHTML='<div class="loading">Loading secure checkout…</div>';
@@ -1558,7 +1635,7 @@ async function mountStripe(){
     if(err.taken){ stopHoldTimer(); $('#pay-overlay').classList.remove('show'); setStep(2); await loadAvailability(); renderAll(); toast(err.message); return; }
     peEl.innerHTML='<div class="loading">Could not start checkout: '+err.message+'</div>'; return;
   }
-  $('#sc-amt').textContent=money(data.amount/100);
+  renderPayMode(data.payMode, data.amount, data.payMessage);
   // The venue does not keep cards, so the Payment Element is given no Customer Session: nothing is
   // listed from a previous visit and nothing is offered to save. Apple Pay / Google Pay are unaffected —
   // the Payment Element offers them from the PaymentIntent itself.
@@ -1708,7 +1785,12 @@ $('#sc-pay').onclick=async ()=>{
   });
   paying=false;
   if(error){ $('#pay-error').textContent=error.message||'Payment could not be completed.'; btn.innerHTML=label; btn.disabled=false; return; }
-  if(paymentIntent && paymentIntent.status==='succeeded'){
+  // TWO statuses mean the customer is finished, not one. A HELD booking never reaches 'succeeded'
+  // at checkout: with manual capture Stripe stops at 'requires_capture', and the money is only taken
+  // when staff capture at check-in, possibly days later. Treating that as an unfinished payment
+  // would leave a customer with money reserved on their card, no booking, and the slot showing free.
+  // api/checkout.js ?action=confirm-booking accepts both for exactly the same reason.
+  if(paymentIntent && (paymentIntent.status==='succeeded' || paymentIntent.status==='requires_capture')){
     // Turn the paid hold into a real booking + save the customer (works without a Stripe webhook).
     btn.textContent='Confirming…';
     try{
@@ -1721,7 +1803,7 @@ $('#sc-pay').onclick=async ()=>{
     }catch(e){ /* payment already succeeded; the webhook backup can still catch it */ }
     await settleCredits(paymentIntent.id);
     $('#pay-overlay').classList.remove('show');
-    showConfirmation($('#sc-name').value.trim()||'Guest', paymentIntent.amount);
+    showConfirmation($('#sc-name').value.trim()||'Guest', paymentIntent.amount, payModeOfPI(paymentIntent));
   }else{ btn.innerHTML=label; btn.disabled=false; }
 };
 
@@ -1799,7 +1881,9 @@ async function handleReturn(){
   if(!cs || !STRIPE) return;
   try{
     const { paymentIntent }=await STRIPE.retrievePaymentIntent(cs);
-    if(paymentIntent && paymentIntent.status==='succeeded'){
+    // 'requires_capture' for the same reason as the Pay button above: a held booking is finished
+    // at checkout without the money having moved.
+    if(paymentIntent && (paymentIntent.status==='succeeded' || paymentIntent.status==='requires_capture')){
       // Confirm the booking on return too (billing details are pulled server-side from the charge).
       try{ await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ paymentIntentId: paymentIntent.id }) }); }catch(e){}
       showStripeConfirmation(paymentIntent);
@@ -1822,16 +1906,33 @@ function fillWaiverCTA(email, phone, name){
     <a class="btn btn-line btn-block" href="${href}" target="_blank" rel="noopener">Sign participant waiver</a>
   </div>`;
 }
+/* What the confirmation says about the money, for both confirmation screens below. A held booking
+   and a paid one are not the same event and must not share a sentence: "Paid" against a booking
+   whose money was only set aside is the line that produces the phone call. A mode the server never
+   stated keeps the wording this page has always used. */
+function moneyLine(mode, price){
+  return mode==='hold'
+    ? `<div class="row"><span class="k">On hold</span><span>${money(price)}</span></div>`
+    : `<div class="row"><span class="k">Paid</span><span>${money(price)}</span></div>`;
+}
+function confMsg(name, mode, price){
+  const hi = `You're all set${name && name!=='Guest' ? ', '+name : ''}! Your bay is reserved`;
+  return mode==='hold'
+    ? `${hi}. We've put a ${money(price)} hold on your card — nothing has been taken yet, and you pay the ${money(price)} when you arrive.`
+    : `${hi} — we'll see you at Invictus Golf.`;
+}
+
 function showStripeConfirmation(pi){
   HELD=null; holdActive=false; stopHoldTimer();   // hold is now a confirmed booking (flipped by the webhook)
   const code='JH-'+Math.abs([...pi.id].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
   piCache=null;
+  const mode=payModeOfPI(pi);
   $('#conf-code').textContent=code;
-  $('#conf-msg').textContent="You're all set! Your bay is reserved — we'll see you at Invictus Golf.";
+  $('#conf-msg').textContent=confMsg('', mode, pi.amount/100);
   $('#conf-recap').innerHTML=`
     <div class="row"><span class="k">Bay</span><span>${pi.metadata?.bayName||''}</span></div>
     <div class="row"><span class="k">When</span><span>${pi.metadata?.summary||''}</span></div>
-    <div class="row"><span class="k">Paid</span><span>${money(pi.amount/100)}</span></div>`;
+    ${moneyLine(mode, pi.amount/100)}`;
   fillWaiverCTA($('#sc-email')?.value, ($('#sc-phone')?.value||'').trim(), ($('#sc-name')?.value||'').trim());
   $('#conf-overlay').classList.add('show');
   setStep(4);
@@ -1839,7 +1940,9 @@ function showStripeConfirmation(pi){
 
 // paidCents: what was actually charged to a card, when the caller knows it (a gift-card-covered
 // booking charges nothing). Left undefined, the recap falls back to the list price as before.
-function showConfirmation(name, paidCents){
+// mode: 'hold' or 'charge', from payModeOfPI() once Stripe has answered. Left undefined — the
+// gift-card and prepaid-hours paths, where no card is involved at all — the recap reads as before.
+function showConfirmation(name, paidCents, mode){
   HELD=null; holdActive=false; stopHoldTimer();
   const bay=CONFIG.bays.find(b=>b.id===state.bay);
   const price = paidCents!=null ? paidCents/100 : priceRange(state.date, state.startMin, state.endMin);
@@ -1847,14 +1950,14 @@ function showConfirmation(name, paidCents){
   const code='JH-'+Math.abs([...(name+dateStr+state.startMin+bay.id)].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
   piCache=null;
   $('#conf-code').textContent=code;
-  $('#conf-msg').textContent=`You're all set${name && name!=='Guest' ? ', '+name : ''}! Your bay is reserved — we'll see you at Invictus Golf.`;
+  $('#conf-msg').textContent=confMsg(name, mode, price);
   $('#conf-recap').innerHTML=`
     <div class="row"><span class="k">Name</span><span>${name}</span></div>
     <div class="row"><span class="k">Bay</span><span>${bay.name}</span></div>
     <div class="row"><span class="k">Date</span><span>${dateStr}</span></div>
     <div class="row"><span class="k">Time</span><span>${fmtFull(state.startMin)} – ${fmtFull(state.endMin)}</span></div>
     <div class="row"><span class="k">Group</span><span>${state.party} ${state.party>1?'players':'player'}</span></div>
-    <div class="row"><span class="k">Paid</span><span>${money(price)}</span></div>`;
+    ${moneyLine(mode, price)}`;
   fillWaiverCTA($('#sc-email')?.value, ($('#sc-phone')?.value||'').trim(), name);
   $('#conf-overlay').classList.add('show');
   setStep(4);

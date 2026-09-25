@@ -1,7 +1,8 @@
-import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, winnipegTodayISO, bookingWindowError } from '../lib/booking.js';
+import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, winnipegTodayISO, bookingWindowError, holdPlan } from '../lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
          confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
          releaseHold } from '../lib/db.js';
+import { paymentPatchFor, releaseUnbookedHold } from '../lib/holds.js';
 
 // One customer checkout, start to finish. Dispatch on ?action=, the same shape as
 // api/gift-cards.js, api/leagues.js and api/waitlist.js:
@@ -120,12 +121,28 @@ export async function createPaymentIntent(req, res) {
     // and no Customer Session is opened, so customers.stripe_customer_id is never read. Apple Pay
     // and Google Pay are unaffected — they come from automatic_payment_methods below, which has
     // nothing to do with a Customer.
+    // HOLD OR CHARGE. The Payment Settings screen has always claimed "Capture method: Credit Card
+    // Hold" while every booking was captured on the spot. holdPlan() is what makes it true, and it
+    // is a DATE question, not a preference: a card authorisation lasts about seven days (Stripe's
+    // documented windows are in lib/booking.js), the booking window is 10 days — 60 for league
+    // players — so a session further ahead than settings.pay.hold.cutoffDays cannot be held and is
+    // charged in full exactly as it is today. The answer goes back to the caller below so the
+    // customer is told which one before they confirm, not after their card is taken.
+    const plan = holdPlan({ settings, dateISO, startMin });
+
     const pi = await stripe.paymentIntents.create({
       amount: charge,
       currency: settings.currency,
       automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
+      // Only sent for a hold. Stripe's default is already 'automatic', so the charge-now path is
+      // byte for byte the request it has always been.
+      ...(plan.mode === 'hold' ? { capture_method: 'manual' } : {}),
       description: `${bayName(settings, bayId)} — simulator session`,
       metadata: {
+        // Which way this payment was set up, carried on the PaymentIntent itself so the webhook and
+        // the client-side confirm cannot disagree about it — neither of them re-runs the decision.
+        paymentMode: plan.mode,
+        holdExpiresAt: plan.holdExpiresAt || '',
         bayId,
         bayName: bayName(settings, bayId),
         dateISO,
@@ -146,7 +163,22 @@ export async function createPaymentIntent(req, res) {
     res.status(200).json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount,
       memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
       promoDiscountCents: q.promoDiscountCents || 0, promoBlocked: q.promoBlocked || null,
-      giftUsedCents: q.giftUsedCents || 0, expiresAt });
+      giftUsedCents: q.giftUsedCents || 0, expiresAt,
+      // WHAT THE CUSTOMER MUST BE TOLD BEFORE THEY CONFIRM. `mode` is 'hold' or 'charge';
+      // `message` is a sentence ready to put on the screen; `captureBy` is when a hold dies if
+      // nobody captures it. A checkout page that shows nothing from here is telling a customer
+      // their card was charged when it was only held, or the reverse.
+      payment: {
+        mode: plan.mode,
+        captureMethod: plan.captureMethod,
+        amountCents: charge,
+        holdExpiresAt: plan.holdExpiresAt,
+        captureBy: plan.captureBy,
+        cutoffDays: plan.cutoffDays,
+        message: plan.message,
+      },
+      // The same answer flat, for callers that only want the one word.
+      paymentMode: plan.mode });
   } catch (err) {
     console.error('create-payment-intent:', err.message);
     res.status(400).json({ error: err.message });
@@ -173,7 +205,18 @@ export async function confirmBooking(req, res) {
   let pi;
   try { pi = await stripe.paymentIntents.retrieve(paymentIntentId); }
   catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
-  if (pi.status !== 'succeeded') return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
+  // TWO statuses mean "the customer is done and the slot is theirs", not one:
+  //   succeeded         the card was charged — the far-ahead path, and what this handler has always
+  //                     accepted, unchanged.
+  //   requires_capture  the card was AUTHORISED. With capture_method: 'manual' this is as far as a
+  //                     held booking ever gets at checkout, and `succeeded` will not arrive until a
+  //                     member of staff captures at check-in — possibly days later. Refusing it here
+  //                     would leave a customer who has had money reserved with no booking at all,
+  //                     and the slot showing free.
+  if (pi.status !== 'succeeded' && pi.status !== 'requires_capture') {
+    return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
+  }
+  const held = pi.status === 'requires_capture';
 
   const md = pi.metadata || {};
   if (!md.dateISO || !md.bayId) return res.status(400).json({ ok: false, error: 'Booking details missing on the payment.' });
@@ -186,12 +229,14 @@ export async function confirmBooking(req, res) {
     return res.status(200).json({ ok: true, already: true });
   }
 
-  // Prefer what the customer typed; fall back to the card's billing details.
-  let n = name, e = email, p = phone;
+  // Prefer what the customer typed; fall back to the card's billing details. The charge is also
+  // where the card network's own authorisation deadline lives (capture_before), which is why it is
+  // handed to paymentPatchFor below rather than thrown away after the billing details.
+  let n = name, e = email, p = phone, charge = null;
   try {
     if (pi.latest_charge) {
-      const ch = await stripe.charges.retrieve(pi.latest_charge);
-      const bd = ch.billing_details || {};
+      charge = await stripe.charges.retrieve(pi.latest_charge);
+      const bd = charge.billing_details || {};
       n = n || bd.name; e = e || pi.receipt_email || bd.email; p = p || bd.phone;
     }
   } catch (_) { /* best-effort */ }
@@ -200,14 +245,28 @@ export async function confirmBooking(req, res) {
   const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
   const patch = {
     status_label: settings.onlineStatusLabel || null, customer_name: n || null, customer_email: e || null, customer_phone: p || null,
-    amount_cents: pi.amount, stripe_payment_intent: pi.id, source: 'online',
+    stripe_payment_intent: pi.id, source: 'online',
+    // amount_cents, authorized_cents, hold_expires_at and captured_at all come from here, so this
+    // path and the webhook record the identical row. A held booking gets amount_cents 0.
+    ...paymentPatchFor({ pi, charge }),
   };
 
   const flip = await confirmHold({ ...slot, patch });
   let bookingId = flip.id;
   if (!flip.updated) {
     const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
-    if (ins.error) return res.status(409).json({ ok: false, error: 'That slot is no longer available — please contact the shop; your payment went through.' });
+    if (ins.error) {
+      if (!held) {
+        return res.status(409).json({ ok: false, error: 'That slot is no longer available — please contact the shop; your payment went through.' });
+      }
+      // A held card with no booking is on no list anywhere, so let it go now — but only when the
+      // slot really is taken, never because the database hiccupped.
+      const rel = ins.conflict ? await releaseUnbookedHold({ stripe, pi }) : { released: false };
+      if (rel.booked) return res.status(200).json({ ok: true, already: true });
+      return res.status(409).json({ ok: false, error: rel.released
+        ? 'That slot is no longer available — please contact the shop. Your card was only held, not charged, and the hold has been released.'
+        : 'We could not save your booking — please contact the shop. Your card was only held, not charged, and the hold clears on its own within about a week.' });
+    }
     bookingId = ins.id;
   }
   await setCustomerNote({ bookingId, note });
@@ -216,7 +275,14 @@ export async function confirmBooking(req, res) {
 
   // Loyalty points are retired: nothing is spent and nothing is earned here any more. Gift cards
   // and promo codes are still settled by api/webhook.js, exactly as before.
-  return res.status(200).json({ ok: true });
+  return res.status(200).json({
+    ok: true, bookingId,
+    // Which of the two happened, so the confirmation screen says "held" or "charged" and not
+    // whichever one it was written for.
+    paymentState: held ? 'held' : 'paid',
+    holdExpiresAt: held ? (patch.hold_expires_at || null) : null,
+    amountCents: held ? (patch.authorized_cents || 0) : (patch.amount_cents || 0),
+  });
 }
 
 // The consent tick, written where lib/notify.js looks for it. Three rules, all of them here:

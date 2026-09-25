@@ -38,6 +38,12 @@ mock.module(url('lib', 'db.js'), { namedExports: {
   confirmHold: rec('confirmHold', { updated: false }),
   upsertCustomer: rec('upsertCustomer', { id: 'cu_1' }),
   bookingExistsForPI: async () => false,
+  // Card holds (migration 0034). api/webhook.js looks a booking up by PaymentIntent and settles a
+  // capture through setPaymentState; lib/refunds.js uses the same writer to mark a fully refunded
+  // booking. Neither is exercised here — tests/holds.test.mjs owns that.
+  setPaymentState: rec('setPaymentState', { updated: 1 }),
+  bookingForHold: async () => null,
+  heldBookings: async () => ({ rows: [] }),
   redeemGiftCard: rec('redeemGiftCard', {}),
   redeemPromo: rec('redeemPromo', {}),
   confirmLeagueCheckout: rec('confirmLeagueCheckout', {}),

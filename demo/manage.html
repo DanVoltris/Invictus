@@ -104,10 +104,23 @@ async function doCancel(b){
   try { r = await (await fetch('/api/booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:b.id }) })).json(); }
   catch(e){ r = { ok:false, error:'Network error — please try again.' }; }
   if(r.ok){
+    // WHAT HAPPENED TO THE MONEY IS THE SERVER'S TO SAY, NOT THIS PAGE'S. A booking whose card was
+    // only HELD was never charged, so there is nothing to refund; a booking that was CHARGED gets a
+    // refund. Those are different sentences, and from a booking link alone this page cannot tell
+    // which case it is looking at — /api/booking's lookup reports an amount, never whether that
+    // amount was taken or merely set aside. So it does not guess: api/booking.js answers a
+    // cancellation with a `refund` object whose `message` is already written for the customer
+    // (refunded / recorded but not sent / nothing to refund), and that message is shown verbatim.
+    // When it isn't there, this page says nothing about money at all.
+    const rf = r.refund || {};
+    const moneyNote = rf.message
+      ? `<div class="note ${rf.status==='pending' ? 'warn' : 'info'}" style="text-align:left">${esc(rf.message)}</div>`
+      : '';
     render(`<div class="center">
       <div class="big" style="color:var(--ok)">✓</div>
       <h1>Booking cancelled</h1>
       <div class="sub">Your reservation has been cancelled. You'll receive a confirmation shortly.</div>
+      ${moneyNote}
       <a class="btn btn-ghost" href="/">Book a new session</a></div>`);
   } else if(r.code==='too_late'){
     render(`<h1>Too close to tee time</h1>

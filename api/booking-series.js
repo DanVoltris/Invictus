@@ -1,13 +1,15 @@
 import {
   normalizeSettings, bayName, fmtMin, winnipegTodayISO, quoteGroup, SERIES_FREQS,
   overrideEffects, overrideConflicts, weeklyStatusConflicts, stripeStatus, stripeClient,
+  hoursUntilBooking,
 } from '../lib/booking.js';
 import { issueRefund } from '../lib/refunds.js';
+import { captureHold, releaseHold as releaseAuthorisation, holdView } from '../lib/holds.js';
 import {
   getSettings, getOverridesForDate, staffContext,
   createSeries, seriesById, updateSeries, seriesNeedingHorizon, seriesOccurrences, seriesDatesPreview,
   groupConflicts, bookGroup, groupById, recordSeriesException, cancelGroup, moveGroup, recordRefund,
-  customerHoursByContact,
+  customerHoursByContact, heldBookings, bookingForHold,
 } from '../lib/db.js';
 
 // Group + recurring bookings. Dispatch on ?action= —
@@ -61,6 +63,7 @@ export default async function handler(req, res) {
   const action = (req.query && req.query.action) || '';
   if (req.method === 'GET') {
     if (action === 'get') return getSeries(req, res);
+    if (action === 'holds') return holds(req, res);
     return res.status(400).json({ ok: false, error: 'Unknown action' });
   }
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
@@ -71,6 +74,8 @@ export default async function handler(req, res) {
   if (action === 'end') return end(req, res);
   if (action === 'move') return move(req, res);
   if (action === 'refund') return refund(req, res);
+  if (action === 'capture') return capture(req, res);
+  if (action === 'release') return release(req, res);
   return res.status(400).json({ ok: false, error: 'Unknown action' });
 }
 
@@ -517,14 +522,53 @@ async function cancel(req, res) {
     }
   }
 
+  // ⚠ A CANCELLED BOOKING THAT IS STILL HELD. Nothing above touches it: a hold has amount_cents 0,
+  // so `owed` is zero and no refund note is written — correctly, because the customer was never
+  // charged and there is nothing to refund. But the AUTHORISATION is still sitting on their card,
+  // and left alone it stays there until it expires. It must be released.
+  //
+  // Releasing is a money.write act (it is the money side of this booking), and this action only
+  // demands booking.write. So: a caller who has Money gets it done here and now; one who does not
+  // gets the bookings named in `heldNeedingRelease` so the portal can say which ones still need
+  // somebody with the permission to press Release. Nothing is silently left behind either way.
+  const canRelease = who.role === 'admin' || who.capabilities.includes('money.write');
+  const { enabled: stripeOn } = stripeStatus(process.env);
+  const released = [], heldNeedingRelease = [];
+  for (const row of out.cancelled || []) {
+    const booking = await bookingForHold(row.id);
+    if (!booking || booking.payment_state !== 'held') continue;
+    if (!canRelease || !stripeOn) {
+      heldNeedingRelease.push({ bookingId: row.id, bayId: row.bayId,
+        authorizedCents: Math.max(0, Number(booking.authorized_cents) || 0),
+        holdExpiresAt: booking.hold_expires_at || null });
+      continue;
+    }
+    const r = await releaseAuthorisation({
+      stripe: stripeClient(process.env), bookingId: row.id,
+      reason: String(b.reason || 'cancelled by staff').slice(0, 120),
+      by: (who.user && who.user.email) || 'manager',
+    });
+    released.push({ bookingId: row.id, bayId: row.bayId, ok: !!r.ok,
+      releasedCents: r.releasedCents || 0, error: r.error });
+  }
+
   res.status(200).json({
     ok: true,
     cancelled: out.cancelled, cancelledCount: out.cancelledCount,
     remaining: out.remaining, groupStatus: out.groupStatus,
     refundableCents: out.refundableCents,
     refunds,
+    // Held bookings whose authorisation was cancelled here: the customer is never charged.
+    released,
+    // …and the ones this caller could not release, so they are chased rather than forgotten.
+    heldNeedingRelease: heldNeedingRelease.length ? heldNeedingRelease : undefined,
+    heldNote: heldNeedingRelease.length
+      ? 'These bookings were only HELD, never charged, and the hold is still on the customer’s card. '
+        + 'Someone with the Money permission needs to release them.'
+      : undefined,
     // Said out loud, every time, because the alternative is a customer being told they have been
-    // refunded by a system that has never issued a refund.
+    // refunded by a system that has never issued a refund. Releases are a different thing and are
+    // reported separately above — nothing was refunded there either, because nothing was charged.
     moneyMoved: false,
     refundNote: refunds.length
       ? 'Recorded what is owed. No money has moved — issue these refunds in Stripe.'
@@ -603,6 +647,147 @@ async function refund(req, res) {
     already: !!out.already,
     message: out.message,
     ledgerWarning: out.ledgerWarning,
+  });
+}
+
+// ----- capture / release / holds: the card-hold desk (migration 0034) -------------------------
+//
+// A booking near enough to today is HELD, not charged: the card is authorised at checkout and
+// captured by a human at check-in. Three things follow from that, and they are these three actions.
+//
+//   POST /api/booking-series?action=capture   { bookingId, amountCents?, note? }   money.write
+//   POST /api/booking-series?action=release   { bookingId, reason? }               money.write
+//   GET  /api/booking-series?action=holds                                          any staff login
+//
+// WHY THEY LIVE IN THIS FILE. Vercel's Hobby plan allows 12 Serverless Functions and api/ holds
+// exactly 12 — a thirteenth file means the project stops deploying. And this is already the file
+// that moves money (?action=refund), under the same staff gate and the same money.write rule, so
+// capture and release belong beside it rather than beside the tee sheet. The logic itself is in
+// lib/holds.js, the mirror of lib/refunds.js.
+//
+// money.write, not booking.write: this charges a customer's card, or lets go of the venue's claim
+// on it. An employee who may move a booking still may not do either unless an admin has turned
+// Money on. `holds` is a READ, so it takes any staff login, the same rule `get` and `preview` use.
+
+// Capture a held booking — the check-in button. `amountCents` captures LESS than was authorised, for
+// a session that ran short; leave it out for the whole hold.
+//
+// ⚠ A partial capture is FINAL: Stripe releases the rest and the same authorisation cannot be
+// captured twice. lib/holds.js says so in the response so nobody learns it from a customer.
+async function capture(req, res) {
+  const who = await staff(req, res, 'money.write');
+  if (!who) return;
+
+  const b = req.body || {};
+  const bookingId = String(b.bookingId || b.id || '');
+  if (!isUuid(bookingId)) return res.status(400).json({ ok: false, error: 'Which booking? Send a bookingId.' });
+
+  let amountCents = null;
+  if (b.amountCents != null && b.amountCents !== '') {
+    amountCents = Math.round(Number(b.amountCents));
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      return res.status(400).json({ ok: false, error: 'Enter an amount greater than zero, or leave it out to capture the full hold.' });
+    }
+  }
+
+  // Stripe off is a 503, not a silent "done" — the same rule ?action=refund applies. Staff must not
+  // be told a card was charged when nothing could charge it.
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) {
+    return res.status(503).json({ ok: false, moneyMoved: false, code: 'stripe_off',
+      error: 'Stripe is not configured on this deployment, so no hold can be captured. Set STRIPE_SECRET_KEY and try again.' });
+  }
+
+  const out = await captureHold({
+    stripe: stripeClient(process.env), bookingId, amountCents,
+    by: (who.user && who.user.email) || (who.staff && who.staff.email) || 'manager',
+    note: b.note || null,
+  });
+  if (!out.ok) {
+    return res.status(out.code || 400).json({
+      ok: false, moneyMoved: false, code: out.reason, error: out.error,
+      paymentState: out.paymentState, holdExpiresAt: out.holdExpiresAt, authorizedCents: out.authorizedCents,
+    });
+  }
+  return res.status(200).json({
+    ok: true, moneyMoved: true, already: !!out.already,
+    paymentState: out.paymentState, capturedCents: out.capturedCents,
+    authorizedCents: out.authorizedCents, releasedCents: out.releasedCents || 0,
+    message: out.message, ledgerWarning: out.ledgerWarning,
+  });
+}
+
+// Let the hold go. The customer is never charged and nothing is recorded in public.refunds, because
+// a release is NOT a refund — see the header of lib/holds.js.
+async function release(req, res) {
+  const who = await staff(req, res, 'money.write');
+  if (!who) return;
+
+  const b = req.body || {};
+  const bookingId = String(b.bookingId || b.id || '');
+  if (!isUuid(bookingId)) return res.status(400).json({ ok: false, error: 'Which booking? Send a bookingId.' });
+
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) {
+    return res.status(503).json({ ok: false, moneyMoved: false, code: 'stripe_off',
+      error: 'Stripe is not configured on this deployment, so no hold can be released. Set STRIPE_SECRET_KEY and try again.' });
+  }
+
+  const out = await releaseAuthorisation({
+    stripe: stripeClient(process.env), bookingId,
+    reason: b.reason ? String(b.reason).slice(0, 120) : null,
+    by: (who.user && who.user.email) || (who.staff && who.staff.email) || 'manager',
+  });
+  if (!out.ok) {
+    return res.status(out.code || 400).json({ ok: false, moneyMoved: false, code: out.reason,
+      error: out.error, paymentState: out.paymentState });
+  }
+  return res.status(200).json({
+    ok: true, moneyMoved: false, already: !!out.already,
+    paymentState: out.paymentState, releasedCents: out.releasedCents || 0,
+    message: out.message, ledgerWarning: out.ledgerWarning,
+  });
+}
+
+// ⚠ THE LIST THAT STOPS HOLDS FROM QUIETLY EXPIRING.
+//
+// Staff chose MANUAL capture, so nothing captures a hold unless a person does. A hold nobody
+// presses does not fail, does not error and does not appear anywhere — it simply lapses after about
+// seven days and the money is gone. This is the query that makes those visible.
+//
+// SORT ON `holdExpiresAt` ASCENDING — it is already returned in that order. `hoursLeft` is the same
+// fact in a form a row can print; `expired` is true once it is too late to capture at all, and
+// those rows still belong on the list so somebody can release them and see what was lost.
+async function holds(req, res) {
+  if (!(await staff(req, res))) return;
+  const settings = normalizeSettings(await getSettings());
+  const out = await heldBookings({ limit: Math.min(500, Math.max(1, Number((req.query || {}).limit) || 200)) });
+  if (out.unsupported) return res.status(503).json({ ok: false, code: 'schema', error: out.error });
+  if (out.error) return res.status(500).json({ ok: false, error: out.error });
+
+  const now = new Date();
+  const rows = out.rows.map((r) => ({
+    ...holdView(r, now),
+    bay: bayName(settings, r.bay_id) || r.bay_id,
+    bayId: r.bay_id,
+    bookingDate: r.booking_date,
+    start: fmtMin(r.start_min), end: fmtMin(r.end_min),
+    customerName: r.customer_name || null,
+    customerEmail: r.customer_email || null,
+    customerPhone: r.customer_phone || null,
+    stripePaymentIntent: r.stripe_payment_intent || null,
+    // A session that has already started and is still only held: the customer either checked in and
+    // nobody pressed Capture, or they never came. Either way it is a decision somebody owes.
+    noShow: hoursUntilBooking(r.booking_date, r.start_min, now) < 0,
+  }));
+  return res.status(200).json({
+    ok: true,
+    sortField: 'holdExpiresAt',
+    holds: rows,
+    expiringCents: rows.filter((r) => !r.expired).reduce((a, r) => a + r.authorizedCents, 0),
+    expiredCents: rows.filter((r) => r.expired).reduce((a, r) => a + r.authorizedCents, 0),
+    cutoffDays: settings.hold.cutoffDays,
+    authWindowDays: settings.hold.authWindowDays,
   });
 }
 

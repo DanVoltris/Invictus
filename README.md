@@ -35,6 +35,11 @@ Pay with Stripe's test card: **4242 4242 4242 4242**, any future expiry, any CVC
   stripe listen --forward-to localhost:4242/api/webhook
   ```
   Put the printed `whsec_…` value in `.env` as `STRIPE_WEBHOOK_SECRET`.
+- **Webhook events to enable** (Stripe dashboard → Developers → Webhooks → your endpoint):
+  `payment_intent.succeeded`, `payment_intent.amount_capturable_updated`, `charge.refunded`,
+  `checkout.session.completed`. Without `amount_capturable_updated`, a booking paid with a card
+  *hold* is only saved if the customer's browser finishes checkout — close the tab and the slot
+  looks free.
 
 ## Deploying to Vercel
 

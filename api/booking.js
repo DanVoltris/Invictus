@@ -4,6 +4,7 @@ import { normalizeSettings, bayName, fmtMin, hoursUntilBooking, winnipegTodayISO
          bookingWindowError, overrideEffects, overrideConflicts, weeklyStatusConflicts,
          stripeStatus, stripeClient } from '../lib/booking.js';
 import { issueRefund } from '../lib/refunds.js';
+import { releaseHold as releaseAuthorisation } from '../lib/holds.js';
 import '../demo/assets/leagues.js';   // side effect: globalThis.InvictusLeagues (the week maths)
 
 // Customer self-service, one function (keeps the deployment under Vercel's function cap):
@@ -27,7 +28,7 @@ async function lookup(req, res) {
 
   const { data, error } = await db
     .from('bookings')
-    .select('id,bay_id,booking_date,start_min,end_min,status,customer_name,amount_cents,refunded_cents')
+    .select('*')     // payment_state and authorized_cents included — see the cancel handler below
     .eq('id', id)
     .maybeSingle();
   if (error || !data) return res.status(404).json({ ok: false, error: 'Booking not found.' });
@@ -50,6 +51,13 @@ async function lookup(req, res) {
       // commits rather than after. Customer-safe: it is their own booking and their own money.
       paidCents: Math.max(0, Number(data.amount_cents) || 0),
       refundableCents: Math.max(0, (Number(data.amount_cents) || 0) - (Number(data.refunded_cents) || 0)),
+      // …and whether there is anything to send back at all. A HELD booking was never charged:
+      // paidCents is 0, authorizedCents is what is reserved, and cancelling releases it rather than
+      // refunding it. A page that shows "You'll be refunded $25" to a held booking is wrong twice.
+      paymentState: data.payment_state || null,
+      authorizedCents: Math.max(0, Number(data.authorized_cents) || 0),
+      holdExpiresAt: data.hold_expires_at || null,
+      cancelEffect: data.payment_state === 'held' ? 'release' : 'refund',
     },
   });
 }
@@ -86,9 +94,12 @@ async function cancel(req, res) {
   const db = admin();
   if (!db) return res.status(503).json({ ok: false, error: 'Not configured.' });
 
+  // select('*') so payment_state comes with it: whether this cancellation RELEASES a hold or
+  // REFUNDS a charge is decided from that column, and a named list would be the one thing that
+  // breaks on a database still on migration 0033 instead of falling back to the old behaviour.
   const { data, error } = await db
     .from('bookings')
-    .select('id,booking_date,start_min,status')
+    .select('*')
     .eq('id', id)
     .maybeSingle();
   if (error || !data) return res.status(404).json({ ok: false, error: 'Booking not found.' });
@@ -113,7 +124,48 @@ async function cancel(req, res) {
   }
   if (upd.error) return res.status(500).json({ ok: false, error: upd.error.message });
 
+  // WHICH WAY THE MONEY GOES IS NOT A PREFERENCE, IT IS A FACT ABOUT THIS BOOKING.
+  //
+  //   payment_state 'held'  the card was AUTHORISED and never charged, because the session was near
+  //                         enough for a hold to survive. Cancelling RELEASES the authorisation.
+  //                         There is nothing to refund and saying "refunded" would send a customer
+  //                         hunting their statement for money that never left it.
+  //   anything else         the card was charged in full at booking. Cancelling REFUNDS it, through
+  //                         the path in lib/refunds.js, exactly as before.
+  if (data.payment_state === 'held') {
+    return res.status(200).json({ ok: true, release: await releaseOnSelfCancel(id) });
+  }
   res.status(200).json({ ok: true, refund: await refundOnSelfCancel(id) });
+}
+
+// The release half of the cancellation above — the hold version of refundOnSelfCancel. Same
+// contract: it never throws, and it never claims anything about the customer's money that it did
+// not get an answer for.
+async function releaseOnSelfCancel(bookingId) {
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) {
+    return { released: false, moneyMoved: false, status: 'pending',
+      message: 'Your booking is cancelled. Your card was only held, never charged, and the hold is '
+        + 'being released — it clears on your bank’s own schedule.' };
+  }
+  let out;
+  try {
+    out = await releaseAuthorisation({ stripe: stripeClient(process.env), bookingId, reason: 'cancelled online (24-hour policy)', by: 'customer' });
+  } catch (err) {
+    console.error('self-cancel release:', err && err.message);
+    out = null;
+  }
+  if (!out || !out.ok) {
+    // The booking IS cancelled either way — that part is the customer's and it is done. The hold
+    // expires on its own within about seven days even if nobody touches it, so the worst case is a
+    // wait, never a charge. Say exactly that.
+    return { released: false, moneyMoved: false, status: 'pending',
+      message: 'Your booking is cancelled. Your card was only held, never charged. We could not '
+        + 'release the hold automatically — it will clear on its own within about a week, and you '
+        + 'can call the shop if your bank is still showing it after that.' };
+  }
+  return { released: true, moneyMoved: false, status: out.paymentState,
+    amountCents: out.releasedCents || 0, message: out.message };
 }
 
 // The refund half of the cancellation above. Returns a small object a page can show verbatim —

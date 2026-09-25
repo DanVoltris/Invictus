@@ -1,9 +1,10 @@
 import { stripeStatus, stripeClient, normalizeSettings } from '../lib/booking.js';
-import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingExistsForPI,
+import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingByPaymentIntent, setPaymentState,
          redeemGiftCard, redeemPromo, confirmLeagueCheckout, confirmLeagueTeamCheckout,
   recordStripeEvent, forgetStripeEvent } from '../lib/db.js';
 import { notifyBookingConfirmed } from '../lib/notify.js';
 import { applyChargeRefunded } from '../lib/refunds.js';
+import { paymentPatchFor, releaseUnbookedHold } from '../lib/holds.js';
 
 function readRaw(req) {
   return new Promise((resolve, reject) => {
@@ -128,82 +129,137 @@ async function fulfil(event, stripe) {
     return;
   }
 
-  if (event.type === 'payment_intent.succeeded') {
-    const pi = event.data.object;
-    const md = pi.metadata || {};
-    if (md.dateISO && md.bayId) {
-      // Pull the customer's contact info from the charge's billing details.
-      let name = null, email = pi.receipt_email || null, phone = null;
-      try {
-        if (pi.latest_charge) {
-          const ch = await stripe.charges.retrieve(pi.latest_charge);
-          const bd = ch.billing_details || {};
-          name = bd.name || null;
-          email = email || bd.email || null;
-          phone = bd.phone || null;
-        }
-      } catch (_) { /* best-effort */ }
+  // ⚠ THE EVENT THAT MAKES CARD HOLDS WORK AT ALL, and the trap this whole change turns on.
+  //
+  // A booking row has always been written when payment_intent.succeeded arrived. With
+  // capture_method: 'manual' that event DOES NOT FIRE at checkout — it fires when a member of staff
+  // captures, which may be days later, or never. So a held booking would never be recorded: no
+  // booking, no confirmation, and the tee sheet showing the slot free for somebody else to buy,
+  // while the customer's card sat authorised for the amount.
+  //
+  // payment_intent.amount_capturable_updated is Stripe's "the authorisation landed" event, and it
+  // is the moment a HELD booking becomes real. Stripe documents it in exactly those terms: "when a
+  // customer completes the payment process on a PaymentIntent with manual capture, it triggers the
+  // payment_intent.amount_capturable_updated event".
+  //
+  // The two events split the job cleanly and stay double-covered with the client-side confirm:
+  //   amount_capturable_updated  → the booking exists, payment_state 'held', nothing charged
+  //   succeeded                  → the money moved. Either a far-ahead booking charged in full at
+  //                                checkout (unchanged), or the capture of a hold already written
+  //                                down, which only needs settling to 'paid'.
+  if (event.type === 'payment_intent.amount_capturable_updated' || event.type === 'payment_intent.succeeded') {
+    await recordPaidOrHeldBooking(event, stripe);
+  }
+}
 
-      // The client-side confirm usually saved this already — the webhook is the backup path.
-      if (await bookingExistsForPI(pi.id)) return;
+// One PaymentIntent reaching a state that means something, written down. Shared by both events
+// above because a held booking and a charged one differ in exactly one thing — where the money is —
+// and that difference lives entirely in paymentPatchFor().
+async function recordPaidOrHeldBooking(event, stripe) {
+  const pi = event.data.object;
+  const md = pi.metadata || {};
+  if (!md.dateISO || !md.bayId) return;
+  const held = pi.status === 'requires_capture' || event.type === 'payment_intent.amount_capturable_updated';
 
-      const settings = normalizeSettings(await getSettings());
-      const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
-      const patch = {
-        status_label: settings.onlineStatusLabel || null,   // workflow label for a self-booked online reservation
-        customer_name: name,
-        customer_email: email,
-        customer_phone: phone,
-        amount_cents: pi.amount,
-        stripe_payment_intent: pi.id,
-        source: 'online',
-      };
-      // Prefer flipping the customer's live cart hold → confirmed; fall back to a fresh insert if it lapsed.
-      const flip = await confirmHold({ ...slot, patch });
-      let error = flip.error || null;
-      let bookingId = flip.id;
-      if (!flip.updated) {
-        const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
-        error = ins.error;
-        bookingId = ins.id;
-      }
-      console.log(error
-        ? `⚠ Booking save failed (${md.summary}): ${error}`
-        : `✅ Booking PAID & saved — ${md.bayName} · ${md.summary}`);
-      // Save the booker into the customer database (contact only; the SMS toggle is set at pay time).
-      const up = await upsertCustomer({ name, email, phone });
-      // Loyalty points are retired: no balance is spent or earned when a payment lands.
-
-      // Gift card and promo are settled HERE, not only in the browser. Previously the sole caller
-      // of either redemption was demo/index.html after the Stripe confirm resolved, so a customer
-      // whose tab died between "payment succeeded" and that call still got the booking (this
-      // webhook writes it) while the gift-card reservation quietly lapsed and the balance was
-      // restored in full — paid less AND kept the card. Same for a promo's redemption count.
-      //
-      // Both are idempotent, so the browser calling them too is harmless: redeem_gift_card keys on
-      // the PaymentIntent id, and redeem_promo on the reservation, which can only be spent once.
-      const giftUsed = Number(md.giftUsedCents) || 0;
-      if (!error && giftUsed > 0 && md.giftCardId) {
-        const r = await redeemGiftCard({
-          cardId: md.giftCardId, ref: pi.id, chargedCents: giftUsed, bookingId,
-          note: `Booking ${slot.dateISO}`,
-        });
-        if (r && r.error) console.error(`⚠ gift card ${md.giftCardId} not settled for ${pi.id}: ${r.error}`);
-      }
-      if (!error && md.promoReservationId) {
-        const r = await redeemPromo({ reservationId: md.promoReservationId, bookingId, ref: pi.id });
-        if (r && r.error) console.error(`⚠ promo reservation ${md.promoReservationId} not settled for ${pi.id}: ${r.error}`);
-      }
-      // Tell the customer. Queued in the outbox keyed on the booking, so the client-side confirm
-      // enqueuing the same receipt cannot produce a second one; delivery is best-effort and can
-      // never fail a payment that has already been taken (see lib/notify.js).
-      if (!error) {
-        await notifyBookingConfirmed({
-          bookingId, dateISO: slot.dateISO, bayId: slot.bayId, bayName: md.bayName,
-          startMin: slot.startMin, endMin: slot.endMin, players: Number(md.players) || null,
-          amountCents: pi.amount, name, email, phone, customerId: up.id || null,
-        });
-      }
+  // Pull the customer's contact info from the charge's billing details. The charge also carries
+  // capture_before — the card network's own authorisation deadline — which paymentPatchFor prefers
+  // over the estimate the checkout wrote into the metadata.
+  let name = null, email = pi.receipt_email || null, phone = null, charge = null;
+  try {
+    if (pi.latest_charge) {
+      charge = await stripe.charges.retrieve(pi.latest_charge);
+      const bd = charge.billing_details || {};
+      name = bd.name || null;
+      email = email || bd.email || null;
+      phone = bd.phone || null;
     }
+  } catch (_) { /* best-effort */ }
+
+  const money = paymentPatchFor({ pi, charge });
+
+  // The client-side confirm usually saved this already — the webhook is the backup path. For a
+  // HELD booking there is a second, ordinary reason to land here: the row was written at
+  // authorisation and this is the capture arriving days later. That is not a duplicate to skip; it
+  // is the moment the money actually moved, and if our own capture endpoint did not manage to write
+  // it down (or a manager captured from the Stripe dashboard instead), this is what puts the
+  // booking right. Idempotent: settling 'paid' to 'paid' updates nothing.
+  const existing0 = await bookingByPaymentIntent(pi.id);
+  // A CANCELLED row for this PaymentIntent is not "already saved" — it is a booking that was
+  // cancelled and refunded or released. bookingExistsForPI() has always excluded those, and this
+  // keeps that exact rule rather than quietly changing it.
+  const existing = existing0 && existing0.status !== 'cancelled' ? existing0 : null;
+  if (existing) {
+    if (!held && existing.payment_state === 'held') {
+      await setPaymentState({ bookingId: existing.id, state: 'paid', expect: 'held',
+        patch: { amount_cents: money.amount_cents, captured_at: money.captured_at } });
+      console.log(`✅ Hold captured (from Stripe) — booking ${existing.id}, ${money.amount_cents} cents`);
+    }
+    return;
+  }
+
+  const settings = normalizeSettings(await getSettings());
+  const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
+  const patch = {
+    status_label: settings.onlineStatusLabel || null,   // workflow label for a self-booked online reservation
+    customer_name: name,
+    customer_email: email,
+    customer_phone: phone,
+    stripe_payment_intent: pi.id,
+    source: 'online',
+    ...money,     // amount_cents (0 while held), authorized_cents, hold_expires_at, captured_at
+  };
+  // Prefer flipping the customer's live cart hold → confirmed; fall back to a fresh insert if it
+  // lapsed. NOTE the two senses of "hold" that meet here and are not the same thing: `status:
+  // 'held'` is the five-minute CART lock on the slot, and payment_state 'held' is the money.
+  const flip = await confirmHold({ ...slot, patch });
+  let error = flip.error || null;
+  let bookingId = flip.id;
+  if (!flip.updated) {
+    const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
+    error = ins.error;
+    bookingId = ins.id;
+    // Slot taken and the card only held: nothing else will ever release it (see lib/holds.js).
+    if (ins.conflict && held) await releaseUnbookedHold({ stripe, pi });
+  }
+  console.log(error
+    ? `⚠ Booking save failed (${md.summary}): ${error}`
+    : `✅ Booking ${held ? 'HELD' : 'PAID'} & saved — ${md.bayName} · ${md.summary}`);
+  // Save the booker into the customer database (contact only; the SMS toggle is set at pay time).
+  const up = await upsertCustomer({ name, email, phone });
+  // Loyalty points are retired: no balance is spent or earned when a payment lands.
+
+  // Gift card and promo are settled HERE, not only in the browser. Previously the sole caller
+  // of either redemption was demo/index.html after the Stripe confirm resolved, so a customer
+  // whose tab died between "payment succeeded" and that call still got the booking (this
+  // webhook writes it) while the gift-card reservation quietly lapsed and the balance was
+  // restored in full — paid less AND kept the card. Same for a promo's redemption count.
+  //
+  // Both are idempotent, so the browser calling them too is harmless: redeem_gift_card keys on
+  // the PaymentIntent id, and redeem_promo on the reservation, which can only be spent once.
+  //
+  // They settle at AUTHORISATION, not at capture, and on purpose: a reservation that is not spent
+  // lapses and hands the balance back, so waiting for a capture that might be five days away would
+  // give the customer their discount AND their gift-card balance back for those five days.
+  const giftUsed = Number(md.giftUsedCents) || 0;
+  if (!error && giftUsed > 0 && md.giftCardId) {
+    const r = await redeemGiftCard({
+      cardId: md.giftCardId, ref: pi.id, chargedCents: giftUsed, bookingId,
+      note: `Booking ${slot.dateISO}`,
+    });
+    if (r && r.error) console.error(`⚠ gift card ${md.giftCardId} not settled for ${pi.id}: ${r.error}`);
+  }
+  if (!error && md.promoReservationId) {
+    const r = await redeemPromo({ reservationId: md.promoReservationId, bookingId, ref: pi.id });
+    if (r && r.error) console.error(`⚠ promo reservation ${md.promoReservationId} not settled for ${pi.id}: ${r.error}`);
+  }
+  // Tell the customer. Queued in the outbox keyed on the booking, so the client-side confirm
+  // enqueuing the same receipt cannot produce a second one; delivery is best-effort and can
+  // never fail a payment that has already been taken (see lib/notify.js).
+  if (!error) {
+    await notifyBookingConfirmed({
+      bookingId, dateISO: slot.dateISO, bayId: slot.bayId, bayName: md.bayName,
+      startMin: slot.startMin, endMin: slot.endMin, players: Number(md.players) || null,
+      amountCents: pi.amount, name, email, phone, customerId: up.id || null,
+    });
   }
 }

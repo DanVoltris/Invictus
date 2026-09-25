@@ -579,6 +579,67 @@
   .view-switch .vs-btn{font-size:13px;font-weight:700;color:#555C68;text-decoration:none;padding:6px 14px;border-radius:999px;transition:.15s;}
   .view-switch .vs-btn:hover{color:var(--white);}
   .view-switch .vs-btn.active{background:#F0523D;color:#fff;}
+
+  /* ---------- Card holds: money that has NOT been taken yet ----------
+     A Stripe authorisation dies after about a week, and after that the money can never be taken
+     at all. So urgency has to be legible from across the counter. Three bands, loudest first:
+       .is-expired  the deadline has passed — nothing can be charged, this is a loss to record
+       .is-critical under 24 hours left — do it now
+       .is-soon     under three days left
+     State classes are namespaced (is-*) so they cannot collide with layout rules elsewhere. */
+  .hold-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:14px 16px;border:1px solid var(--border);border-left:4px solid var(--border);
+    border-radius:12px;background:var(--surface);margin-bottom:10px}
+  .hold-row .hr-who{min-width:180px;flex:1 1 180px}
+  .hold-row .hr-name{font-family:'Space Grotesk';font-weight:700;font-size:15px}
+  .hold-row .hr-when{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+  .hold-row .hr-phone{font-size:13px;font-weight:700;color:var(--orange);text-decoration:none;white-space:nowrap}
+  .hold-row .hr-phone:hover{text-decoration:underline}
+  .hold-row .hr-amt{min-width:100px;text-align:right}
+  .hold-row .hr-cents{font-family:'Space Grotesk';font-weight:700;font-size:19px;white-space:nowrap}
+  .hold-row .hr-amt-l{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+  .hold-row .hr-due{min-width:168px}
+  .hold-row .hr-left{font-family:'Space Grotesk';font-weight:700;font-size:14px}
+  .hold-row .hr-dead{font-size:12px;color:var(--muted);margin-top:2px}
+  .hold-row .hr-act{display:flex;gap:8px;flex-wrap:nowrap;margin-left:auto}
+  .hold-row.is-soon{border-left-color:#B26A15;background:rgba(178,106,21,.05)}
+  .hold-row.is-soon .hr-left{color:#B26A15}
+  .hold-row.is-critical{border-left-width:6px;border-left-color:var(--danger);
+    border-color:rgba(217,45,32,.45);background:rgba(217,45,32,.07);box-shadow:0 2px 14px rgba(217,45,32,.13)}
+  .hold-row.is-critical .hr-left{color:var(--danger);font-size:15px}
+  .hold-row.is-critical .hr-name::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:var(--danger);margin-right:8px;vertical-align:middle;animation:holdPulse 1.6s ease-in-out infinite}
+  @keyframes holdPulse{0%,100%{opacity:1}50%{opacity:.25}}
+  @media(prefers-reduced-motion:reduce){ .hold-row.is-critical .hr-name::before{animation:none} }
+  .hold-row.is-expired{border-left-color:var(--dim);background:var(--surface-2)}
+  .hold-row.is-expired .hr-cents{color:var(--dim);text-decoration:line-through}
+  .hold-row.is-expired .hr-left{color:var(--dim)}
+  .holds-band{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--dim);margin:24px 0 10px}
+  .holds-band:first-child{margin-top:0}
+  .hold-lead{font-size:13.5px;color:var(--muted);line-height:1.6;margin-bottom:18px;max-width:780px}
+  .stat.is-critical{border-color:rgba(217,45,32,.45);background:rgba(217,45,32,.07)}
+  .stat.is-critical .stat-n{color:var(--danger)}
+  /* The sidebar count, so a hold running out is visible from every screen in the portal. */
+  .side-badge{margin-left:auto;min-width:20px;text-align:center;font-size:11px;font-weight:700;
+    padding:1px 7px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-family:'Space Grotesk'}
+  .side-badge.is-critical{background:var(--danger);color:#fff}
+  /* The hold block inside a reservation sheet. */
+  .hold-box{border:1px solid rgba(178,106,21,.4);background:rgba(178,106,21,.07);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .hold-box.is-critical{border-color:rgba(217,45,32,.45);background:rgba(217,45,32,.07)}
+  .hold-box.is-expired{border-color:var(--border);background:var(--surface-2)}
+  .hold-box.is-paid{border-color:rgba(78,192,106,.4);background:rgba(78,192,106,.09)}
+  .hold-box .hb-h{font-family:'Space Grotesk';font-weight:700;font-size:15px;margin-bottom:5px}
+  .hold-box .hb-s{font-size:13px;color:var(--muted);line-height:1.55}
+  .hold-box .hb-amt{font-family:'Space Grotesk';font-weight:700;font-size:24px;margin:8px 0 2px}
+  @media(max-width:820px){
+    .hold-row{gap:10px;padding:12px}
+    .hold-row .hr-amt{text-align:left;min-width:0}
+    .hold-row .hr-due{min-width:0;flex:1 1 100%}
+    .hold-row .hr-act{margin-left:0;flex:1 1 100%}
+    .hold-row .hr-act .btn{flex:1}
+    .side-badge{margin-left:6px}
+  }
 </style>
 </head>
 <body>
@@ -741,6 +802,24 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- HOLDS TO CHARGE — the safety net.
+           Every booking whose card is authorised but not yet charged, soonest deadline first.
+           A Stripe authorisation expires after about a week; once it does the money cannot be
+           taken at all. This screen exists so nobody has to remember. -->
+      <div id="tab-holds" class="hidden">
+        <div class="toolbar">
+          <div><h2>Holds to Charge</h2><div class="day-label" id="holds-sub">Loading…</div></div>
+          <div class="day-nav"><button class="btn btn-ghost btn-sm" id="holds-refresh">Refresh</button></div>
+        </div>
+        <div class="hold-lead">
+          These cards have been authorised but <b>no money has been taken</b>. Charge each one when
+          the customer arrives. A hold that reaches its deadline is gone — the bank releases it and
+          the amount can never be collected, so work down this list from the top.
+        </div>
+        <div class="stats" id="holds-stats"></div>
+        <div id="holds-list"></div>
       </div>
 
       <!-- SCHEDULE -->
@@ -1082,10 +1161,16 @@
                 <div class="field"><label>Tax %</label><input class="input" id="p-tax" type="number" min="0" step="0.1" /><div class="dim" style="font-size:12px;margin-top:6px">Applied on top of the sub-total.</div></div>
                 <div class="field"><label>Currency</label><select class="input" id="p-currency"><option>CAD</option><option>USD</option></select></div>
               </div>
-              <div class="grid2">
-                <div class="field"><label>Capture method</label><select class="input" id="p-capture"><option>Credit Card Hold</option><option>Payment Upfront</option><option>No Payment</option></select></div>
-                <div class="field"><label>Priority capture</label><select class="input" id="p-priority"><option>No Payment</option><option>Credit Card Hold</option><option>Payment Upfront</option></select></div>
-              </div>
+            </div>
+            <!-- "Capture method" and "Priority capture" were two dropdowns here. Nothing read
+                 either of them: every booking was charged in full the moment the customer pressed
+                 pay, because api/checkout.js sent no capture_method and Stripe's default is
+                 `automatic`. Migration 0034 made the hold real, so this card now DESCRIBES what
+                 the server does instead of offering a choice the server never saw. -->
+            <div class="card">
+              <h3 class="card-h">What happens to a customer's card</h3>
+              <div class="sub">Set by the server, not by this screen. Shown here so it can be checked.</div>
+              <div id="pay-hold-how"></div>
             </div>
           </div>
           <div class="card">
@@ -1255,6 +1340,13 @@ let TAGS = [];          // tags
 let CUSTOMERS = [];     // customer database
 let CUST_STATS = {};    // { 'email|phone key': {count, last} } derived from bookings
 let OVERRIDES = [];      // active schedule overrides that touch the visible range
+// Bookings whose card is authorised but not charged yet. Kept here (not inside the tab) so the
+// sidebar can carry the count on every screen — a hold running out is not a thing to discover.
+let HOLDS = { rows:null, due:0, critical:0, expired:0, error:null, loading:false };
+// How many days ahead the server will still take a HOLD rather than charging outright, and how
+// long an authorisation survives. Filled in by boot() from /api/config — never assumed, because
+// a wrong number here would be a promise the bank does not keep. See holdWindowText().
+let HOLD_WINDOW = { holdDays:null, chargeAheadDays:null };
 
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtMin = m => { if(m>=1440) return 'Midnight'; let h=Math.floor(m/60),mm=m%60,ap=h<12?'AM':'PM',hh=h%12||12; return hh+':'+String(mm).padStart(2,'0')+' '+ap; };
@@ -1277,9 +1369,23 @@ async function boot(){
   // only ever enabled on test keys (lib/booking.js stripeStatus), and the key it hands back says
   // which kind it is — so with live keys there is nothing here to claim.
   STRIPE_TEST_MODE = !!(cfg.stripeEnabled && /^pk_test_/.test(cfg.publishableKey||''));
+  // The hold/charge cut-off belongs to the server (lib/booking.js holdSettings). It is read from
+  // settings.pay.hold, which this portal loads anyway — but if /api/config starts reporting the
+  // rules directly, that answer wins, because it is the copy actually in force.
+  if(cfg.hold && typeof cfg.hold==='object') HOLD_WINDOW = { ...HOLD_WINDOW, ...cfg.hold };
   // A deployed site with no database configured used to fall into the in-memory demo backend —
   // a browsable "manager portal", no login, for anyone who found the URL. Off this machine that
   // is a misconfiguration to report, not a mode to enter.
+  // No database at all. On a deployment that is a misconfiguration — and a portal that cannot
+  // reach its database must SAY so, not sit on "Loading…" forever. (It did exactly that: the
+  // guard below stopped a deployed site entering demo mode, but the "Not configured" message
+  // lived inside the branch it skipped, so boot fell through and crashed on cfg.supabase.url.)
+  if(!cfg.supabase && !DEV_HOST){
+    $('#app-loading').innerHTML = '<div class="login"><h1>Not configured</h1>'
+      + '<div class="sub">This site has no database connected yet, so there is nothing to sign in to. '
+      + 'Add the Supabase details in the hosting settings and deploy again.</div></div>';
+    return;
+  }
   if((!cfg.supabase && DEV_HOST) || wantsDemo){
     const loaded = await new Promise(res=>{
       const s=document.createElement('script'); s.src='/assets/demo-mode.js';
@@ -1406,6 +1512,7 @@ async function showApp(session){
   fetchCustomers();              // load the customer database so booking autocomplete works on the Tee Sheet
   $('#bk-date').value = todayISO(); dpSync('#bk-date');
   await loadSchedule();
+  refreshHoldCount();            // the sidebar carries the number of uncharged holds from the start
   if(leagueRoute()) await applyLeagueRoute();    // opened straight at a league's own address
 }
 function todayISO(){ return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Winnipeg',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
@@ -1531,6 +1638,7 @@ async function loadWhoami(){
             goToBooking instead, so it deliberately has none) */
 const TABS = [
   { id:'dashboard',   group:'Operations',    label:'Dashboard',          load:loadDashboardTab },
+  { id:'holds',                              label:'Holds to Charge',    load:loadHolds,          cap:'money.write' },
   { id:'bookings',                           label:'Tee Sheet' },
   { id:'waitlist',                           label:'Waiting List',       load:loadWaitlist },
   { id:'leagues',                            label:'Leagues',            load:loadLeaguesTab },
@@ -1563,7 +1671,17 @@ function renderSideNav(){
     if(t.group) pending=t.group;
     if(t.cap && !can(t.cap)) return;
     if(pending){ out+=`<div class="side-cap">${esc(pending)}</div>`; pending=null; }
-    out+=`<div class="tab${t.id===ACTIVE_TAB?' active':''}" data-tab="${t.id}">${esc(t.label)}</div>`;
+    // Holds carries its own count: money that has not been taken yet should be visible from
+    // whatever screen the person happens to be on, not only from its own tab.
+    // Nothing left to charge but something already expired still has to be seen, so the count
+    // falls back to the expired one rather than disappearing.
+    const hn = HOLDS.due || HOLDS.expired;
+    const badge = t.id==='holds' && hn
+      ? `<span class="side-badge${(HOLDS.critical||HOLDS.expired)?' is-critical':''}" title="${
+          HOLDS.due ? (HOLDS.critical?HOLDS.critical+' running out today':'waiting to be charged')
+                    : HOLDS.expired+' expired, nothing can be charged'}">${hn}</span>`
+      : '';
+    out+=`<div class="tab${t.id===ACTIVE_TAB?' active':''}" data-tab="${t.id}">${esc(t.label)}${badge}</div>`;
   });
   $('#side-nav').innerHTML=out;
 }
@@ -2113,8 +2231,7 @@ function loadPaySettings(){
   $('#p-accept').checked = p.acceptPayments!==false;
   $('#p-tax').value = p.taxPct??12;
   $('#p-currency').value = p.currency||'CAD';
-  $('#p-capture').value = p.captureMethod||'Credit Card Hold';
-  $('#p-priority').value = p.priorityCapture||'No Payment';
+  renderHoldPolicy();
   $('#p-hold').value = p.holdDisclaimer||'';
   $('#p-pay').value = p.paymentDisclaimer||'';
   // Never claim test mode on the portal's say-so: STRIPE_TEST_MODE comes from the publishable
@@ -2126,9 +2243,51 @@ function loadPaySettings(){
     : 'Card payments are handled by '+proc+'.';
   syncSelects();
 }
+// The truth about a card, in the order it happens to it. Every number here comes from the
+// server's own rules (settings.pay.hold, read by lib/booking.js holdSettings) — with none saved
+// this says so rather than printing a cut-off that might not be the one in force.
+function renderHoldPolicy(){
+  const host=$('#pay-hold-how'); if(!host) return;
+  const p=(SETTINGS&&SETTINGS.pay)||{}, r=holdRules();
+  const method=String(p.captureMethod||'Credit Card Hold');
+  const cut=r.cutoffDays, win=r.authWindowDays;
+  if(method!=='Credit Card Hold'){
+    host.innerHTML=`<div class="hold-box is-paid"><div class="hb-h">Cards are charged in full at booking</div>
+      <div class="hb-s">Capture method is set to <b>${esc(method)}</b> on the Prices tab, so nothing is held —
+        the money is taken the moment a customer books. Set it to <b>Credit Card Hold</b> there to switch holds on.</div></div>`;
+    return;
+  }
+  host.innerHTML=`
+    <div class="hold-box"><div class="hb-h">1 · The card is held, not charged</div>
+      <div class="hb-s">When a customer books, the bank sets the amount aside. <b>No money moves.</b>
+        The booking is confirmed and holds its bay exactly as a paid one does.</div></div>
+    <div class="hold-box"><div class="hb-h">2 · Staff charge it at check-in</div>
+      <div class="hb-s">Somebody presses <b>Charge now</b> in the portal — for the full amount, or less for a
+        shorter session. Nothing is automatic and no-shows are decided case by case.
+        <button type="button" class="link-btn" id="pay-hold-go">Open Holds to Charge</button></div></div>
+    <div class="hold-box is-critical"><div class="hb-h">3 · A hold that is never charged expires</div>
+      <div class="hb-s">${win?`An authorisation lasts about <b>${win} day${win===1?'':'s'}</b>.`
+                            :'An authorisation lasts about a week.'}
+        After that the bank releases it and <b>the money can never be collected</b> — not by this portal,
+        not by Stripe, not by anyone. That is what the Holds to Charge screen is for.</div></div>
+    <div class="hold-box is-paid"><div class="hb-h">The cut-off — when a booking is charged instead</div>
+      <div class="hb-s">${cut
+        ? `A session <b>more than ${cut} day${cut===1?'':'s'} away</b> is charged in full at the time of booking,
+           because a hold would expire before the customer ever arrived. Anything closer than that is held.`
+        : `Your settings do not name a cut-off, so the server's own default applies. It is
+           <code>settings.pay.hold.cutoffDays</code> — sessions further ahead than that are charged in full at
+           booking, because a hold would expire first. Ask whoever set up payments what it is set to.`}</div></div>`;
+  if($('#pay-hold-go')) $('#pay-hold-go').onclick=()=>{ showTab('holds'); loadHolds(); };
+}
+
 $('#save-pay').onclick = async () => {
   const pay={ ...(SETTINGS.pay||{}), acceptPayments:$('#p-accept').checked, taxPct:+$('#p-tax').value||0, currency:$('#p-currency').value,
-    captureMethod:$('#p-capture').value, priorityCapture:$('#p-priority').value, processor:(SETTINGS.pay&&SETTINGS.pay.processor)||'Stripe',
+    // captureMethod is carried through untouched. lib/booking.js holdSettings() reads it
+    // ('Credit Card Hold' is what switches holds on), and it is edited on the Prices tab next to
+    // the deposit rules — saving this screen must not quietly rewrite it.
+    captureMethod:(SETTINGS.pay&&SETTINGS.pay.captureMethod)||'Credit Card Hold',
+    priorityCapture:(SETTINGS.pay&&SETTINGS.pay.priorityCapture)||'No Payment',
+    processor:(SETTINGS.pay&&SETTINGS.pay.processor)||'Stripe',
     holdDisclaimer:$('#p-hold').value.trim(), paymentDisclaimer:$('#p-pay').value.trim() };
   $('#save-pay').disabled=true;
   const ok=await dbUpdate('settings',1,{pay,updated_at:new Date().toISOString()});
@@ -4273,7 +4432,13 @@ function openManage(id){
   const held = pay.chargeAmount ? Math.round(pay.chargeAmount*100) : Math.round(sub*(pay.chargePercent||0)/100);
   const baySim=(SETTINGS.bays.find(x=>x.id===b.bay_id)||{}).sim;
   const cust=matchCustomer(b);
+  // A HELD booking is confirmed and occupies its slot — what differs is only that the money is
+  // not in yet, and that has to be the first thing the pill says.
   const statusPill = isBlock?'<span class="pill blocked">Blocked</span>'
+    : isHeld(b) ? (holdUrgency(b).key==='expired'
+        ? '<span class="pill blocked">Hold expired · never charged</span>'
+        : '<span class="pill warn">Card held · not charged</span>')
+    : isCaptured(b)?'<span class="pill confirmed">Paid</span>'
     :(onlinePaid?'<span class="pill confirmed">Paid</span>':'<span class="pill manager">Confirmed</span>');
 
   if(isBlock){
@@ -4301,14 +4466,27 @@ function openManage(id){
 
   const payLine = lgRound
     ? `<div class="kv"><span class="k">League round</span><span><span class="pill info">Free</span> <span class="dim">included in ${esc((LG_TEAM_BY_ID[b.league_team_id]||{}).league?LG_TEAM_BY_ID[b.league_team_id].league.name:'the league')}’s team fee</span></span></div>`
+    : isHeld(b)
+    ? `<div class="kv"><span class="k">On hold</span><span><b>${fmt(heldCents(b))}</b> <span class="dim">— not taken</span></span></div>`
+    : isCaptured(b)
+    ? `<div class="kv"><span class="k">Charged</span><span class="pill confirmed">Paid ${fmt(b.amount_cents||0)}</span></div>`
     : onlinePaid
     ? `<div class="kv"><span class="k">Paid online</span><span class="pill confirmed">Paid ${fmt(sub)}</span></div>`
     : acceptDep
       ? `<div class="kv"><span class="k">Deposit held</span><span>${fmt(held)} <span class="dim">(${pay.chargeAmount?'flat':((pay.chargePercent||0)+'%')})</span></span></div>`
       : `<div class="kv"><span class="k">Payment</span><span class="dim">No payment collected</span></div>`;
-  const cardLine = `<div class="kv" style="border:none"><span class="k">Card</span><span class="dim">${onlinePaid?'On file · charged':'No card on file'}</span></div>`;
+  const cardLine = `<div class="kv" style="border:none"><span class="k">Card</span><span class="dim">${
+    isHeld(b) ? 'Authorised · nothing charged'
+    : isCaptured(b) ? 'On file · charged'
+    : payState(b)==='released' ? 'Hold released · never charged'
+    : onlinePaid ? 'On file · charged' : 'No card on file'}</span></div>`;
   const txn = lgRound
     ? `<div class="dim" style="font-size:13px;padding:6px 0">Nothing to collect — the team paid for the season.</div>`
+    : isHeld(b)
+    ? `<div class="txn-row"><span>Card authorised</span><span class="dim">${fmt(heldCents(b))} · ${fmtTs(b.created_at)}</span></div>`
+    : isCaptured(b)
+    ? `<div class="txn-row"><span>Card authorised</span><span class="dim">${fmt(heldCents(b)||b.amount_cents||0)} · ${fmtTs(b.created_at)}</span></div>
+       <div class="txn-row"><span>Charged at check-in</span><span class="dim">${fmt(b.amount_cents||0)} · ${fmtTs(b[HOLD_COLS.captured]||b.created_at)}</span></div>`
     : onlinePaid
     ? `<div class="txn-row"><span>Payment received</span><span class="dim">${fmt(total)} · ${fmtTs(b.created_at)}</span></div>`
     : acceptDep
@@ -4339,10 +4517,20 @@ function openManage(id){
     </div>
 
     <div class="sec-h">Payments</div>
+    ${holdBoxHTML(b)}
     <div class="pay-box">${payLine}${cardLine}</div>
-    <!-- "Capture held funds" / "Cancel hold" / "Capture total balance" used to sit here. They only
-         ever raised a toast — no money was captured or released — while appearing on genuinely paid
-         bookings, so staff read them as having moved real funds. Removed rather than faked. -->
+    <!-- "Capture held funds" / "Cancel hold" / "Capture total balance" used to sit here and only
+         ever raised a toast — no money was captured or released — while appearing on genuinely
+         paid bookings too. These two replace them, and they really do move money: they are shown
+         ONLY on a held booking whose hold is still alive, and only to someone with money.write.
+         The server refuses either way (0024 rbac_guard); hiding them is the courtesy. -->
+    ${isHeld(b) && holdUrgency(b).key!=='expired' ? (can('money.write')
+      ? `<div class="row" style="flex-wrap:nowrap;gap:8px;margin-top:10px">
+           <button class="btn btn-primary btn-sm" id="m-charge" style="flex:1">Charge now</button>
+           <button class="btn btn-danger btn-sm" id="m-release" style="flex:1">Release hold</button>
+         </div>
+         <div class="dim" style="font-size:12px;margin-top:8px;line-height:1.5">Charging takes the money and can only be undone as a refund. Releasing cancels the hold and the customer is never charged. Both ask you to confirm.</div>`
+      : `<div class="ro-note">Only staff with the Money permission can charge or release a hold.</div>`) : ''}
 
     <div class="sec-h">Transactions</div>
     <div class="txn">${txn}</div>
@@ -4381,6 +4569,12 @@ function openManage(id){
   if($('#m-gopen')) $('#m-gopen').onclick=()=>{ closeSheet(); openGroup(b.group_id, b.id); };
   if($('#m-sopen')) $('#m-sopen').onclick=()=>{ closeSheet(); openSeries(b.series_id); };
   if($('#m-copy')) $('#m-copy').onclick=()=>{ const i=$('#m-link'); i.select(); navigator.clipboard&&navigator.clipboard.writeText(i.value); toast('Cancel link copied','ok'); };
+  // Money. The sheet closes on success so nobody charges the same hold twice from a stale screen.
+  {
+    const settled=()=>{ closeSheet(); fetchHolds().then(()=>{ if(ACTIVE_TAB==='holds') renderHoldsTab(); }); loadSchedule(); };
+    if($('#m-charge'))  $('#m-charge').onclick =()=>chargeHoldFlow(b, settled);
+    if($('#m-release')) $('#m-release').onclick=()=>releaseHoldFlow(b, settled);
+  }
   if($('#m-wv-copy')) $('#m-wv-copy').onclick=()=>{ const link=`${location.origin}/waiver?c=${cust.id}`; navigator.clipboard&&navigator.clipboard.writeText(link); toast('Waiver link copied — text or email it to the customer','ok'); };
   if($('#m-wv-mark')) $('#m-wv-mark').onclick=async()=>{
     const btn=$('#m-wv-mark'); btn.disabled=true; btn.textContent='Saving…';
@@ -4448,10 +4642,20 @@ function openManage(id){
     };
   }
   if($('#s-cancel')) $('#s-cancel').onclick=async()=>{
+    // A HELD booking has money reserved on the customer's card. Cancelling the row alone would
+    // leave that hold in place for up to a week AND drop it off Holds to Charge, so nobody would
+    // ever release it. Release FIRST: if that fails, the booking is still on the sheet and on the
+    // list, so nothing is lost track of.
+    const held = isHeld(b);
+    if(held){
+      if(!can('money.write')){ toast('This card is on hold. Ask someone with the Money permission to cancel it, so the hold is released at the same time.','err'); return; }
+      const rel = await holdPost('release', { bookingId:b.id, reason:'cancelled by staff' }, b, 0);
+      if(!rel.ok){ toast((rel.error || 'The card hold could not be released.')+' The booking was not cancelled.','err'); return; }
+    }
     let r = await sb.from('bookings').update({status:'cancelled', cancelled_at:new Date().toISOString()}).eq('id',id);
     if(r.error && /cancelled_at/.test(r.error.message||'')) r = await sb.from('bookings').update({status:'cancelled'}).eq('id',id);
-    if(r.error){ toast('Failed: '+r.error.message,'err'); return; }
-    closeSheet(); toast('Removed — slot freed','ok'); loadSchedule();
+    if(r.error){ toast((held?'The card hold was released, but the booking could not be cancelled: ':'Failed: ')+r.error.message,'err'); return; }
+    closeSheet(); toast(held ? 'Cancelled — slot freed, card hold released (never charged)' : 'Removed — slot freed','ok'); loadSchedule();
   };
 }
 
@@ -4912,8 +5116,333 @@ async function apiPost(path, body){
       headers: Object.assign({'Content-Type':'application/json'}, token?{Authorization:'Bearer '+token}:{}),
       body: JSON.stringify(body||{}) });
     const j = await r.json().catch(()=>null);
-    return j || { ok:false, error:'The server sent back something unreadable.' };
+    if(j) return j;
+    // Not JSON. The one case worth naming is a handler that isn't deployed: Vercel answers a
+    // missing route with an HTML 404, and "unreadable" would send someone hunting a bug that
+    // isn't there. Nothing was done either way — these calls only act on a JSON answer.
+    return { ok:false, status:r.status, error: r.status===404
+      ? 'That is not on the server yet (404). Nothing was changed.'
+      : 'The server sent back something unreadable (HTTP '+r.status+').' };
   }catch(e){ return { ok:false, error:'Could not reach the server.' }; }
+}
+
+
+/* ============================================================================
+   CARD HOLDS — migration 0034. THE MONEY THAT HAS NOT BEEN TAKEN YET.
+
+   A booking used to be charged the instant the customer pressed pay. It is now AUTHORISED:
+   the bank sets the amount aside and the venue takes it at check-in. bookings.payment_state
+   says which:
+
+     held      authorised, nothing charged. authorized_cents is what is set aside;
+               amount_cents stays 0 until capture, so nothing can be refunded out of a hold.
+     paid      captured (or charged in full at booking, for a session too far ahead to hold).
+     released  the authorisation was cancelled. The customer is never charged.
+     refunded  captured and then given back through lib/refunds.js.
+     null      no card payment at all — staff booking, gift card, prepaid hours, league round.
+
+   ⚠ AN AUTHORISATION DIES. Stripe documents about seven days for an online card payment, and
+   when it lapses "the funds are released" — the money was never taken and cannot be taken now.
+   Capture here is MANUAL, so somebody has to press a button before then. That is the whole
+   reason the Holds to Charge screen below exists, and why hold_expires_at is what it sorts on.
+
+   This page NEVER moves money itself. Capture and release are server calls that hold the Stripe
+   key; the buttons here are a request, and the answer is what is reported.
+   ========================================================================== */
+
+// The columns, named once. Straight out of migration 0034 — not guessed.
+const HOLD_COLS = { state:'payment_state', amount:'authorized_cents', expires:'hold_expires_at',
+                    captured:'captured_at', released:'released_at' };
+const HOLD_SELECT = 'id,bay_id,booking_date,start_min,end_min,status,status_label,customer_name,'
+  + 'customer_phone,customer_email,amount_cents,created_at,'
+  + [HOLD_COLS.state,HOLD_COLS.amount,HOLD_COLS.expires,HOLD_COLS.captured,HOLD_COLS.released].join(',');
+
+const payState   = b => (b && b[HOLD_COLS.state]) ? String(b[HOLD_COLS.state]) : null;
+const isHeld     = b => payState(b)==='held';
+const isCaptured = b => payState(b)==='paid';
+const heldCents  = b => { const n=Number(b && b[HOLD_COLS.amount]); return Number.isFinite(n) && n>0 ? n : 0; };
+function holdDeadline(b){ const t=b && b[HOLD_COLS.expires]; if(!t) return null; const d=new Date(t); return isNaN(d.getTime())?null:d; }
+
+// Three bands, and they are deliberately tighter than the bank's own clock. Capture is manual and
+// a counter is not staffed every hour, so "one day left" has to already look like an emergency.
+const HOLD_CRITICAL_H = 24, HOLD_SOON_H = 72;
+function holdUrgency(b, now){
+  const d = holdDeadline(b);
+  if(!d) return { key:'unknown', ms:null };
+  const ms = d.getTime() - (now || Date.now());
+  if(ms <= 0)                      return { key:'expired',  ms };
+  if(ms <= HOLD_CRITICAL_H*3600e3) return { key:'critical', ms };
+  if(ms <= HOLD_SOON_H*3600e3)     return { key:'soon',     ms };
+  return { key:'ok', ms };
+}
+// Rounded down on purpose: "1 day left" when 47 hours remain is the safer lie than "2 days".
+function holdSpan(ms){
+  const a=Math.abs(ms||0), mins=Math.floor(a/60000), hrs=Math.floor(mins/60), days=Math.floor(hrs/24);
+  if(days>=1) return days+' day'+(days===1?'':'s');
+  if(hrs>=1)  return hrs+' hour'+(hrs===1?'':'s');
+  if(mins>=1) return mins+' minute'+(mins===1?'':'s');
+  return 'less than a minute';
+}
+function holdLeftText(b, now){
+  const u=holdUrgency(b, now);
+  if(u.key==='unknown') return 'No deadline recorded';
+  return u.ms<=0 ? 'Expired '+holdSpan(u.ms)+' ago' : holdSpan(u.ms)+' left';
+}
+// Has the session itself already happened? A hold on a session nobody has charged for is the
+// case this screen exists to catch, whatever its deadline says.
+function holdSessionOver(b){
+  const t=todayISO();
+  if(!b || !b.booking_date) return false;
+  if(b.booking_date < t) return true;
+  return b.booking_date === t && (b.end_min||0) <= nowMinWpg();
+}
+// What belongs on the list: the session has been played, or the clock is running out, or it is
+// already too late. A hold on a session three days out with six days left is simply fine.
+function holdNeedsAttention(b, now){
+  const k = holdUrgency(b, now).key;
+  return k==='expired' || k==='critical' || k==='soon' || holdSessionOver(b);
+}
+
+/* ----- Reading them -------------------------------------------------------------------- */
+async function fetchHolds(){
+  HOLDS.loading = true;
+  const r = await sb.from('bookings').select(HOLD_SELECT)
+    .eq(HOLD_COLS.state,'held').neq('status','cancelled')
+    .order(HOLD_COLS.expires,{ ascending:true });
+  HOLDS.loading = false;
+  if(r.error){
+    HOLDS.rows=null; HOLDS.due=0; HOLDS.critical=0; HOLDS.expired=0;
+    // A database without 0034 has no such column. Say which migration, not "unknown error".
+    HOLDS.error = missingSchema(r.error)
+      ? 'Card holds are not switched on in this database yet — apply migration 0034 and this screen fills itself in.'
+      : (isAuthError(r.error) ? null : 'Could not read the holds: '+r.error.message);
+  } else {
+    const now=Date.now();
+    HOLDS.rows = r.data||[]; HOLDS.error=null;
+    // `due` is what can still be acted on. An expired hold is past saving and counted on its own,
+    // so this number and the screen's first tile can never disagree.
+    const att = HOLDS.rows.filter(b=>holdNeedsAttention(b, now) && holdUrgency(b, now).key!=='expired');
+    HOLDS.due      = att.length;
+    HOLDS.critical = att.filter(b=>holdUrgency(b, now).key==='critical').length;
+    HOLDS.expired  = HOLDS.rows.filter(b=>holdUrgency(b, now).key==='expired').length;
+  }
+  renderSideNav();      // the count in the sidebar, on whatever screen the person is looking at
+  return HOLDS;
+}
+// Primed at sign-in so the sidebar already carries the number before anyone opens the tab.
+async function refreshHoldCount(){ if(can('money.write')) await fetchHolds(); }
+
+/* ----- Moving the money ---------------------------------------------------------------- */
+// Both of these are money.write, and both are the server's job: this page has no Stripe key.
+// In demo mode there is no server at all, so the in-memory row is settled instead — and the
+// sheet says so, rather than pretending a card was touched.
+async function holdPost(action, body, b, amountCents){
+  if(DEMO_MODE){
+    const now=new Date().toISOString();
+    const patch = action==='capture'
+      ? { [HOLD_COLS.state]:'paid',     [HOLD_COLS.captured]:now, amount_cents:amountCents }
+      : { [HOLD_COLS.state]:'released', [HOLD_COLS.released]:now, amount_cents:0 };
+    const { error } = await sb.from('bookings').update(patch).eq('id', b.id);
+    return error ? { ok:false, error:error.message } : { ok:true, demo:true };
+  }
+  return apiPost('/api/booking-series?action='+action, body);
+}
+const holdCur = () => (SETTINGS.pay && SETTINGS.pay.currency) || 'CAD';
+const holdMoney = c => holdCur()+' '+cash(c);
+const holdWhen = b => `${dateLabel(b.booking_date)}, ${fmtMin(b.start_min)}–${fmtMin(b.end_min)}`;
+
+// "Charge now", with the option of less. Stripe will not capture more than was authorised, so
+// neither will this form — it says why rather than letting the server refuse it.
+function chargeHoldFlow(b, done){
+  if(!can('money.write')) return;
+  const cents = heldCents(b);
+  if(holdUrgency(b).key==='expired'){
+    toast('That hold has already expired — the money can no longer be taken.','err'); return;
+  }
+  promptSheet({
+    title:'Charge this card?',
+    body:`<b>${esc(holdMoney(cents))}</b> is being held on ${esc(b.customer_name||'this customer')}’s card for
+      ${esc(holdWhen(b))}. Nothing has been charged yet.<br /><br />
+      Confirming <b>takes the money now</b>, and it can only be given back as a refund.
+      Charge less for a shorter session — never more than is held.`,
+    fields:[{ id:'amount', label:`Amount to charge (${holdCur()} $)`, type:'number', step:'0.01', min:'0',
+              value:(cents/100).toFixed(2) }],
+    okLabel:'Charge the card',
+    onOk: async (v)=>{
+      const dollars = Number(v.amount);
+      if(!Number.isFinite(dollars) || dollars<=0) return 'Enter an amount greater than zero.';
+      const want = Math.round(dollars*100);
+      if(cents && want>cents) return `Only ${holdMoney(cents)} is held — a card cannot be charged more than was authorised.`;
+      const r = await holdPost('capture', { bookingId:b.id, amountCents:want }, b, want);
+      if(!r.ok) return r.error || 'That could not be charged.';
+      toast(r.message || `Charged ${holdMoney(want)}${r.demo?' (demo — no real card)':''}`,'ok');
+      done && done();
+      return null;
+    },
+  });
+}
+
+// "Release" — the no-show forgiven, the booking cancelled in good time, the double booking.
+function releaseHoldFlow(b, done){
+  if(!can('money.write')) return;
+  const cents = heldCents(b);
+  promptSheet({
+    title:'Release this hold?',
+    body:`The hold of <b>${esc(holdMoney(cents))}</b> on ${esc(b.customer_name||'this customer')}’s card is cancelled
+      and <b>they are never charged</b> for ${esc(holdWhen(b))}. No money moves either way.<br /><br />
+      The booking itself is left as it is — cancel it separately if the bay should go back on sale.
+      A released hold cannot be put back: the card would have to be taken again.`,
+    okLabel:'Release the hold', danger:true,
+    onOk: async ()=>{
+      const r = await holdPost('release', { bookingId:b.id }, b, 0);
+      if(!r.ok) return r.error || 'That hold could not be released.';
+      toast(r.message || `Hold released — nothing was charged${r.demo?' (demo)':''}`,'ok');
+      done && done();
+      return null;
+    },
+  });
+}
+
+/* ----- The reservation sheet's payment block ------------------------------------------- */
+// What a booking's money block says once holds exist. Returns '' for anything with no card
+// state, so a staff booking or a league round is left exactly as it was.
+function holdBoxHTML(b){
+  const st = payState(b);
+  if(st==='paid'){
+    const at = b[HOLD_COLS.captured];
+    return `<div class="hold-box is-paid">
+      <div class="hb-h">Paid — the money has been taken</div>
+      <div class="hb-amt">${esc(holdMoney(b.amount_cents||0))}</div>
+      <div class="hb-s">${at?`Charged ${esc(fmtTs(at))}.`:'Charged in full.'} There is nothing left to collect on this booking.</div></div>`;
+  }
+  if(st==='released'){
+    const at = b[HOLD_COLS.released];
+    return `<div class="hold-box is-expired">
+      <div class="hb-h">Hold released — never charged</div>
+      <div class="hb-s">The authorisation was cancelled${at?' on '+esc(fmtTs(at)):''}. No money left this customer’s account.</div></div>`;
+  }
+  if(st==='refunded'){
+    return `<div class="hold-box is-expired">
+      <div class="hb-h">Charged, then refunded</div>
+      <div class="hb-s">See the refunds on this booking for what went back and when.</div></div>`;
+  }
+  if(st!=='held') return '';
+  const cents=heldCents(b), u=holdUrgency(b), d=holdDeadline(b);
+  if(u.key==='expired'){
+    return `<div class="hold-box is-expired">
+      <div class="hb-h">Too late — this money is gone</div>
+      <div class="hb-amt">${esc(holdMoney(cents))}</div>
+      <div class="hb-s">The hold expired ${esc(holdSpan(u.ms))} ago${d?' ('+esc(fmtTs(d.toISOString()))+')':''}. The bank has released it,
+        so this amount can no longer be charged. If the session was played, take payment another way.</div></div>`;
+  }
+  return `<div class="hold-box${u.key==='critical'?' is-critical':''}">
+    <div class="hb-h">Not charged yet — the card is only on hold</div>
+    <div class="hb-amt">${esc(holdMoney(cents))}</div>
+    <div class="hb-s">The bank is holding this amount. Nothing has left the customer’s account.
+      ${d?`It must be charged by <b>${esc(fmtTs(d.toISOString()))}</b> — <b>${esc(holdLeftText(b))}</b>.`
+         :'No expiry was recorded for this hold, so charge it as soon as the session is done.'}
+      After that the hold lapses and the money cannot be collected at all.</div></div>`;
+}
+
+/* ----- Holds to Charge: the screen that stops money being forgotten -------------------- */
+function loadHolds(){ renderHoldsTab(); fetchHolds().then(renderHoldsTab); }
+
+function holdRowHTML(b, now){
+  const u = holdUrgency(b, now), cents = heldCents(b), d = holdDeadline(b);
+  const phone = (b.customer_phone||'').trim();
+  const over = holdSessionOver(b);
+  const act = u.key==='expired'
+    ? `<span class="dim" style="font-size:12.5px;max-width:200px;line-height:1.45">Nothing can be charged — the bank let this go.</span>
+       <button class="btn btn-ghost btn-sm hr-open">Open</button>`
+    : `<button class="btn btn-primary btn-sm hr-charge">Charge now</button>
+       <button class="btn btn-danger btn-sm hr-release">Release</button>
+       <button class="btn btn-ghost btn-sm hr-open">Open</button>`;
+  return `<div class="hold-row is-${u.key}" data-id="${esc(b.id)}">
+    <div class="hr-who">
+      <div class="hr-name">${esc(b.customer_name||'No name on the booking')}</div>
+      <div class="hr-when">${esc(shortDate2(b.booking_date))} ${esc(fmtMin(b.start_min))}–${esc(fmtMin(b.end_min))} ·
+        ${esc(bayName(b.bay_id))}${over?' · <b>session already played</b>':''}<br />
+        ${phone?`<a class="hr-phone" href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(phone)}</a>`
+               :'<span class="dim">No phone number on file</span>'}</div>
+    </div>
+    <div class="hr-amt"><div class="hr-cents">${esc(holdMoney(cents))}</div><div class="hr-amt-l">On hold</div></div>
+    <div class="hr-due">
+      <div class="hr-left">${esc(holdLeftText(b, now))}</div>
+      <div class="hr-dead">${d?'Charge by '+esc(fmtTs(d.toISOString())):'No deadline recorded'}</div>
+    </div>
+    <div class="hr-act">${act}</div>
+  </div>`;
+}
+
+function renderHoldsTab(){
+  const sub=$('#holds-sub'), stats=$('#holds-stats'), list=$('#holds-list');
+  if(!sub) return;
+  if(HOLDS.error){
+    sub.textContent='Unavailable';
+    stats.innerHTML=''; list.innerHTML=`<div class="card"><div class="empty">${esc(HOLDS.error)}</div></div>`;
+    return;
+  }
+  if(HOLDS.rows===null){ sub.textContent='Loading…'; stats.innerHTML=''; list.innerHTML=''; return; }
+
+  const now=Date.now();
+  const rows=HOLDS.rows.slice();
+  const expired=rows.filter(b=>holdUrgency(b, now).key==='expired');
+  const due    =rows.filter(b=>holdUrgency(b, now).key!=='expired' && holdNeedsAttention(b, now));
+  const later  =rows.filter(b=>holdUrgency(b, now).key!=='expired' && !holdNeedsAttention(b, now));
+  // Soonest deadline first, everywhere. A hold with no deadline recorded sorts last rather than
+  // first: it is unknown, not urgent, and must not push a real countdown down the page.
+  const byDeadline=(x,y)=>{ const a=holdDeadline(x), c=holdDeadline(y);
+    if(!a && !c) return 0; if(!a) return 1; if(!c) return -1; return a-c; };
+  [expired,due,later].forEach(g=>g.sort(byDeadline));
+
+  const total=rows.reduce((s,b)=>s+heldCents(b),0);
+  const critical=due.filter(b=>holdUrgency(b, now).key==='critical').length;
+  sub.textContent = rows.length
+    ? `${rows.length} card${rows.length===1?'':'s'} authorised · ${holdMoney(total)} not yet taken`
+    : 'Nothing is waiting to be charged';
+  stats.innerHTML=`
+    <div class="stat"><div class="stat-n">${due.length}</div><div class="stat-l">Waiting to be charged</div></div>
+    <div class="stat${critical||expired.length?' is-critical':''}"><div class="stat-n">${critical}</div>
+      <div class="stat-l">Running out today</div></div>
+    <div class="stat"><div class="stat-n">${esc(cash(total))}</div><div class="stat-l">${esc(holdCur())} held, not taken</div></div>`;
+
+  let html='';
+  if(due.length){
+    html += `<div class="holds-band">Charge these — most urgent first</div>`
+          + due.map(b=>holdRowHTML(b, now)).join('');
+  }
+  if(expired.length){
+    html += `<div class="holds-band">Too late — ${expired.length} hold${expired.length===1?'':'s'} expired, `
+          + `${esc(holdMoney(expired.reduce((s,b)=>s+heldCents(b),0)))} that can no longer be collected</div>`
+          + expired.map(b=>holdRowHTML(b, now)).join('');
+  }
+  if(later.length){
+    html += `<div class="holds-band">Not due yet — the session is still ahead</div>`
+          + later.map(b=>holdRowHTML(b, now)).join('');
+  }
+  if(!html) html=`<div class="card"><div class="empty">Every authorised card has been dealt with. Nothing is waiting.</div></div>`;
+  list.innerHTML=html;
+
+  const after=()=>{ fetchHolds().then(renderHoldsTab); loadSchedule(); };
+  list.querySelectorAll('.hold-row').forEach(row=>{
+    const b=HOLDS.rows.find(x=>x.id===row.dataset.id); if(!b) return;
+    const on=(sel,fn)=>{ const el=row.querySelector(sel); if(el) el.onclick=fn; };
+    on('.hr-charge',  ()=>chargeHoldFlow(b, after));
+    on('.hr-release', ()=>releaseHoldFlow(b, after));
+    on('.hr-open',    ()=>goToBooking(b.id, b.booking_date));
+  });
+}
+$('#holds-refresh').onclick=()=>{ HOLDS.rows=null; renderHoldsTab(); fetchHolds().then(renderHoldsTab); };
+
+// The cut-off is a SERVER rule (lib/booking.js holdSettings / holdPlan), stored in the same
+// settings.pay jsonb this portal already reads. It is never invented here: with nothing saved,
+// the screen says the server's own default applies rather than printing a number that might be
+// wrong. holdWindowText() is what Payment Settings prints.
+function holdRules(){
+  const h = (HOLD_WINDOW && HOLD_WINDOW.cutoffDays!=null) ? HOLD_WINDOW
+          : ((SETTINGS && SETTINGS.pay && SETTINGS.pay.hold) || {});
+  const n = v => (Number.isFinite(Number(v)) && Number(v)>0) ? Number(v) : null;
+  return { cutoffDays:n(h.cutoffDays), authWindowDays:n(h.authWindowDays) };
 }
 
 /* ============================================================================

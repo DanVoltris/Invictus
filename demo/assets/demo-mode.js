@@ -529,6 +529,54 @@
     league_team_id: r.team_id, league_week: r.league_week,
   }));
 
+  /* ---------- card holds (migration 0034) ----------
+     Every payment_state the portal can be shown, so ?demo=1 exercises the lot: a hold with days
+     to run, one whose session has been played, one down to its last hours, one already expired
+     (money the venue will never see), one captured, one released.
+
+     The deadlines are set relative to NOW rather than written down, so the demo is still telling
+     the truth about urgency whenever somebody opens it. */
+  const inHours = (h) => new Date(Date.now() + h * 3600e3).toISOString();
+  const cardBooking = ([bay, dayAt, s0, e0, who, cents, state, expiresIn, extra]) => {
+    const c = CUSTOMERS.find((x) => x.name === who) || {};
+    return Object.assign({
+      id: uid('bk'), bay_id: bay, booking_date: dayOffset(dayAt),
+      start_min: s0, end_min: e0,
+      status: 'confirmed', status_label: dayAt < 0 ? 'Checked In' : 'Booked',
+      customer_name: c.name || who, customer_email: c.email || null, customer_phone: c.phone || null,
+      // A HELD booking has taken nothing: amount_cents stays 0 and authorized_cents is what the
+      // bank is sitting on. That is migration 0034's rule, and the portal depends on it.
+      amount_cents: state === 'held' || state === 'released' ? 0 : cents,
+      authorized_cents: state === 'refunded' ? null : cents,
+      payment_state: state,
+      hold_expires_at: expiresIn == null ? null : inHours(expiresIn),
+      captured_at: null, released_at: null,
+      stripe_payment_intent: 'pi_demo_' + Math.random().toString(36).slice(2, 12),
+      source: 'online', note: null, tags: [], expires_at: null, cancelled_at: null,
+      created_at: hoursAgo(expiresIn == null ? 30 : Math.max(2, 168 - expiresIn)),
+      group_id: null, series_id: null, refunded_cents: 0, league_team_id: null,
+    }, extra || {});
+  };
+  [
+    // bay  day  start  end   customer            cents  state       hold expires in (hours)
+    // Already expired: the bank let it go. Nothing can be charged, and the screen says so.
+    ['B3', -3, 1020, 1110, 'Marcus Bell',          4500, 'held',     -11],
+    // Down to its last hours. This is the row that has to be impossible to miss.
+    ['B2', -1, 1140, 1260, 'Chloe Nguyen',         6000, 'held',      16],
+    // Session played two days ago, hold still has days to run - caught because the session is over.
+    ['B5', -2,  600,  660, 'Owen Brar',            2500, 'held',      92],
+    // Tomorrow evening, under three days left: warned, not yet urgent.
+    ['B4',  1, 1140, 1230, 'Riley Fontaine',       3750, 'held',      64],
+    // Tonight, a full week to run: nothing to do yet.
+    ['B4',  0, 1080, 1140, 'Avery Thompson',       2500, 'held',     160],
+    // Charged at check-in yesterday - the portal must offer no capture on this one.
+    ['B1', -1, 1080, 1170, 'Priya Raman',          4000, 'paid',     null,
+      { captured_at: hoursAgo(20), status_label: 'Checked In' }],
+    // Cancelled in good time: the hold was released and the customer was never charged.
+    ['B4', -1,  960, 1050, 'Sam Okafor',           3000, 'released', null,
+      { released_at: hoursAgo(26), status_label: 'Checked In' }],
+  ].forEach((row) => BOOKINGS.push(cardBooking(row)));
+
   /* ---------- Staff, roles and the activity log (migration 0024) ---------- */
   const CAPABILITIES = [
     { key: 'booking.write',  label: 'Bookings',     description: 'Create, move and cancel reservations, blocks, groups, leagues and the waiting list.', sort: 0 },
@@ -573,7 +621,17 @@
       hours: { 0: [0, 24], 1: [0, 24], 2: [0, 24], 3: [0, 24], 4: [0, 24], 5: [0, 24], 6: [0, 24] },
       rates: FLAT, bay_rates: {}, min_mins: 60, max_party: 4, slot_step: 30,
       weekly_status: {}, online_status_label: 'Booked',
-      pay: {}, booking_window: { regularDays: 10, leagueDays: 60 },
+      // The hold rules lib/booking.js holdSettings() reads. cutoffDays/authWindowDays mirror
+      // HOLD_DEFAULTS there: a session more than 5 days out is charged outright, because a card
+      // authorisation only survives about 7.
+      pay: {
+        acceptPayments: true, acceptDeposit: true, currency: 'CAD', taxPct: 12, processor: 'Stripe',
+        captureMethod: 'Credit Card Hold', chargePercent: 50, chargeAmount: null,
+        hold: { cutoffDays: 5, authWindowDays: 7 },
+        holdDisclaimer: 'Your card is held, not charged. We take the payment when you check in.',
+        paymentDisclaimer: 'Cancel at least 24 hours before your tee time for a full refund.',
+      },
+      booking_window: { regularDays: 10, leagueDays: 60 },
       updated_at: hoursAgo(20),
     }],
     bookings: BOOKINGS,
