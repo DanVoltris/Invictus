@@ -1,5 +1,6 @@
-import { stripeStatus, stripeClient, normalizeSettings, pointsEarned } from '../lib/booking.js';
-import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingExistsForPI, adjustPoints, awardBookingPoints,
+import { stripeStatus, stripeClient, normalizeSettings } from '../lib/booking.js';
+import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingExistsForPI,
+         redeemGiftCard, redeemPromo, confirmLeagueCheckout, confirmLeagueTeamCheckout,
   recordStripeEvent, forgetStripeEvent } from '../lib/db.js';
 import { notifyBookingConfirmed } from '../lib/notify.js';
 
@@ -18,23 +19,40 @@ export default async function handler(req, res) {
   const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(200).json({ received: true });
 
-  const stripe = stripeClient(process.env);
+  // Every event must be signed. Without the secret there is no way to tell Stripe from anyone
+  // else who can reach this URL, and an unsigned payment_intent.succeeded would mint a paid
+  // booking for free — so refuse outright. 503 (not 400) because it is our misconfiguration:
+  // Stripe keeps retrying, and the retries succeed once the secret is set.
   const whsec = process.env.STRIPE_WEBHOOK_SECRET;
-  // Local dev mounts this behind express.raw(), which hands us a Buffer and leaves the request
-  // stream drained — readRaw() would never resolve, so always prefer the Buffer when there is one.
-  const buf = req.body && Buffer.isBuffer(req.body) ? req.body : null;
+  if (!whsec) {
+    console.error('Webhook refused: STRIPE_WEBHOOK_SECRET is not set. Add the endpoint in the Stripe '
+      + 'dashboard (Developers → Webhooks) and copy its signing secret (whsec_…) into the environment.');
+    return res.status(503).json({ error: 'Webhook signing secret not configured.' });
+  }
+
+  const stripe = stripeClient(process.env);
   let event;
   try {
-    if (whsec) {
-      event = stripe.webhooks.constructEvent(buf || await readRaw(req), req.headers['stripe-signature'], whsec);
-    } else {
-      // No signing secret configured — accept the parsed event (fine for a test-mode prototype).
-      if (buf) event = JSON.parse(buf.toString());
-      else event = req.body && req.body.type ? req.body : JSON.parse((await readRaw(req)).toString());
-    }
+    // The signature covers the exact bytes Stripe sent, never a re-serialised object.
+    // - Local dev mounts this behind express.raw(), which hands us a Buffer and leaves the request
+    //   stream drained — readRaw() would never resolve, so always prefer the Buffer when there is one.
+    // - On Vercel, req.body is a lazy getter that JSON-parses (an object, not a Buffer), and the
+    //   runtime replays the original bytes to req.on('data'/'end'), so readRaw() gets them intact.
+    //   (`config.api.bodyParser` is a Next.js option; plain Vercel functions ignore it.)
+    // Inside the try because that getter throws on malformed JSON — which is just another bad request.
+    const buf = req.body && Buffer.isBuffer(req.body) ? req.body : null;
+    event = stripe.webhooks.constructEvent(buf || await readRaw(req), req.headers['stripe-signature'], whsec);
   } catch (err) {
     console.error('Webhook error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // stripeStatus() only enables Stripe on test keys, so a genuine event here is always test mode.
+  // A signed livemode event means a live endpoint's secret is configured against test keys —
+  // acknowledge it (so Stripe stops retrying) but never fulfil a live payment on this prototype.
+  if (event.livemode) {
+    console.error(`Webhook ${event.id} ignored: livemode event received while running on test keys.`);
+    return res.status(200).json({ received: true, ignored: 'livemode' });
   }
 
   // Global idempotency. Stripe retries until it gets a 2xx and can also deliver the same event
@@ -61,10 +79,34 @@ export default async function handler(req, res) {
   res.status(200).json({ received: true });
 }
 
-// Everything a successful payment causes: the booking row, the customer, loyalty points and the
-// confirmation message. Split out of the handler so a failure anywhere in it can release the
+// Everything a successful payment causes: the booking row, the customer, the gift-card and promo
+// settlements, and the confirmation message. Split out of the handler so a failure anywhere in it can release the
 // event claim above.
 async function fulfil(event, stripe) {
+  const sessionKind = event.type === 'checkout.session.completed'
+    ? ((event.data.object || {}).metadata || {}).kind : null;
+
+  // A captain paying for a whole team (migration 0031). Backup for the success page, exactly like
+  // the per-player sign-up below: confirmLeagueTeamCheckout re-reads the session from Stripe, and
+  // league_teams.stripe_session_id is unique, so a replayed event cannot create a second team.
+  if (sessionKind === 'league-team') {
+    const r = await confirmLeagueTeamCheckout(stripe, event.data.object.id);
+    if (r.error && r.retry) throw new Error(`league team not saved: ${r.error}`);   // 500 → Stripe retries
+    if (r.error) console.warn('⚠ League team ignored:', r.error);
+    else console.log(`✅ League team saved — ${(r.team && r.team.name) || r.teamId}${r.already ? ' (already there)' : ''}`);
+    return;
+  }
+
+  // A paid league sign-up (api/leagues.js). Backup for the success page: a player who pays and
+  // closes the tab still lands on the roster. confirmLeagueCheckout re-reads the session from
+  // Stripe, so the event body itself is never trusted.
+  if (sessionKind === 'league') {
+    const r = await confirmLeagueCheckout(stripe, event.data.object.id);
+    if (r.error && r.retry) throw new Error(`league sign-up not saved: ${r.error}`);   // 500 → Stripe retries
+    if (r.error) console.warn('⚠ League sign-up ignored:', r.error);
+    else console.log(`✅ League sign-up saved — ${r.league && r.league.name}${r.already ? ' (already on roster)' : ''}`);
+    return;
+  }
   if (event.type === 'payment_intent.succeeded') {
     const pi = event.data.object;
     const md = pi.metadata || {};
@@ -109,13 +151,27 @@ async function fulfil(event, stripe) {
         : `✅ Booking PAID & saved — ${md.bayName} · ${md.summary}`);
       // Save the booker into the customer database (contact only; the SMS toggle is set at pay time).
       const up = await upsertCustomer({ name, email, phone });
-      // Loyalty: spend applied points (idempotent by PI id) + earn for time played (once per booking).
-      const spent = Number(md.pointsUsed) || 0;
-      if (!error && spent > 0 && md.pointsCustomerId) {
-        await adjustPoints({ customerId: md.pointsCustomerId, delta: -spent, kind: 'redeem', note: `Booking ${slot.dateISO}`, bookingId, ref: pi.id });
+      // Loyalty points are retired: no balance is spent or earned when a payment lands.
+
+      // Gift card and promo are settled HERE, not only in the browser. Previously the sole caller
+      // of either redemption was demo/index.html after the Stripe confirm resolved, so a customer
+      // whose tab died between "payment succeeded" and that call still got the booking (this
+      // webhook writes it) while the gift-card reservation quietly lapsed and the balance was
+      // restored in full — paid less AND kept the card. Same for a promo's redemption count.
+      //
+      // Both are idempotent, so the browser calling them too is harmless: redeem_gift_card keys on
+      // the PaymentIntent id, and redeem_promo on the reservation, which can only be spent once.
+      const giftUsed = Number(md.giftUsedCents) || 0;
+      if (!error && giftUsed > 0 && md.giftCardId) {
+        const r = await redeemGiftCard({
+          cardId: md.giftCardId, ref: pi.id, chargedCents: giftUsed, bookingId,
+          note: `Booking ${slot.dateISO}`,
+        });
+        if (r && r.error) console.error(`⚠ gift card ${md.giftCardId} not settled for ${pi.id}: ${r.error}`);
       }
-      if (!error && up.id && bookingId) {
-        await awardBookingPoints({ customerId: up.id, bookingId, points: pointsEarned(settings, slot.endMin - slot.startMin) });
+      if (!error && md.promoReservationId) {
+        const r = await redeemPromo({ reservationId: md.promoReservationId, bookingId, ref: pi.id });
+        if (r && r.error) console.error(`⚠ promo reservation ${md.promoReservationId} not settled for ${pi.id}: ${r.error}`);
       }
       // Tell the customer. Queued in the outbox keyed on the booking, so the client-side confirm
       // enqueuing the same receipt cannot produce a second one; delivery is best-effort and can

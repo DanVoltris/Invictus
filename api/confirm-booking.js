@@ -1,5 +1,6 @@
-import { stripeStatus, stripeClient, normalizeSettings, pointsEarned } from '../lib/booking.js';
-import { getSettings, confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, adjustPoints, awardBookingPoints } from '../lib/db.js';
+import { stripeStatus, stripeClient, normalizeSettings } from '../lib/booking.js';
+import { getSettings, confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote,
+         recordConsent, clientIp } from '../lib/db.js';
 
 // Called by the booking site the moment a payment succeeds. It re-verifies the PaymentIntent with
 // Stripe (so it can't be spoofed), then turns the customer's live cart hold into a confirmed booking
@@ -10,7 +11,10 @@ export default async function handler(req, res) {
   const { enabled } = stripeStatus(process.env);
   if (!enabled) return res.status(503).json({ ok: false, error: 'Stripe not configured' });
 
-  const { paymentIntentId, name, email, phone, sms } = req.body || {};
+  // note: typed at checkout, after the PaymentIntent already existed — so it arrives here, not in its metadata.
+  // smsConsent: the express-consent tick box on the checkout form (migration 0019). `sms` beside it
+  // is the old UI preference, which defaults to true and is NOT consent — the two are kept apart.
+  const { paymentIntentId, name, email, phone, sms, smsConsent, note } = req.body || {};
   if (!paymentIntentId) return res.status(400).json({ ok: false, error: 'Missing payment reference.' });
 
   const stripe = stripeClient(process.env);
@@ -23,7 +27,12 @@ export default async function handler(req, res) {
   if (!md.dateISO || !md.bayId) return res.status(400).json({ ok: false, error: 'Booking details missing on the payment.' });
 
   // Already saved (webhook or a retry got here first)? Nothing more to do.
-  if (await bookingExistsForPI(pi.id)) { await upsertCustomer({ name, email, phone, smsOptIn: typeof sms === 'boolean' ? sms : undefined }); return res.status(200).json({ ok: true, already: true }); }
+  if (await bookingExistsForPI(pi.id)) {
+    await upsertCustomer({ name, email, phone, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+    await saveSmsConsent(req, { name, email, phone, smsConsent });
+    await setCustomerNote({ paymentIntentId: pi.id, note, onlyIfEmpty: true });   // the webhook saved it without the note
+    return res.status(200).json({ ok: true, already: true });
+  }
 
   // Prefer what the customer typed; fall back to the card's billing details.
   let n = name, e = email, p = phone;
@@ -49,16 +58,29 @@ export default async function handler(req, res) {
     if (ins.error) return res.status(409).json({ ok: false, error: 'That slot is no longer available — please contact the shop; your payment went through.' });
     bookingId = ins.id;
   }
-  const up = await upsertCustomer({ name: n, email: e, phone: p, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+  await setCustomerNote({ bookingId, note });
+  await upsertCustomer({ name: n, email: e, phone: p, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+  await saveSmsConsent(req, { name: n, email: e, phone: p, smsConsent });
 
-  // Loyalty: spend the applied points (idempotent by PaymentIntent id), then earn for time played
-  // (once per booking — the ledger's unique index guards both against retries/webhook overlap).
-  const spent = Number(md.pointsUsed) || 0;
-  if (spent > 0 && md.pointsCustomerId) {
-    await adjustPoints({ customerId: md.pointsCustomerId, delta: -spent, kind: 'redeem', note: `Booking ${slot.dateISO}`, bookingId, ref: pi.id });
-  }
-  if (up.id && bookingId) {
-    await awardBookingPoints({ customerId: up.id, bookingId, points: pointsEarned(settings, slot.endMin - slot.startMin) });
-  }
+  // Loyalty points are retired: nothing is spent and nothing is earned here any more. Gift cards
+  // and promo codes are still settled by api/webhook.js, exactly as before.
   return res.status(200).json({ ok: true });
+}
+
+// The consent tick, written where lib/notify.js looks for it. Three rules, all of them here:
+//   • no smsConsent in the request → nothing is written, ever. Silence is not consent, and a
+//     client that has not been updated must not be read as one that sent `false`.
+//   • true  → sms_consent, with the time, the IP and source 'checkout' (CASL's point-of-collection
+//     record), and sms_unsub_at cleared.
+//   • false → recorded as a NO, not skipped: the box starts empty, so the customer has looked at
+//     it and chosen to leave it that way. That withdraws any earlier yes rather than leaving the
+//     old one standing, which is why recordConsent() stamps sms_unsub_at on a false.
+// Best-effort, like the note and the receipt: a paid booking is never failed over a preference.
+async function saveSmsConsent(req, { name, email, phone, smsConsent }) {
+  if (typeof smsConsent !== 'boolean') return;
+  try {
+    await recordConsent({ name, email, phone, smsConsent, ip: clientIp(req), source: 'checkout' });
+  } catch (err) {
+    console.error('confirm-booking: consent not recorded —', err && err.message ? err.message : err);
+  }
 }

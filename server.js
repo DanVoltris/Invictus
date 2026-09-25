@@ -1,19 +1,27 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   stripeStatus, normalizeSettings, fmtMin, hoursUntilBooking,
-  overrideEffects, weeklyStatusBlocked, pointsRedemption,
+  overrideEffects, weeklyStatusBlocked,
 } from './lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, dbEnabled, admin,
-  releaseHold, cleanupExpiredHolds } from './lib/db.js';
+  releaseHold, cleanupExpiredHolds, customerHoursByContact, normPhone, upsertCustomer, saveBookingFeedback,
+  leaguesForCustomer, isLeaguePlayer } from './lib/db.js';
 import signWaiver from './api/sign-waiver.js';
 import confirmBooking from './api/confirm-booking.js';
-import membership from './api/membership.js';
+import leagues from './api/leagues.js';
 import hourCards from './api/hour-cards.js';
-import points from './api/points.js';
+import giftCards from './api/gift-cards.js';
+import promos from './api/promos.js';
+import availability from './api/availability.js';
+import waitlist from './api/waitlist.js';
+import bookingSeries from './api/booking-series.js';
 import bookingSelfService from './api/booking.js';
+import account from './api/account.js';
+import staff from './api/staff.js';
 import createPaymentIntent from './api/create-payment-intent.js';
 import webhook from './api/webhook.js';
 
@@ -45,19 +53,65 @@ app.use(express.json());
 app.get('/admin', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'admin.html')));
 app.get('/manage', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'manage.html')));
 app.get('/waiver', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'waiver.html')));
-app.get('/membership', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'membership.html')));
+app.get('/leagues', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'leagues.html')));
+app.get('/membership', (_req, res) => res.redirect(301, '/leagues'));   // memberships were replaced by leagues
 app.get('/hours', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'hours.html')));
 app.get('/account', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'account.html')));
+// /gift-cards is where api/gift-cards.js sends a buyer back to after Stripe Checkout. The page
+// itself belongs to the Customer UI agent and does not exist yet, so serve it only if it is there
+// — otherwise fall through to a clean 404 rather than a sendFile ENOENT 500.
+app.get('/gift-cards', (_req, res, next) => {
+  const page = path.join(__dirname, 'demo', 'gift-cards.html');
+  return existsSync(page) ? res.sendFile(page) : next();
+});
+// /waitlist is where an offer message sends the customer to claim their slot. Same story as
+// /gift-cards above: the page is the Customer UI agent's, so serve it only if it exists.
+app.get('/waitlist', (_req, res, next) => {
+  const page = path.join(__dirname, 'demo', 'waitlist.html');
+  return existsSync(page) ? res.sendFile(page) : next();
+});
 app.use(express.static(path.join(__dirname, 'demo')));
 
-// Waiver signing + booking confirmation + membership purchase (same handlers the Vercel functions use).
+// LOCAL ONLY: the booking page on localhost books as the no-login dev account when it sends
+// X-Dev-Account, so the league window applies to it (same rule as /api/create-payment-intent below).
+// This is registered BEFORE the routes it covers: Express runs middleware and routes in the order
+// they were added, so a route mounted first would never see the marker. /api/leagues and
+// /api/booking are on the list so the dev account can buy a team and book its weekly round.
+app.use(['/api/hour-cards', '/api/gift-cards', '/api/waitlist', '/api/leagues', '/api/booking'], (req, _res, next) => {
+  if (devAccountPhone(req) && req.get('x-dev-account') === '1') req.devAccountPhone = process.env.DEV_ACCOUNT_PHONE;
+  next();
+});
+
+// Waiver signing + booking confirmation + league purchases (same handlers the Vercel functions use).
 app.all('/api/sign-waiver', (req, res) => signWaiver(req, res));
 app.all('/api/confirm-booking', (req, res) => confirmBooking(req, res));
-app.all('/api/membership', (req, res) => membership(req, res));
+// Leagues: buy a team, invite a friend, claim an invite, my teams — dispatches on ?action=.
+app.all('/api/leagues', (req, res) => leagues(req, res));
 app.all('/api/hour-cards', (req, res) => hourCards(req, res));
-app.all('/api/points', (req, res) => points(req, res));
+// Gift cards (buy, check a balance, apply at checkout) and promo codes (validate, reserve,
+// release, redeem). Both dispatch on ?action= — see the header of each handler.
+app.all('/api/gift-cards', (req, res) => giftCards(req, res));
+app.all('/api/promos', (req, res) => promos(req, res));
+// Waiting list (join, leave, claim an offer, and the pg_cron sweep) — dispatches on ?action=.
+// ?action=outbox on the same handler is the notification outbox's own scheduled drain; it is
+// mounted here rather than on a route of its own so the local server and the Vercel function
+// answer the identical URL. Try it with:
+//   curl -XPOST -H "x-outbox-secret: $OUTBOX_SWEEP_SECRET" 'localhost:4242/api/waitlist?action=outbox'
+// ?action=sms-reply on the same handler is Twilio's INBOUND webhook — a customer texting STOP,
+// START or HELP back. Twilio posts application/x-www-form-urlencoded, which express.json() above
+// ignores, so that one content type gets its own parser here; a JSON body is untouched by it.
+// Vercel parses the same form body for the function without any of this.
+app.use('/api/waitlist', express.urlencoded({ extended: false }));
+app.all('/api/waitlist', (req, res) => waitlist(req, res));
+
+// Group + recurring bookings (preview, create, extend the horizon, cancel, end, move) —
+// dispatches on ?action=. A group is a series of one; see the header of the handler.
+app.all('/api/booking-series', (req, res) => bookingSeries(req, res));
 
 // Customer booking lookup (GET) + self-service cancellation (POST) — shared module handler.
+// ?action=league-round on the same handler books a team's free weekly round (migration 0031).
+app.all('/api/account', (req, res) => account(req, res));
+app.all('/api/staff', (req, res) => staff(req, res));
 app.all('/api/booking', (req, res) => bookingSelfService(req, res));
 app.post('/api/cancel-booking', (req, res) => bookingSelfService(req, res));   // legacy path
 
@@ -70,50 +124,145 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
-app.get('/api/availability', async (req, res) => {
-  const row = await getSettings();
-  if (!row) return res.json({ dbEnabled: false });
-  const settings = normalizeSettings(row);
-  const dateISO = req.query.date || '';
-  const booked = {};
-  const closed = {};
-  const held = {};      // live cart holds — shown to other users as "Held"
-  let dateHours = null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) {
-    await cleanupExpiredHolds();
-    for (const b of await getBookingsForDate(dateISO)) {
-      (booked[b.bay_id] ||= []).push([b.start_min, b.end_min]);
-      if (b.status === 'held') (held[b.bay_id] ||= []).push([b.start_min, b.end_min]);
-    }
-    const overrides = await getOverridesForDate(dateISO);
-    const fx = overrideEffects(overrides, settings, dateISO);
-    dateHours = fx.dateHours;
-    for (const [bayId, ranges] of Object.entries(fx.blocked)) for (const r of ranges) (booked[bayId] ||= []).push(r);
-    for (const [bayId, ranges] of Object.entries(weeklyStatusBlocked(settings, overrides, dateISO)))
-      for (const r of ranges) { (booked[bayId] ||= []).push(r); (closed[bayId] ||= []).push(r); }
-  }
-  res.json({
-    dbEnabled: true,
-    settings: {
-      bays: settings.bays.filter((b) => !b.holding), hours: settings.hours, slotStep: settings.slotStep,
-      minMins: settings.minMins, maxParty: settings.maxParty, peakStartHour: settings.peakStartHour,
-      rates: settings.rates, bayRates: settings.bayRates,
-    },
-    dateHours,
-    booked,
-    closed,
-    held,
-  });
-});
+// Public availability. Delegates to the SAME handler Vercel runs (api/availability.js) instead of
+// keeping a second copy here: this route used to be duplicated, and the copies drifted — the
+// shared one learned to tell customers why a time is unavailable while this one silently did not,
+// so the feature worked in tests and not in the browser.
+app.get('/api/availability', (req, res) => availability(req, res));
 
-// PaymentIntent creation (pricing, availability, cart hold, member/points discount) — shared module handler.
-app.all('/api/create-payment-intent', (req, res) => createPaymentIntent(req, res));
+// PaymentIntent creation (pricing, availability, cart hold, promo + gift card) — shared module handler.
+app.all('/api/create-payment-intent', (req, res) => {
+  // LOCAL ONLY: the booking page on localhost checks out as the no-login dev account (see below),
+  // so its saved cards show. Vercel never runs this file; req.devAccountPhone is set nowhere else.
+  const devPhone = devAccountPhone(req);
+  if (devPhone && req.get('x-dev-account') === '1') req.devAccountPhone = process.env.DEV_ACCOUNT_PHONE;
+  return createPaymentIntent(req, res);
+});
 
 // Release a cart hold (checkout closed/abandoned before payment). Best-effort — the 5-min TTL is the backstop.
 app.post('/api/release-hold', async (req, res) => {
   const { dateISO, bayId, startMin, endMin } = req.body || {};
   if (dateISO && bayId) await releaseHold({ dateISO, bayId, startMin: Number(startMin), endMin: Number(endMin) });
   res.json({ ok: true });
+});
+
+// LOCAL ONLY: "My Account" without signing in, always as the customer in DEV_ACCOUNT_PHONE.
+// This route exists only in this dev server. Vercel runs the /api/*.js functions and never this
+// file, so it cannot reach the live site. It is also off unless .env sets DEV_ACCOUNT_PHONE, and
+// it refuses any request that does not come from this machine.
+// The dev customer's phone when this request may use the no-login account, else null.
+function devAccountPhone(req) {
+  return isLocal(req) ? normPhone(process.env.DEV_ACCOUNT_PHONE) : null;
+}
+// True only for a request whose peer is this machine. Every dev-only route below is gated on it.
+function isLocal(req) {
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+}
+app.get('/api/dev/my-account', async (req, res) => {
+  const phone = devAccountPhone(req);
+  if (!phone) return res.status(404).json({ error: 'Not found.' });
+  const db = admin();
+  if (!db) return res.status(503).json({ error: 'No database configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.' });
+
+  // The customer, found by phone exactly as checkout finds them. No record yet: a blank account.
+  const c = await customerHoursByContact({ phone }) || {};
+  const customer = {
+    name: c.name || process.env.DEV_ACCOUNT_NAME || null, email: c.email || null, phone: c.phone || process.env.DEV_ACCOUNT_PHONE,
+    hours_balance_min: c.hours_balance_min || 0,
+    membership_id: c.membership_id || null, membership_expires: c.membership_expires || null,
+    waiver_signed_at: c.waiver_signed_at || null, address: c.address || null, career: c.career || null,
+  };
+
+  // Bookings keep the phone as it was typed, not a customer id, so match the same way the
+  // customer lookup does: narrow on the last four digits in the database, compare in full here.
+  const { data, error } = await db.from('bookings')
+    .select('id,group_id,booking_date,start_min,end_min,bay_id,status,status_label,amount_cents,customer_phone')
+    .like('customer_phone', `%${phone.slice(-4)}%`)
+    .order('booking_date', { ascending: false }).limit(200);
+  if (error) return res.status(500).json({ error: `Could not read bookings: ${error.message}` });
+  const bookings = (data || []).filter((b) => normPhone(b.customer_phone) === phone).slice(0, 50)
+    .map(({ customer_phone, ...b }) => b);
+  // Which of these already have feedback, so My Account asks about the rest (migration 0027).
+  let answered = [];
+  if (bookings.length) {
+    const fb = await db.from('booking_feedback').select('booking_id').in('booking_id', bookings.map((b) => b.id));
+    answered = fb.error ? [] : (fb.data || []).map((r) => r.booking_id);
+  }
+  const bays = Object.fromEntries((normalizeSettings(await getSettings()).bays || []).map((b) => [b.id, b.name]));
+  res.json({ ok: true, customer, bookings, answered, leagues: c.id ? await leaguesForCustomer(c.id) : [], bays });
+});
+
+// The booking page's date picker: how far ahead the dev customer may book (migration 0028).
+// LOCAL ONLY: open the manager portal without signing in, as a real staff member.
+// Same shape as the customer dev account above: localhost peers only, and this route lives in
+// server.js, which Vercel never runs. It mints a single-use magic-link token with the service-role
+// key; the portal exchanges it for a normal session, so RLS and the staff role apply exactly as
+// they would after a hand-typed sign-in. An employee login stays an employee login.
+// Which account: DEV_STAFF_EMAIL if set, else the first active admin in the staff table.
+app.get('/api/dev/staff-session', async (req, res) => {
+  if (!isLocal(req)) return res.status(404).json({ error: 'Not found.' });
+  const db = admin();
+  if (!db) return res.status(503).json({ error: 'Database not configured.' });
+  let email = (process.env.DEV_STAFF_EMAIL || '').trim().toLowerCase();
+  if (!email) {
+    const { data } = await db.from('staff').select('email,role,is_active').eq('is_active', true).eq('role', 'admin').order('created_at').limit(1);
+    email = ((data || [])[0] || {}).email || '';
+  }
+  if (!email) return res.status(404).json({ error: 'No active admin to sign in as. Set DEV_STAFF_EMAIL in .env.' });
+  const { data, error } = await db.auth.admin.generateLink({ type: 'magiclink', email });
+  if (error) return res.status(500).json({ error: error.message });
+  const tokenHash = (data && data.properties && data.properties.hashed_token) || null;
+  if (!tokenHash) return res.status(500).json({ error: 'Could not mint a local sign-in.' });
+  res.json({ ok: true, email, tokenHash });
+});
+
+app.get('/api/dev/window', async (req, res) => {
+  const phone = devAccountPhone(req);
+  if (!phone) return res.status(404).json({ error: 'Not found.' });
+  const settings = normalizeSettings(await getSettings());
+  const league = await isLeaguePlayer({ phone });
+  res.json({ ok: true, league, phone: process.env.DEV_ACCOUNT_PHONE, leagueDays: settings.bookingWindow.leagueDays,
+    days: league ? settings.bookingWindow.leagueDays : settings.bookingWindow.regularDays });
+});
+
+app.post('/api/dev/my-account/feedback', async (req, res) => {
+  const phone = devAccountPhone(req);
+  if (!phone) return res.status(404).json({ error: 'Not found.' });
+  const c = await customerHoursByContact({ phone });
+  const b = req.body || {};
+  const r = await saveBookingFeedback({ contact: { phone }, customerId: (c && c.id) || null,
+    bookingId: b.bookingId, rating: b.rating, comment: b.comment, skipped: b.skipped });
+  return r.ok ? res.json(r) : res.status(r.code || 400).json({ error: r.error });
+});
+
+// Saved cards for the dev account: the same handler as the live site, with the identity filled in.
+app.post('/api/dev/my-account/cards', async (req, res) => {
+  if (!devAccountPhone(req)) return res.status(404).json({ error: 'Not found.' });
+  const action = String((req.body || {}).action || 'cards');
+  if (!['cards', 'card-setup', 'card-remove'].includes(action)) return res.status(400).json({ error: 'Unknown action.' });
+  // Cards hang off a customer record. On a fresh database the dev account has none yet, so make it
+  // here, the same way saving an address does.
+  const up = await upsertCustomer({ name: process.env.DEV_ACCOUNT_NAME, phone: process.env.DEV_ACCOUNT_PHONE });
+  if (!up.id) return res.status(500).json({ error: `Could not find or create the dev customer record: ${up.error || 'unknown'}` });
+  req.devAccountPhone = process.env.DEV_ACCOUNT_PHONE;
+  req.query.action = action;
+  return account(req, res);
+});
+
+app.post('/api/dev/my-account/profile', async (req, res) => {
+  const phone = devAccountPhone(req);
+  if (!phone) return res.status(404).json({ error: 'Not found.' });
+  const db = admin();
+  if (!db) return res.status(503).json({ error: 'No database configured.' });
+  const up = await upsertCustomer({ name: process.env.DEV_ACCOUNT_NAME, phone: process.env.DEV_ACCOUNT_PHONE });
+  if (!up.id) return res.status(500).json({ error: `Could not find or create the customer record: ${up.error || 'unknown'}` });
+  const patch = {
+    address: String((req.body || {}).address || '').trim().slice(0, 200) || null,
+    career: String((req.body || {}).career || '').trim().slice(0, 120) || null,
+  };
+  const { error } = await db.from('customers').update(patch).eq('id', up.id);
+  if (error) return res.status(500).json({ error: `Could not save: ${error.message}. Is migration 0027 applied?` });
+  res.json({ ok: true, ...patch });
 });
 
 app.listen(PORT, () => {

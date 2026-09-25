@@ -1,9 +1,10 @@
 import {
-  stripeStatus, stripeClient, normalizeSettings, priceForBooking, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsEarned,
+  stripeStatus, stripeClient, normalizeSettings, priceForBooking, overrideEffects, overrideConflicts, weeklyStatusConflicts, bookingWindowError
 } from '../lib/booking.js';
 import {
   getSettings, getOverridesForDate, getBookingsForDate, admin,
-  listHourCards, grantHours, customerHoursByContact, bookWithHours, awardBookingPoints,
+  listHourCards, grantHours, customerHoursByContact, bookWithHours, leaguePlayerForRequest,
+  accountCustomerForRequest, recordConsent, clientIp
 } from '../lib/db.js';
 
 // One function for the whole hour-card flow (kept single to stay within the Hobby function limit).
@@ -89,21 +90,27 @@ async function confirm(req, res) {
   res.status(200).json({ ok: true, cardName: (card && card.name) || 'Hour card', hours, balanceMin: r.balanceMin, email: email || null });
 }
 
-// POST ?action=balance — a customer's hours balance by phone (primary) or email (fallback).
+// POST ?action=balance — the SIGNED-IN customer's hours balance.
+// A typed phone number proves nothing. Answering this from the request body meant anyone could
+// read a stranger's name and prepaid balance from their number alone, and ?action=book below
+// would then spend it. The balance now comes from the account session, never from the body.
 async function balance(req, res) {
-  const { email, phone } = req.body || {};
-  if (!validPhone(phone) && !validEmail(email)) return res.status(200).json({ found: false });
-  const cust = await customerHoursByContact({ email, phone });
-  if (!cust) return res.status(200).json({ found: false });
-  res.status(200).json({ found: true, name: cust.name || null, balanceMin: cust.hours_balance_min || 0 });
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(200).json({ found: false, signInRequired: true });
+  res.status(200).json({ found: true, name: me.name || null, balanceMin: me.hours_balance_min || 0 });
 }
 
 // POST ?action=book — book a slot by paying with prepaid hours (validates the slot, deducts, confirms).
 async function book(req, res) {
-  const { dateISO, bayId, startMin, endMin, name, email, phone } = req.body || {};
-  if (!validPhone(phone) && !validEmail(email)) return res.status(400).json({ ok: false, error: 'Enter your phone number to use your hours.' });
+  const { dateISO, bayId, startMin, endMin, name, note, smsConsent } = req.body || {};
+  // Spending a balance requires proving whose it is (see balance() above).
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to My Account to pay with your prepaid hours.', code: 'sign_in' });
+  const email = me.email, phone = me.phone;
 
   const settings = normalizeSettings(await getSettings());
+  const tooFar = bookingWindowError({ settings, dateISO, league: await leaguePlayerForRequest(req) });
+  if (tooFar) return res.status(400).json({ ok: false, error: tooFar, code: 'booking_window' });
   const overrides = await getOverridesForDate(dateISO);
   const fx = overrideEffects(overrides, settings, dateISO);
   try {
@@ -120,12 +127,22 @@ async function book(req, res) {
   if (clash) return res.status(409).json({ ok: false, error: 'That time was just taken — pick another slot.' });
 
   const stg = normalizeSettings(await getSettings());
-  const r = await bookWithHours({ dateISO, bayId, startMin, endMin, name, email, phone, statusLabel: stg.onlineStatusLabel || 'Booked' });
+  const r = await bookWithHours({ dateISO, bayId, startMin, endMin, name: name || me.name, email, phone, customerNote: note, statusLabel: stg.onlineStatusLabel || 'Booked' });
   if (r.error === 'no_account') return res.status(400).json({ ok: false, error: 'no_account' });
   if (r.error === 'insufficient') return res.status(400).json({ ok: false, error: 'insufficient', balanceMin: r.balanceMin, neededMin: r.neededMin });
   if (r.error === 'taken') return res.status(409).json({ ok: false, error: 'That time was just taken — pick another slot.' });
   if (r.error) return res.status(500).json({ ok: false, error: r.error });
-  // Time played on an hours-paid session still earns loyalty points (once per booking).
-  await awardBookingPoints({ customerId: r.customerId, bookingId: r.bookingId, points: pointsEarned(stg, Number(endMin) - Number(startMin)) });
+
+  // The same checkout form, the same tick box, the same record (migration 0019): paying with
+  // prepaid hours instead of a card changes nothing about consent. Only a request that actually
+  // carried the box writes anything — an untouched `false` is recorded as a no, and an absent
+  // field leaves whatever is on file exactly as it is. Never fails the booking.
+  if (typeof smsConsent === 'boolean') {
+    try {
+      await recordConsent({ name: name || me.name, email, phone, smsConsent, ip: clientIp(req), source: 'checkout' });
+    } catch (err) {
+      console.error('hours book: consent not recorded —', err && err.message ? err.message : err);
+    }
+  }
   res.status(200).json({ ok: true, balanceMin: r.balanceMin });
 }

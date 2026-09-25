@@ -1,5 +1,6 @@
-import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, pointsRedemption, quoteBooking, winnipegTodayISO } from '../lib/booking.js';
-import { getSettings, getBookingsForDate, getOverridesForDate, createHold, customerHoursByContact, membershipById } from '../lib/db.js';
+import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, winnipegTodayISO, bookingWindowError } from '../lib/booking.js';
+import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
+         checkoutStripeCustomer, paymentElementSession } from '../lib/db.js';
 
 // Creates a PaymentIntent for a booking. Price + availability are validated server-side.
 export default async function handler(req, res) {
@@ -10,9 +11,14 @@ export default async function handler(req, res) {
 
   try {
     const stripe = stripeClient(process.env);
-    const { dateISO, bayId, startMin, endMin, party, hold, applyPoints, email, phone } = req.body || {};
+    const { dateISO, bayId, startMin, endMin, party, hold, email, phone,
+            promoCode, giftCode, promoReservationId } = req.body || {};
 
     const settings = normalizeSettings(await getSettings());
+    // How far ahead this customer may book: further for league players (migration 0028).
+    const leaguePlayer = await leaguePlayerForRequest(req);
+    const tooFar = bookingWindowError({ settings, dateISO, league: leaguePlayer });
+    if (tooFar) return res.status(400).json({ error: tooFar, code: 'booking_window' });
     const overrides = await getOverridesForDate(dateISO);
     // Resolve schedule overrides up front: dateHours lets priceForBooking accept widened
     // special hours; overrideConflicts rejects blocked/closed slots.
@@ -40,24 +46,37 @@ export default async function handler(req, res) {
       expiresAt = h.expiresAt;
     }
 
-    // Loyalty points as dollars off: discount the charge now; the points are actually deducted
-    // when the payment succeeds (confirm-booking/webhook, idempotent by PaymentIntent id).
-    // partialOnly: on this card path a charge must remain — a balance big enough to fully cover
-    // still gets the max discount (50¢ minimum charge) instead of being silently ignored.
-    // Look the customer up whether or not they are spending points — an active membership
-    // discounts the session on its own. Same quoteBooking call as server.js, deliberately.
-    const cust = await customerHoursByContact({ email, phone });
-    const plan = cust && cust.membership_id ? await membershipById(cust.membership_id) : null;
+    // Promo code and gift card. The browser sends these; until now this handler destructured
+    // neither, so quoteBooking() never saw them and the card was charged the undiscounted price
+    // while /api/promos and /api/gift-cards quoted a lower one. Three answers, one of them the
+    // one that actually took the money.
+    //
+    // Both are looked up server-side from the code alone — the browser sends a string, never an
+    // amount. An unknown or exhausted code is simply not applied; it is not an error, because the
+    // customer must still be able to pay. What was applied comes back in the response and in the
+    // PaymentIntent metadata, so the client shows the same figure the card is charged and the
+    // webhook can settle it (see api/webhook.js fulfil()).
+    const promo = promoCode ? await promoByCode(String(promoCode)) : null;
+    const giftCard = giftCode ? await giftCardByCode(String(giftCode)) : null;
+    const giftBalanceCents = giftCard ? await giftCardAvailable(giftCard.id) : 0;
+
     const q = quoteBooking({
-      settings, amountCents: amount, plan,
-      membershipExpires: cust && cust.membership_expires, todayISO: winnipegTodayISO(),
-      pointsBalance: (cust && cust.points_balance) || 0, applyPoints: !!applyPoints,
+      settings, amountCents: amount, plan: null,   // memberships retired (0028): leagues carry no discount
+      todayISO: winnipegTodayISO(),                // loyalty points retired: no stage for them here
+      promo,
+      promoContext: {
+        dateISO, bayId, startMin: Number(startMin), endMin: Number(endMin),
+        leaguePlayer,
+      },
+      giftBalanceCents, applyGift: !!giftCard,
     });
     const charge = q.charge;
-    const pointsUsed = q.pointsUsed;
-    const pointsCustomerId = (cust && q.pointsUsed > 0) ? cust.id : '';
+
+    // A signed-in customer's saved cards and wallets (migration 0029). Null for everyone else.
+    const stripeCustomerId = await checkoutStripeCustomer(stripe, req);
 
     const pi = await stripe.paymentIntents.create({
+      ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
       amount: charge,
       currency: settings.currency,
       automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
@@ -70,15 +89,26 @@ export default async function handler(req, res) {
         endMin: String(endMin),
         players: String(players),
         summary: summaryFor({ dateISO, startMin, endMin, players }),
-        pointsUsed: String(pointsUsed),
-        pointsCustomerId,
+        promoId: (q.promoDiscountCents > 0 && promo) ? String(promo.id) : '',
+        promoReservationId: (q.promoDiscountCents > 0 && promoReservationId) ? String(promoReservationId) : '',
+        promoDiscountCents: String(q.promoDiscountCents || 0),
+        giftCardId: (q.giftUsedCents > 0 && giftCard) ? String(giftCard.id) : '',
+        giftUsedCents: String(q.giftUsedCents || 0),
         memberDiscountPct: String(q.memberPct),
         memberDiscountCents: String(q.memberDiscountCents),
       },
     });
 
-    res.status(200).json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount, pointsUsed,
-      memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents, expiresAt });
+    let customerSessionClientSecret = null;
+    if (stripeCustomerId) {
+      try { customerSessionClientSecret = await paymentElementSession(stripe, stripeCustomerId); }
+      catch (err) { console.warn('create-payment-intent: saved cards unavailable —', err.message); }
+    }
+
+    res.status(200).json({ clientSecret: pi.client_secret, customerSessionClientSecret, amount: charge, fullAmount: amount,
+      memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
+      promoDiscountCents: q.promoDiscountCents || 0, promoBlocked: q.promoBlocked || null,
+      giftUsedCents: q.giftUsedCents || 0, expiresAt });
   } catch (err) {
     console.error('create-payment-intent:', err.message);
     res.status(400).json({ error: err.message });
