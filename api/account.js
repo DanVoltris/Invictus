@@ -26,7 +26,7 @@
 //   somebody holding the phone can reach.
 import crypto from 'node:crypto';
 import { getSettings, admin, customerHoursByContact, normPhone, saveBookingFeedback } from '../lib/db.js';
-import { enqueue } from '../lib/notify.js';
+import { enqueue, sendOne, venueIdentity } from '../lib/notify.js';
 
 const CODE_TTL_MIN = 10;        // a code is good for ten minutes
 const TOKEN_TTL_MIN = 20;       // the proof it produces, twenty
@@ -121,15 +121,24 @@ async function start(req, res, db) {
   const { error } = await db.from('phone_codes').upsert(row, { onConflict: 'phone' });
   if (error) { console.error('phone_codes upsert:', error.message); return json(res, 500, { error: 'Could not send a code. Please try again.' }); }
 
-  // Delivery is best-effort and deliberately NOT awaited into the response shape: whether the SMS
-  // provider is configured must not change what an attacker can observe. With no Twilio
-  // credentials lib/notify.js logs the code and no-ops, which is how this is tested locally.
+  // Delivery is best-effort and deliberately NOT part of the response shape: whether the SMS
+  // provider is configured, or the send worked, must not change what an attacker can observe. With
+  // no Twilio credentials lib/notify.js logs the code and no-ops, which is how this is tested locally.
+  //
+  // SENT NOW, not left for the outbox drain. Queued alone, a code only went out when the scheduled
+  // outbox job ran — which was never set up on the live site, so every code sat 'queued' and nobody
+  // could sign up. The row is still written first, so a failed send is retried by the drain if it
+  // is ever scheduled (same pattern as booking receipts and league invites in lib/notify.js).
   const settings = await getSettings();
-  await enqueue({
+  const queued = await enqueue({
     channel: 'sms', recipient: phone, template: 'account.code',
     payload: { code, minutes: CODE_TTL_MIN, venue: (settings && settings.venue_name) || 'Invictus Golf' },
     dedupeKey: `account_code:${phone}:${row.last_sent}`,
   });
+  if (queued && queued.row) {
+    try { await sendOne(queued.row, { venue: venueIdentity(settings) }); }
+    catch (err) { console.error('account code send:', err && err.message ? err.message : err); }
+  }
 
   // Same answer for every number on earth.
   return json(res, 200, { ok: true, sent: true, expiresInMinutes: CODE_TTL_MIN });

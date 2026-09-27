@@ -412,14 +412,15 @@ async function viewProfile(justInherited){
   if(!sb){ viewLanding('Accounts are unavailable right now.'); return; }
   const { data:{ session } } = await sb.auth.getSession();
   if(!session){ viewLanding(); return; }
-  // Signed in, and another page is waiting for them: go back to it rather than showing the account.
-  const nxt = nextUrl();
-  if(nxt){ location.replace(nxt); return; }
+  if(await isStaffLogin(sb)){ await refuseStaff(sb); return; }
 
-  // RLS decides what comes back — the page asks for "customers" and the database returns exactly
-  // the caller's own row. There is no id in this query to get wrong.
-  const { data: rows, error } = await sb.from('customers').select('*').limit(1);
-  if(error || !rows || !rows.length){
+  const mine = await myCustomerRow(sb, session);
+  const rows = mine ? [mine] : [];
+  // Signed in as a real customer, and another page is waiting for them: go back to it rather than
+  // showing the account. Without a customer record, going back would only send them here again.
+  const nxt = nextUrl();
+  if(nxt && mine){ location.replace(nxt); return; }
+  if(!rows.length){
     render(`<div class="card"><h1>Almost there</h1>
       <div class="sub">Your login works, but it is not linked to a customer record yet. Call the shop and we'll sort it out.</div>
       <button class="btn btn-ghost" id="o-out">Sign out</button></div>`);
@@ -909,6 +910,30 @@ async function devProfile(){
   return true;
 }
 
+/* ---------- staff logins are not customer accounts ----------
+   Staff sign in to the manager portal with the same kind of login (Supabase email + password), so
+   the password box here would accept one. It must not: a staff login has no customer record, other
+   pages (Leagues) would bounce it back here for ever, and staff can read every customer, so "my
+   customer record" could even come back as somebody else's. staff_role() is the database's own
+   answer (migration 0024) — null for anyone who is not active staff.
+
+   The sign-out is scope 'local': it forgets the login in THIS page's storage only. A global
+   sign-out would also end the same person's manager-portal session. */
+const STAFF_LOGIN_MSG = 'That is a staff login — it signs in to the manager portal, not My Account. To use My Account, create a customer account with a different email address.';
+async function isStaffLogin(sb){
+  try{ const { data, error } = await sb.rpc('staff_role'); return !error && !!data; }catch(e){ return false; }
+}
+async function refuseStaff(sb){
+  try{ await sb.auth.signOut({ scope:'local' }); }catch(e){}
+  viewLanding(STAFF_LOGIN_MSG);
+}
+// This login's own customer record, or null. Asked for by user_id — never "the first row RLS lets
+// me see", which for anybody who can see more than their own row is the wrong answer.
+async function myCustomerRow(sb, session){
+  const { data, error } = await sb.from('customers').select('*').eq('user_id', session.user.id).limit(1);
+  return (!error && data && data[0]) || null;
+}
+
 async function signOut(){
   const sb = await supa();
   if(sb) await sb.auth.signOut();
@@ -923,9 +948,10 @@ async function signOut(){
   if(sb) ({ data:{ session } } = await sb.auth.getSession());
   // Sent here by another page (a league invite, say) purely to sign in: if they already are,
   // hand them straight back rather than showing them an account they did not ask for.
+  if(session && await isStaffLogin(sb)){ await refuseStaff(sb); return; }
   const nxt = nextUrl();
   if(nxt){
-    if(session){ location.replace(nxt); return; }
+    if(session && await myCustomerRow(sb, session)){ location.replace(nxt); return; }
     // On localhost the no-login dev account counts as being signed in.
     if(['localhost','127.0.0.1','[::1]'].includes(location.hostname)){
       try{ const r = await fetch('/api/dev/my-account'); if(r.ok){ location.replace(nxt); return; } }catch(e){}

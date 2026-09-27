@@ -4,6 +4,10 @@
     {
       "path": "/api/booking-series?action=place-holds",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/waitlist?action=outbox",
+      "schedule": "5 15 * * *"
     }
   ],
   "rewrites": [

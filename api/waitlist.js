@@ -88,6 +88,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     if (action === 'offer') return offer(req, res);
     if (action === 'entry') return entry(req, res);
+    if (action === 'outbox') return outbox(req, res);   // the daily Vercel cron is a GET
     return res.status(400).json({ ok: false, error: 'Unknown action' });
   }
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
@@ -404,7 +405,10 @@ async function sweep(req, res) {
 // a slow run and the next tick cannot overlap inside the same process, which is the overlap a
 // one-minute cron actually produces. Concurrent calls get { busy: true } and change nothing.
 //
-// SCHEDULING (pg_cron + pg_net, same shape as waitlist_schedule_sweep in migration 0022 §10).
+// SCHEDULING. Every message is already sent the moment it is created (lib/notify.js), so this is
+// only the catch-up: retries of a send that failed, and gift cards dated for a later day. Vercel
+// Cron runs it once a day (vercel.json, 10:05 Winnipeg), which is all either needs. For faster
+// retries it can also be driven by pg_cron + pg_net (same shape as migration 0022 §10):
 // Run once in Supabase -> SQL Editor, with your URL and the value of OUTBOX_SWEEP_SECRET:
 //
 //   select cron.schedule('outbox-sweep', '*/2 * * * *', $$
@@ -432,6 +436,11 @@ async function outbox(req, res) {
   const sent = String((req.headers && (req.headers['x-outbox-secret'] || req.headers['x-cron-secret'])) || '');
   let allowed = false;
   if (secret && sent && sent.length === secret.length && timingSafeEqual(sent, secret)) allowed = true;
+  // Vercel Cron (vercel.json) sends `Authorization: Bearer <CRON_SECRET>`. Checked before the staff
+  // login below, which would read that header as a Supabase token.
+  const cron = process.env.CRON_SECRET ? `Bearer ${process.env.CRON_SECRET}` : '';
+  const auth0 = String((req.headers && req.headers.authorization) || '');
+  if (!allowed && cron && auth0.length === cron.length && timingSafeEqual(auth0, cron)) allowed = true;
   if (!allowed) {
     // Staff with booking.write may also flush the queue by hand ("send the stuck messages now").
     const auth = (req.headers && req.headers.authorization) || '';
