@@ -13,6 +13,9 @@ import '../demo/assets/leagues.js';   // side effect: globalThis.InvictusLeagues
 //   POST ?action=league-round     → a team's free weekly league round (migration 0031)
 // The old GET ?phone=… account summary is gone: it handed out a customer's name, balances and
 // bookings to anyone who typed their number. My Account (migration 0025) needs a sign-in instead.
+// Payment states in which the customer has not been charged a cent — cancelling releases, never refunds.
+const NEVER_CHARGED = ['held', 'card_saved', 'hold_failed'];
+
 export default async function handler(req, res) {
   const action = (req.query && req.query.action) || '';
   if (req.method === 'POST' && action === 'league-round') return leagueRound(req, res);
@@ -57,7 +60,8 @@ async function lookup(req, res) {
       paymentState: data.payment_state || null,
       authorizedCents: Math.max(0, Number(data.authorized_cents) || 0),
       holdExpiresAt: data.hold_expires_at || null,
-      cancelEffect: data.payment_state === 'held' ? 'release' : 'refund',
+      // A saved card (migration 0035) was never charged either, so it releases too.
+      cancelEffect: NEVER_CHARGED.includes(data.payment_state) ? 'release' : 'refund',
     },
   });
 }
@@ -132,7 +136,9 @@ async function cancel(req, res) {
   //                         hunting their statement for money that never left it.
   //   anything else         the card was charged in full at booking. Cancelling REFUNDS it, through
   //                         the path in lib/refunds.js, exactly as before.
-  if (data.payment_state === 'held') {
+  //   'card_saved' / 'hold_failed'  a far-ahead booking whose card was only SAVED (migration 0035).
+  //                         Never charged either: releasing just forgets the card.
+  if (NEVER_CHARGED.includes(data.payment_state)) {
     return res.status(200).json({ ok: true, release: await releaseOnSelfCancel(id) });
   }
   res.status(200).json({ ok: true, refund: await refundOnSelfCancel(id) });

@@ -1,10 +1,10 @@
 import { stripeStatus, stripeClient, normalizeSettings } from '../lib/booking.js';
 import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingByPaymentIntent, setPaymentState,
          redeemGiftCard, redeemPromo, confirmLeagueCheckout, confirmLeagueTeamCheckout,
-  recordStripeEvent, forgetStripeEvent } from '../lib/db.js';
+  recordStripeEvent, forgetStripeEvent, bookingForHold, bookingExistsForSetupIntent, rememberStripeCustomer } from '../lib/db.js';
 import { notifyBookingConfirmed } from '../lib/notify.js';
 import { applyChargeRefunded } from '../lib/refunds.js';
-import { paymentPatchFor, releaseUnbookedHold } from '../lib/holds.js';
+import { paymentPatchFor, releaseUnbookedHold, savedCardPatchFor, forgetSavedCard } from '../lib/holds.js';
 
 function readRaw(req) {
   return new Promise((resolve, reject) => {
@@ -150,6 +150,103 @@ async function fulfil(event, stripe) {
   if (event.type === 'payment_intent.amount_capturable_updated' || event.type === 'payment_intent.succeeded') {
     await recordPaidOrHeldBooking(event, stripe);
   }
+
+  // A far-ahead booking whose card was SAVED at checkout (migration 0035) — the backup for the
+  // client-side confirm, exactly as the two events above are for a hold or a charge.
+  if (event.type === 'setup_intent.succeeded') {
+    await recordSavedCardBooking(event, stripe);
+  }
+}
+
+// The hold the server placed on a saved card (lib/holds.js placeDeferredHold), or its capture. It
+// belongs to a booking that ALREADY EXISTS — deferredBookingId says which — so this only ever
+// updates that row. It never writes a booking: the metadata deliberately carries no dateISO/bayId.
+async function settleDeferredPayment(pi, stripe) {
+  const booking = await bookingForHold(pi.metadata.deferredBookingId);
+  if (!booking) return;
+  const state = booking.payment_state;
+  if (pi.status === 'requires_capture' && (state === 'card_saved' || state === 'hold_failed')) {
+    // placeDeferredHold normally writes this itself; this is for when its write did not land.
+    let charge = null;
+    try { if (pi.latest_charge) charge = await stripe.charges.retrieve(pi.latest_charge); } catch (_) { /* best-effort */ }
+    const money = paymentPatchFor({ pi, charge });
+    await setPaymentState({ bookingId: booking.id, state: 'held', expect: state, patch: {
+      stripe_payment_intent: pi.id, authorized_cents: money.authorized_cents, hold_error: null,
+      ...(money.hold_expires_at ? { hold_expires_at: money.hold_expires_at } : {}),
+    } });
+    console.log(`✅ Deferred hold recorded (from Stripe) — booking ${booking.id}`);
+    return;
+  }
+  if (pi.status === 'succeeded' && state !== 'paid' && state !== 'refunded') {
+    const received = Math.max(0, Number(pi.amount_received) || Number(pi.amount) || 0);
+    await setPaymentState({ bookingId: booking.id, state: 'paid', expect: state, patch: {
+      stripe_payment_intent: pi.id, amount_cents: received, captured_at: new Date().toISOString(),
+    } });
+    await forgetSavedCard(stripe, booking);
+    console.log(`✅ Deferred hold captured (from Stripe) — booking ${booking.id}, ${received} cents`);
+  }
+}
+
+// setup_intent.succeeded: the card was saved for a far-ahead booking. The mirror of
+// recordPaidOrHeldBooking below for the saved-card path — same row, same customer, same gift-card
+// and promo settlement, same receipt — with savedCardPatchFor() in place of paymentPatchFor().
+async function recordSavedCardBooking(event, stripe) {
+  const si = event.data.object;
+  const md = si.metadata || {};
+  if (!md.dateISO || !md.bayId || md.paymentMode !== 'save') return;
+  if (await bookingExistsForSetupIntent(si.id)) return;
+
+  let name = null, email = null, phone = null;
+  try {
+    const pmId = typeof si.payment_method === 'string' ? si.payment_method : (si.payment_method && si.payment_method.id);
+    if (pmId) {
+      const bd = ((await stripe.paymentMethods.retrieve(pmId)) || {}).billing_details || {};
+      name = bd.name || null; email = bd.email || null; phone = bd.phone || null;
+    }
+  } catch (_) { /* best-effort */ }
+
+  const saved = savedCardPatchFor({ si });
+  const settings = normalizeSettings(await getSettings());
+  const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
+  const patch = {
+    status_label: settings.onlineStatusLabel || null,
+    customer_name: name, customer_email: email, customer_phone: phone,
+    source: 'online', ...saved,
+  };
+  const flip = await confirmHold({ ...slot, patch });
+  let error = flip.error || null;
+  let bookingId = flip.id;
+  if (!flip.updated) {
+    const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
+    error = ins.error;
+    bookingId = ins.id;
+    // Slot taken: nothing was charged, so only the card needs letting go of.
+    if (ins.conflict && !(await bookingExistsForSetupIntent(si.id))) {
+      await forgetSavedCard(stripe, { id: 'unbooked', stripe_payment_method: saved.stripe_payment_method });
+    }
+  }
+  console.log(error
+    ? `⚠ Booking save failed (${md.summary}): ${error}`
+    : `✅ Booking CARD SAVED & saved — ${md.bayName} · ${md.summary}`);
+  if (error) return;
+
+  const up = await upsertCustomer({ name, email, phone });
+  await rememberStripeCustomer({ email, phone, stripeCustomerId: saved.stripe_customer });
+  // Settled now, not when the hold lands days later — the same reasoning as a hold's, below.
+  const giftUsed = Number(md.giftUsedCents) || 0;
+  if (giftUsed > 0 && md.giftCardId) {
+    const r = await redeemGiftCard({ cardId: md.giftCardId, ref: si.id, chargedCents: giftUsed, bookingId, note: `Booking ${slot.dateISO}` });
+    if (r && r.error) console.error(`⚠ gift card ${md.giftCardId} not settled for ${si.id}: ${r.error}`);
+  }
+  if (md.promoReservationId) {
+    const r = await redeemPromo({ reservationId: md.promoReservationId, bookingId, ref: si.id });
+    if (r && r.error) console.error(`⚠ promo reservation ${md.promoReservationId} not settled for ${si.id}: ${r.error}`);
+  }
+  await notifyBookingConfirmed({
+    bookingId, dateISO: slot.dateISO, bayId: slot.bayId, bayName: md.bayName,
+    startMin: slot.startMin, endMin: slot.endMin, players: Number(md.players) || null,
+    amountCents: saved.deferred_cents, paymentState: 'card_saved', name, email, phone, customerId: up.id || null,
+  });
 }
 
 // One PaymentIntent reaching a state that means something, written down. Shared by both events
@@ -158,6 +255,7 @@ async function fulfil(event, stripe) {
 async function recordPaidOrHeldBooking(event, stripe) {
   const pi = event.data.object;
   const md = pi.metadata || {};
+  if (md.deferredBookingId) return settleDeferredPayment(pi, stripe);
   if (!md.dateISO || !md.bayId) return;
   const held = pi.status === 'requires_capture' || event.type === 'payment_intent.amount_capturable_updated';
 

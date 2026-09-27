@@ -9,6 +9,7 @@ import {
   promoRateOk, promoLogAttempt, customerKeyFor,
   customerHoursByContact, isLeaguePlayer
 } from '../lib/db.js';
+import { retrieveCheckoutIntent } from '../lib/holds.js';
 
 // Promo codes at checkout. Dispatch on ?action= — validate | reserve | release | redeem.
 //
@@ -232,7 +233,7 @@ async function redeem(req, res) {
 
   const stripe = stripeClient(process.env);
   let pi;
-  try { pi = await stripe.paymentIntents.retrieve(b.paymentIntentId); }
+  try { pi = await retrieveCheckoutIntent(stripe, b.paymentIntentId); }   // pi_… or a saved card's seti_…
   catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
   if (pi.status !== 'succeeded') return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
 

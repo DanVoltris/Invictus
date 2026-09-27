@@ -1,8 +1,9 @@
 import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, taxPctOf, winnipegTodayISO, bookingWindowError, holdPlan } from '../lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
          confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
-         releaseHold } from '../lib/db.js';
-import { paymentPatchFor, releaseUnbookedHold } from '../lib/holds.js';
+         releaseHold, deferredHoldsReady, bookingExistsForSetupIntent, stripeCustomerForContact,
+         rememberStripeCustomer } from '../lib/db.js';
+import { paymentPatchFor, releaseUnbookedHold, savedCardPatchFor, forgetSavedCard } from '../lib/holds.js';
 
 // One customer checkout, start to finish. Dispatch on ?action=, the same shape as
 // api/gift-cards.js, api/leagues.js and api/waitlist.js:
@@ -126,59 +127,93 @@ export async function createPaymentIntent(req, res) {
     // Hold" while every booking was captured on the spot. holdPlan() is what makes it true, and it
     // is a DATE question, not a preference: a card authorisation lasts about seven days (Stripe's
     // documented windows are in lib/booking.js), the booking window is 10 days — 60 for league
-    // players — so a session further ahead than settings.pay.hold.cutoffDays cannot be held and is
-    // charged in full exactly as it is today. The answer goes back to the caller below so the
-    // customer is told which one before they confirm, not after their card is taken.
-    const plan = holdPlan({ settings, dateISO, startMin });
+    // players — so a session further ahead than settings.pay.hold.cutoffDays cannot be held at
+    // checkout. Since migration 0035 its card is SAVED instead ('save'): nothing is charged, and the
+    // server holds it leadDays before the session. Without 0035 it is charged in full, as before.
+    // The answer goes back to the caller below so the customer is told which one before they
+    // confirm, not after their card is taken.
+    let plan = holdPlan({ settings, dateISO, startMin,
+      deferAvailable: charge > 0 && await deferredHoldsReady() });
 
-    const pi = await stripe.paymentIntents.create({
-      amount: charge,
-      currency: settings.currency,
-      automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
-      // Only sent for a hold. Stripe's default is already 'automatic', so the charge-now path is
-      // byte for byte the request it has always been.
-      ...(plan.mode === 'hold' ? { capture_method: 'manual' } : {}),
-      description: `${bayName(settings, bayId)} — simulator session`,
-      metadata: {
-        // Which way this payment was set up, carried on the PaymentIntent itself so the webhook and
-        // the client-side confirm cannot disagree about it — neither of them re-runs the decision.
-        paymentMode: plan.mode,
-        holdExpiresAt: plan.holdExpiresAt || '',
-        bayId,
-        bayName: bayName(settings, bayId),
-        dateISO,
-        startMin: String(startMin),
-        endMin: String(endMin),
-        players: String(players),
-        summary: summaryFor({ dateISO, startMin, endMin, players }),
-        promoId: (q.promoDiscountCents > 0 && promo) ? String(promo.id) : '',
-        promoReservationId: (q.promoDiscountCents > 0 && promoReservationId) ? String(promoReservationId) : '',
-        promoDiscountCents: String(q.promoDiscountCents || 0),
-        giftCardId: (q.giftUsedCents > 0 && giftCard) ? String(giftCard.id) : '',
-        giftUsedCents: String(q.giftUsedCents || 0),
-        memberDiscountPct: String(q.memberPct),
-        memberDiscountCents: String(q.memberDiscountCents),
-        subtotalCents: String(q.subtotalCents),
-        taxPct: String(q.taxPct),
-        taxCents: String(q.taxCents),
-      },
+    const description = `${bayName(settings, bayId)} — simulator session`;
+    const metadataFor = (p) => ({
+      // Which way this payment was set up, carried on the PaymentIntent itself so the webhook and
+      // the client-side confirm cannot disagree about it — neither of them re-runs the decision.
+      paymentMode: p.mode,
+      holdExpiresAt: p.holdExpiresAt || '',
+      bayId,
+      bayName: bayName(settings, bayId),
+      dateISO,
+      startMin: String(startMin),
+      endMin: String(endMin),
+      players: String(players),
+      summary: summaryFor({ dateISO, startMin, endMin, players }),
+      promoId: (q.promoDiscountCents > 0 && promo) ? String(promo.id) : '',
+      promoReservationId: (q.promoDiscountCents > 0 && promoReservationId) ? String(promoReservationId) : '',
+      promoDiscountCents: String(q.promoDiscountCents || 0),
+      giftCardId: (q.giftUsedCents > 0 && giftCard) ? String(giftCard.id) : '',
+      giftUsedCents: String(q.giftUsedCents || 0),
+      memberDiscountPct: String(q.memberPct),
+      memberDiscountCents: String(q.memberDiscountCents),
+      subtotalCents: String(q.subtotalCents),
+      taxPct: String(q.taxPct),
+      taxCents: String(q.taxCents),
     });
 
-    res.status(200).json({ clientSecret: pi.client_secret, amount: charge, fullAmount: amount,
+    // SAVE: a SetupIntent, not a PaymentIntent — the card is checked by the bank and saved, and not
+    // a cent is authorised. chargeCents is what will be held later, written here so nothing
+    // downstream takes an amount from the browser. Cards only (Apple Pay and Google Pay are cards):
+    // the later hold is a manual-capture card payment, and a saved method that cannot do that would
+    // only be discovered two days before the session.
+    //
+    // A RESTRICTED Stripe key without Customers / SetupIntents / PaymentMethods write cannot save a
+    // card at all. That is a configuration gap, not the customer's problem: charge in full as before
+    // and say loudly in the log what to fix, rather than refusing every far-ahead booking.
+    let intent = null;
+    if (plan.mode === 'save') {
+      try {
+        intent = await createSetupIntent(stripe, { email, phone, description,
+          metadata: { ...metadataFor(plan), chargeCents: String(charge), holdDueAt: plan.holdDueAt } });
+      } catch (err) {
+        if (!err || err.type !== 'StripePermissionError') throw err;
+        console.error(`⚠ Saved-card checkout is off — the Stripe key may not save cards (${err.message}). `
+          + 'Give the restricted key write access to Customers, SetupIntents and PaymentMethods. '
+          + 'Far-ahead bookings are charged in full until then.');
+        plan = holdPlan({ settings, dateISO, startMin, deferAvailable: false });
+      }
+    }
+    if (!intent) {
+      intent = await stripe.paymentIntents.create({
+        amount: charge,
+        currency: settings.currency,
+        automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
+        // Only sent for a hold. Stripe's default is already 'automatic', so the charge-now path is
+        // byte for byte the request it has always been.
+        ...(plan.mode === 'hold' ? { capture_method: 'manual' } : {}),
+        description,
+        metadata: metadataFor(plan),
+      });
+    }
+
+    res.status(200).json({ clientSecret: intent.client_secret, amount: charge, fullAmount: amount,
       memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
       promoDiscountCents: q.promoDiscountCents || 0, promoBlocked: q.promoBlocked || null,
       giftUsedCents: q.giftUsedCents || 0, expiresAt,
       subtotalCents: q.subtotalCents, taxPct: q.taxPct, taxCents: q.taxCents, totalCents: q.totalCents,
-      // WHAT THE CUSTOMER MUST BE TOLD BEFORE THEY CONFIRM. `mode` is 'hold' or 'charge';
+      // WHAT THE CUSTOMER MUST BE TOLD BEFORE THEY CONFIRM. `mode` is 'hold', 'save' or 'charge';
       // `message` is a sentence ready to put on the screen; `captureBy` is when a hold dies if
-      // nobody captures it. A checkout page that shows nothing from here is telling a customer
-      // their card was charged when it was only held, or the reverse.
+      // nobody captures it, and `holdDueAt` when a saved card will be held. A checkout page that
+      // shows nothing from here is telling a customer their card was charged when it was only
+      // held, or the reverse. For 'save' the clientSecret is a SetupIntent's: confirmSetup, not
+      // confirmPayment.
       payment: {
         mode: plan.mode,
         captureMethod: plan.captureMethod,
         amountCents: charge,
         holdExpiresAt: plan.holdExpiresAt,
         captureBy: plan.captureBy,
+        holdDueAt: plan.holdDueAt,
+        leadDays: plan.leadDays,
         cutoffDays: plan.cutoffDays,
         message: plan.message,
       },
@@ -188,6 +223,28 @@ export async function createPaymentIntent(req, res) {
     console.error('create-payment-intent:', err.message);
     res.status(400).json({ error: err.message });
   }
+}
+
+// The saved-card half of checkout. The card has to belong to a Stripe Customer to be charged later
+// with nobody at the keyboard, so one is needed — the one already linked to this contact when there
+// is one, so a regular does not gain a new Customer in the Stripe dashboard for every booking.
+// A linked Customer that was deleted in Stripe is replaced rather than failing the checkout.
+async function createSetupIntent(stripe, { email, phone, description, metadata }) {
+  const make = (customer) => stripe.setupIntents.create({
+    customer, usage: 'off_session', payment_method_types: ['card'], description, metadata,
+  });
+  const fresh = async () => (await stripe.customers.create({
+    email: String(email || '').trim() || undefined, phone: String(phone || '').trim() || undefined,
+    metadata: { source: 'invictus-booking' },
+  })).id;
+  const linked = await stripeCustomerForContact({ email, phone });
+  if (linked) {
+    try { return await make(linked); }
+    catch (err) {
+      if (!/No such customer/i.test(String(err && err.message))) throw err;
+    }
+  }
+  return make(await fresh());
 }
 
 // ---- ?action=confirm-booking (was api/confirm-booking.js) -------------------------------
@@ -207,6 +264,9 @@ export async function confirmBooking(req, res) {
   if (!paymentIntentId) return res.status(400).json({ ok: false, error: 'Missing payment reference.' });
 
   const stripe = stripeClient(process.env);
+  // A far-ahead booking finished with its card SAVED, not paid: a SetupIntent (seti_…). Same job,
+  // different Stripe object — see confirmSavedCard below.
+  if (String(paymentIntentId).startsWith('seti_')) return confirmSavedCard(req, res, stripe);
   let pi;
   try { pi = await stripe.paymentIntents.retrieve(paymentIntentId); }
   catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
@@ -287,6 +347,72 @@ export async function confirmBooking(req, res) {
     paymentState: held ? 'held' : 'paid',
     holdExpiresAt: held ? (patch.hold_expires_at || null) : null,
     amountCents: held ? (patch.authorized_cents || 0) : (patch.amount_cents || 0),
+  });
+}
+
+// confirm-booking for a SAVED card (migration 0035). The SetupIntent is re-read from Stripe, so it
+// cannot be spoofed; the slot, the amount and when the hold is due all come from its metadata,
+// which api/checkout.js wrote. The booking is 'card_saved' with amount_cents 0 — nothing has been
+// charged or even authorised, and lib/holds.js placeDueHolds() holds the card leadDays out.
+async function confirmSavedCard(req, res, stripe) {
+  const { paymentIntentId: siId, name, email, phone, sms, smsConsent, note } = req.body || {};
+  let si;
+  try { si = await stripe.setupIntents.retrieve(siId); }
+  catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
+  if (si.status !== 'succeeded') return res.status(400).json({ ok: false, error: 'Your card has not been saved yet.' });
+  const md = si.metadata || {};
+  if (!md.dateISO || !md.bayId) return res.status(400).json({ ok: false, error: 'Booking details missing on the payment.' });
+
+  if (await bookingExistsForSetupIntent(si.id)) {
+    await upsertCustomer({ name, email, phone, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+    await saveSmsConsent(req, { name, email, phone, smsConsent });
+    return res.status(200).json({ ok: true, already: true });
+  }
+
+  // Prefer what the customer typed; fall back to the card's billing details.
+  let n = name, e = email, p = phone;
+  try {
+    if (si.payment_method) {
+      const pm = typeof si.payment_method === 'string' ? await stripe.paymentMethods.retrieve(si.payment_method) : si.payment_method;
+      const bd = (pm && pm.billing_details) || {};
+      n = n || bd.name; e = e || bd.email; p = p || bd.phone;
+    }
+  } catch (_) { /* best-effort */ }
+
+  const settings = normalizeSettings(await getSettings());
+  const slot = { dateISO: md.dateISO, bayId: md.bayId, startMin: Number(md.startMin), endMin: Number(md.endMin) };
+  const saved = savedCardPatchFor({ si });
+  const patch = {
+    status_label: settings.onlineStatusLabel || null, customer_name: n || null, customer_email: e || null, customer_phone: p || null,
+    source: 'online', ...saved,
+  };
+
+  const flip = await confirmHold({ ...slot, patch });
+  let bookingId = flip.id;
+  if (!flip.updated) {
+    const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
+    if (ins.error) {
+      // "Taken" by the webhook's own row for this very SetupIntent is not taken at all.
+      if (ins.conflict && await bookingExistsForSetupIntent(si.id)) return res.status(200).json({ ok: true, already: true });
+      // Nothing was charged, so there is nothing to give back — only the card to forget, and only
+      // when the slot really is taken (never because the database hiccupped).
+      if (ins.conflict) await forgetSavedCard(stripe, { id: 'unbooked', stripe_payment_method: saved.stripe_payment_method });
+      return res.status(409).json({ ok: false, error: ins.conflict
+        ? 'That slot is no longer available — please pick another time. Nothing was charged to your card.'
+        : 'We could not save your booking — please contact the shop. Nothing was charged to your card.' });
+    }
+    bookingId = ins.id;
+  }
+  await setCustomerNote({ bookingId, note });
+  await upsertCustomer({ name: n, email: e, phone: p, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+  await rememberStripeCustomer({ email: e, phone: p, stripeCustomerId: saved.stripe_customer });
+  await saveSmsConsent(req, { name: n, email: e, phone: p, smsConsent });
+
+  return res.status(200).json({
+    ok: true, bookingId,
+    paymentState: 'card_saved',
+    holdDueAt: saved.hold_due_at,
+    amountCents: saved.deferred_cents,
   });
 }
 

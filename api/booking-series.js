@@ -4,12 +4,12 @@ import {
   hoursUntilBooking,
 } from '../lib/booking.js';
 import { issueRefund } from '../lib/refunds.js';
-import { captureHold, releaseHold as releaseAuthorisation, holdView } from '../lib/holds.js';
+import { captureHold, releaseHold as releaseAuthorisation, holdView, placeDueHolds } from '../lib/holds.js';
 import {
   getSettings, getOverridesForDate, staffContext,
   createSeries, seriesById, updateSeries, seriesNeedingHorizon, seriesOccurrences, seriesDatesPreview,
   groupConflicts, bookGroup, groupById, recordSeriesException, cancelGroup, moveGroup, recordRefund,
-  customerHoursByContact, heldBookings, bookingForHold,
+  customerHoursByContact, heldBookings, bookingForHold, failedHolds,
 } from '../lib/db.js';
 
 // Group + recurring bookings. Dispatch on ?action= —
@@ -64,6 +64,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     if (action === 'get') return getSeries(req, res);
     if (action === 'holds') return holds(req, res);
+    if (action === 'place-holds') return placeHolds(req, res);   // Vercel cron is a GET
     return res.status(400).json({ ok: false, error: 'Unknown action' });
   }
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
@@ -76,6 +77,7 @@ export default async function handler(req, res) {
   if (action === 'refund') return refund(req, res);
   if (action === 'capture') return capture(req, res);
   if (action === 'release') return release(req, res);
+  if (action === 'place-holds') return placeHolds(req, res);
   return res.status(400).json({ ok: false, error: 'Unknown action' });
 }
 
@@ -105,6 +107,17 @@ function cronOk(req) {
   if (!secret || !sent || sent.length !== secret.length) return false;
   let diff = 0;
   for (let i = 0; i < sent.length; i++) diff |= sent.charCodeAt(i) ^ secret.charCodeAt(i);
+  return diff === 0;
+}
+// Vercel Cron (vercel.json "crons") calls with `Authorization: Bearer <CRON_SECRET>` — the env var
+// Vercel itself reads. Checked before staff(), which would read that header as a Supabase token.
+function vercelCronOk(req) {
+  const secret = process.env.CRON_SECRET || '';
+  const sent = String((req.headers && req.headers.authorization) || '');
+  const want = `Bearer ${secret}`;
+  if (!secret || sent.length !== want.length) return false;
+  let diff = 0;
+  for (let i = 0; i < sent.length; i++) diff |= sent.charCodeAt(i) ^ want.charCodeAt(i);
   return diff === 0;
 }
 const denied = (res) => res.status(401).json({ ok: false, error: 'Sign in to the manager portal first.' });
@@ -536,7 +549,8 @@ async function cancel(req, res) {
   const released = [], heldNeedingRelease = [];
   for (const row of out.cancelled || []) {
     const booking = await bookingForHold(row.id);
-    if (!booking || booking.payment_state !== 'held') continue;
+    // A saved card with no hold yet (migration 0035) is released the same way: nothing was charged.
+    if (!booking || !['held', 'card_saved', 'hold_failed'].includes(booking.payment_state)) continue;
     if (!canRelease || !stripeOn) {
       heldNeedingRelease.push({ bookingId: row.id, bayId: row.bayId,
         authorizedCents: Math.max(0, Number(booking.authorized_cents) || 0),
@@ -780,15 +794,59 @@ async function holds(req, res) {
     // nobody pressed Capture, or they never came. Either way it is a decision somebody owes.
     noShow: hoursUntilBooking(r.booking_date, r.start_min, now) < 0,
   }));
+  // Saved cards the bank declined when the hold was placed (migration 0035). The booking stands and
+  // the customer has not been told — staff take payment at the counter, or press Charge to try the
+  // card again.
+  const f = await failedHolds();
+  const failed = (f.rows || []).map((r) => ({
+    bookingId: r.id, paymentState: r.payment_state,
+    bay: bayName(settings, r.bay_id) || r.bay_id, bayId: r.bay_id,
+    bookingDate: r.booking_date, start: fmtMin(r.start_min), end: fmtMin(r.end_min),
+    customerName: r.customer_name || null, customerEmail: r.customer_email || null, customerPhone: r.customer_phone || null,
+    amountCents: Math.max(0, Number(r.deferred_cents) || 0),
+    error: r.hold_error || null, attempts: Number(r.hold_attempts) || 0,
+  }));
   return res.status(200).json({
     ok: true,
     sortField: 'holdExpiresAt',
     holds: rows,
+    failed,
     expiringCents: rows.filter((r) => !r.expired).reduce((a, r) => a + r.authorizedCents, 0),
     expiredCents: rows.filter((r) => r.expired).reduce((a, r) => a + r.authorizedCents, 0),
     cutoffDays: settings.hold.cutoffDays,
     authWindowDays: settings.hold.authWindowDays,
   });
+}
+
+// ----- place-holds: put the hold on saved cards that are due (migration 0035) --------------------
+//
+//   GET|POST /api/booking-series?action=place-holds
+//
+// A far-ahead booking is made with the card SAVED and nothing charged. settings.pay.hold.leadDays
+// before the session this is what holds it (lib/holds.js placeDueHolds). Run once a day by Vercel
+// Cron — see "crons" in vercel.json; set CRON_SECRET in the Vercel project and Vercel sends it. Once
+// a day is enough: a hold placed anywhere from 2 days to 1 day before the session still outlives it.
+// Also accepts the scheduler secret (x-cron-secret) and, by hand, a staff login with Money.
+//
+// Safe to run twice at once: placeDueHolds is single-flight in a process, and the per-booking
+// idempotency key stops two processes holding the same card twice.
+async function placeHolds(req, res) {
+  if (!vercelCronOk(req) && !cronOk(req)) {
+    if (!(await staff(req, res, 'money.write'))) return;
+  }
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) {
+    return res.status(503).json({ ok: false, code: 'stripe_off',
+      error: 'Stripe is not configured on this deployment, so no saved card can be held. Set STRIPE_SECRET_KEY and try again.' });
+  }
+  const out = await placeDueHolds({ stripe: stripeClient(process.env) });
+  if (out.unsupported) {
+    return res.status(503).json({ ok: false, code: 'schema',
+      error: 'Saved-card holds aren’t switched on in this database yet — apply migration 0035.' });
+  }
+  if (out.error) return res.status(500).json({ ok: false, error: out.error });
+  console.log(`place-holds: ${out.busy ? 'already running' : `${out.due} due · ${out.held} held · ${out.declined} declined · ${out.retry} to retry`}`);
+  return res.status(200).json({ ok: true, ...out });
 }
 
 // ----- end ----------------------------------------------------------------------------------

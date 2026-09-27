@@ -575,6 +575,14 @@
     // Cancelled in good time: the hold was released and the customer was never charged.
     ['B4', -1,  960, 1050, 'Sam Okafor',           3000, 'released', null,
       { released_at: hoursAgo(26), status_label: 'Checked In' }],
+    // Far ahead (migration 0035): card saved, nothing held or charged; held 2 days before.
+    ['B2',  8, 1080, 1170, 'Priya Raman',          4500, 'card_saved', null,
+      { amount_cents: 0, authorized_cents: null, deferred_cents: 4500, stripe_payment_intent: null,
+        hold_due_at: inHours(6 * 24), stripe_payment_method: 'pm_demo' }],
+    // Its hold was declined by the bank: the booking stands, staff take payment at the counter.
+    ['B3',  1, 1200, 1290, 'Owen Brar',            3750, 'hold_failed', null,
+      { amount_cents: 0, authorized_cents: null, deferred_cents: 3750, stripe_payment_intent: null,
+        hold_error: 'Your card has insufficient funds', hold_attempts: 1, stripe_payment_method: 'pm_demo' }],
   ].forEach((row) => BOOKINGS.push(cardBooking(row)));
 
   /* ---------- Staff, roles and the activity log (migration 0024) ---------- */
@@ -621,13 +629,13 @@
       hours: { 0: [0, 24], 1: [0, 24], 2: [0, 24], 3: [0, 24], 4: [0, 24], 5: [0, 24], 6: [0, 24] },
       rates: FLAT, bay_rates: {}, min_mins: 60, max_party: 4, slot_step: 30,
       weekly_status: {}, online_status_label: 'Booked',
-      // The hold rules lib/booking.js holdSettings() reads. cutoffDays/authWindowDays mirror
-      // HOLD_DEFAULTS there: a session more than 5 days out is charged outright, because a card
-      // authorisation only survives about 7.
+      // The hold rules lib/booking.js holdSettings() reads. cutoffDays/authWindowDays/leadDays
+      // mirror HOLD_DEFAULTS there: a session more than 5 days out has its card saved instead,
+      // because a card authorisation only survives about 7, and is held 2 days before.
       pay: {
         acceptPayments: true, acceptDeposit: true, currency: 'CAD', taxPct: 12, processor: 'Stripe',
         captureMethod: 'Credit Card Hold', chargePercent: 50, chargeAmount: null,
-        hold: { cutoffDays: 5, authWindowDays: 7 },
+        hold: { cutoffDays: 5, authWindowDays: 7, leadDays: 2 },
         holdDisclaimer: 'Your card is held, not charged. We take the payment when you check in.',
         paymentDisclaimer: 'Cancel at least 24 hours before your tee time for a full refund.',
       },

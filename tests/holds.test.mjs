@@ -156,8 +156,10 @@ class FakeStripe {
     this.webhooks = realWebhooks;
     this.charges = { retrieve: async (id) => { S.stripe.push(['charges.retrieve', id]); return S.charge || { billing_details: {} }; } };
     this.paymentIntents = {
-      create: async (p) => {
-        S.stripe.push(['paymentIntents.create', p]);
+      create: async (p, opts) => {
+        S.stripe.push(['paymentIntents.create', p, opts]);
+        if (S.beforeCreate) await S.beforeCreate(p);
+        if (S.createThrows) throw S.createThrows;
         const id = `pi_${++seq}`;
         S.pis[id] = { id, object: 'payment_intent', amount: p.amount, metadata: p.metadata || {},
           status: p.capture_method === 'manual' ? 'requires_capture' : 'succeeded',
@@ -183,6 +185,26 @@ class FakeStripe {
         return pi;
       },
     };
+    // Saved cards (migration 0035): a SetupIntent, the Stripe Customer it hangs off, and detaching.
+    this.setupIntents = {
+      create: async (p) => {
+        S.stripe.push(['setupIntents.create', p]);
+        if (S.setupThrowsFor && p.customer === S.setupThrowsFor) throw new Error(`No such customer: '${p.customer}'`);
+        if (S.permissionDenied) throw Object.assign(new Error('The provided key does not have the required permissions for this endpoint'), { type: 'StripePermissionError' });
+        const id = `seti_${++seq}`;
+        S.sis[id] = { id, object: 'setup_intent', status: 'requires_payment_method', customer: p.customer,
+          payment_method: null, usage: p.usage, metadata: p.metadata || {}, client_secret: `${id}_secret_x` };
+        return S.sis[id];
+      },
+      retrieve: async (id) => { if (!S.sis[id]) throw new Error('No such setupintent'); return S.sis[id]; },
+    };
+    this.customers = {
+      create: async (p) => { S.stripe.push(['customers.create', p]); return { id: `cus_${++seq}`, ...p }; },
+    };
+    this.paymentMethods = {
+      retrieve: async (id) => ({ id, billing_details: { name: 'Robin Saver', email: 'robin@x.test', phone: null } }),
+      detach: async (id) => { S.stripe.push(['paymentMethods.detach', id]); return { id, customer: null }; },
+    };
     this.refunds = {
       create: async (params, opts) => {
         S.stripe.push(['refunds.create', params, opts]);
@@ -202,6 +224,7 @@ const { createPaymentIntent: createPI, confirmBooking } = await import(url('api'
 const { default: seriesApi } = await import(url('api', 'booking-series.js'));
 const { default: bookingApi } = await import(url('api', 'booking.js'));
 const { default: webhookApi } = await import(url('api', 'webhook.js'));
+const { placeDueHolds, retrieveCheckoutIntent } = await import(url('lib', 'holds.js'));
 
 // ---------------------------------------------------------------------------------------------
 // World
@@ -217,7 +240,8 @@ const inHours = (h) => new Date(Date.now() + h * 3600 * 1000).toISOString();
 function world(over = {}) {
   seq = 0;
   Object.assign(S, {
-    stripe: [], rpc: [], fail: {}, pis: {}, charge: null, captureThrows: null, cancelThrows: null,
+    stripe: [], rpc: [], fail: {}, pis: {}, sis: {}, charge: null, captureThrows: null, cancelThrows: null,
+    createThrows: null, beforeCreate: null, setupThrowsFor: null, permissionDenied: false,
     users: {
       'tok-admin': { id: 'u-admin', email: 'admin@invictus.test' },
       'tok-emp': { id: 'u-emp', email: 'emp@invictus.test' },
@@ -308,18 +332,18 @@ test('the cut-off is a setting, defaults to 5 days, and can never exceed the aut
   assert.equal(holdSettings({ captureMethod: 'No Payment' }).enabled, false);
 });
 
-test('THE BOUNDARY: 5 days ahead is held, one minute past it is charged', () => {
+test('THE BOUNDARY: 5 days ahead is held, one minute past it the card is saved instead', () => {
   const settings = normalizeSettings(S.db.settings[0]);
   // 12:00 Winnipeg on a fixed day, so the arithmetic below is not at the mercy of when the suite runs.
   const now = new Date('2026-06-10T17:00:00Z');    // 12:00 CDT
   const at = (dateISO, startMin) => holdPlan({ settings, dateISO, startMin, now });
 
   assert.equal(at('2026-06-15', 12 * 60).mode, 'hold', 'exactly 120 hours ahead — the last held booking');
-  assert.equal(at('2026-06-15', 12 * 60 + 1).mode, 'charge', 'one minute past the cut-off');
+  assert.equal(at('2026-06-15', 12 * 60 + 1).mode, 'save', 'one minute past the cut-off');
   assert.equal(at('2026-06-15', 11 * 60 + 59).mode, 'hold');
   assert.equal(at('2026-06-10', 14 * 60).mode, 'hold', 'this afternoon');
-  assert.equal(at('2026-06-20', 12 * 60).mode, 'charge', 'ten days out — the regular booking window');
-  assert.equal(at('2026-08-01', 12 * 60).mode, 'charge', 'a league player booking 60 days out');
+  assert.equal(at('2026-06-20', 12 * 60).mode, 'save', 'ten days out — the regular booking window');
+  assert.equal(at('2026-08-01', 12 * 60).mode, 'save', 'a league player booking 60 days out');
 
   // The hold's deadline runs from the BOOKING, not from the session: seven days from now.
   const held = at('2026-06-15', 12 * 60);
@@ -328,10 +352,29 @@ test('THE BOUNDARY: 5 days ahead is held, one minute past it is charged', () => 
   assert.equal(held.captureBy, held.holdExpiresAt);
   assert.match(held.message, /held, not charged/);
 
-  const charged = at('2026-06-20', 12 * 60);
-  assert.equal(charged.captureMethod, 'automatic');
-  assert.equal(charged.holdExpiresAt, null);
-  assert.match(charged.message, /charged in full now/);
+  // Too far to hold: nothing charged now, and the hold is due two days before the session.
+  const saved = at('2026-06-20', 12 * 60);
+  assert.equal(saved.holdExpiresAt, null, 'no authorisation exists yet, so nothing can expire');
+  assert.equal(saved.holdDueAt, new Date('2026-06-18T17:00:00Z').toISOString(), 'session minus leadDays (2)');
+  assert.match(saved.message, /Nothing is charged today/);
+
+  // A database without migration 0035 has nowhere to keep the card: the old charge-in-full answer.
+  const old = holdPlan({ settings, dateISO: '2026-06-20', startMin: 12 * 60, now, deferAvailable: false });
+  assert.equal(old.mode, 'charge');
+  assert.equal(old.captureMethod, 'automatic');
+  assert.equal(old.holdDueAt, null);
+  assert.match(old.message, /charged in full now/);
+});
+
+test('leadDays defaults to 2 and can never pass Visa\'s merchant-initiated window or the cut-off', () => {
+  assert.equal(HOLD_DEFAULTS.leadDays, 2);
+  assert.equal(holdSettings(null).leadDays, 2);
+  assert.equal(holdSettings({ hold: { leadDays: 3 } }).leadDays, 3);
+  // A hold placed with nobody at the keyboard lasts 4d18h on Visa. Five days out would expire first.
+  assert.equal(holdSettings({ hold: { leadDays: 6, cutoffDays: 7 } }).leadDays, 4);
+  // …and never earlier than a booking would have been held at checkout anyway.
+  assert.equal(holdSettings({ hold: { leadDays: 3, cutoffDays: 1 } }).leadDays, 1);
+  assert.equal(holdSettings({ hold: { leadDays: 'soon' } }).leadDays, 2);
 });
 
 test('"Payment Upfront" turns every booking back into a charge, however near', () => {
@@ -368,19 +411,53 @@ test('a NEAR booking is authorised, not charged — capture_method: manual on th
   assert.equal(r.out.payment.amountCents, r.out.amount);
 });
 
-test('a FAR booking is charged in full at booking, exactly as before', async () => {
-  const r = await call(createPI, { body: slot(9) });
+test('a FAR booking saves the card — a SetupIntent, and no PaymentIntent at all', async () => {
+  const r = await call(createPI, { body: { ...slot(9), email: 'new@x.test' } });
   assert.equal(r.code, 200, JSON.stringify(r.out));
 
-  const params = calls('paymentIntents.create')[0][1];
-  assert.equal('capture_method' in params, false,
-    'nothing is sent: Stripe already defaults to automatic, so the charge-now request is unchanged');
-  assert.equal(params.metadata.paymentMode, 'charge');
-  assert.equal(params.metadata.holdExpiresAt, '');
+  assert.equal(calls('paymentIntents.create').length, 0, 'nothing is charged or even authorised');
+  const params = calls('setupIntents.create')[0][1];
+  assert.equal(params.usage, 'off_session', 'so the server may hold it later with nobody at the keyboard');
+  assert.deepEqual(params.payment_method_types, ['card']);
+  assert.ok(params.customer.startsWith('cus_'), 'a saved card has to hang off a Stripe Customer');
+  assert.equal(calls('customers.create').length, 1);
+  assert.equal(params.metadata.paymentMode, 'save');
+  assert.equal(params.metadata.chargeCents, String(r.out.amount), 'the amount to hold later, server-computed');
+  assert.ok(params.metadata.holdDueAt);
+  assert.ok(r.out.clientSecret.startsWith('seti_'));
 
-  assert.equal(r.out.paymentMode, 'charge');
+  assert.equal(r.out.paymentMode, 'save');
   assert.equal(r.out.payment.captureBy, null);
+  assert.equal(r.out.payment.holdDueAt, params.metadata.holdDueAt);
+  assert.equal(r.out.payment.leadDays, 2);
+  assert.match(r.out.payment.message, /Nothing is charged today/);
+});
+
+test('a Stripe key that may not save cards falls back to charging in full — checkout never breaks', async () => {
+  S.permissionDenied = true;     // a restricted key without SetupIntents write
+  const r = await call(createPI, { body: { ...slot(9), email: 'new@x.test' } });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.paymentMode, 'charge');
   assert.match(r.out.payment.message, /charged in full now/);
+  const params = calls('paymentIntents.create')[0][1];
+  assert.equal(params.metadata.paymentMode, 'charge', 'the metadata agrees with what the customer was told');
+  assert.equal('capture_method' in params, false);
+});
+
+test('a regular\'s saved card goes on the Stripe Customer already linked to them — no new one', async () => {
+  S.db.customers.push({ id: 'c-1', email: 'reg@x.test', phone: null, stripe_customer_id: 'cus_known' });
+  await call(createPI, { body: { ...slot(9), email: 'reg@x.test' } });
+  assert.equal(calls('setupIntents.create')[0][1].customer, 'cus_known');
+  assert.equal(calls('customers.create').length, 0);
+});
+
+test('a linked Customer deleted in Stripe is replaced, not a failed checkout', async () => {
+  S.db.customers.push({ id: 'c-1', email: 'reg@x.test', phone: null, stripe_customer_id: 'cus_gone' });
+  S.setupThrowsFor = 'cus_gone';
+  const r = await call(createPI, { body: { ...slot(9), email: 'reg@x.test' } });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(calls('customers.create').length, 1);
+  assert.notEqual(calls('setupIntents.create')[1][1].customer, 'cus_gone');
 });
 
 test('confirm-booking records a HELD booking from requires_capture, and charges nothing to it', async () => {
@@ -402,16 +479,38 @@ test('confirm-booking records a HELD booking from requires_capture, and charges 
   assert.ok(row.hold_expires_at);
 });
 
-test('confirm-booking still records a far-ahead booking as PAID', async () => {
-  const made = await call(createPI, { body: slot(9) });
-  const piId = made.out.clientSecret.split('_secret')[0];
-  const r = await call(confirmBooking, { body: { paymentIntentId: piId } });
-  assert.equal(r.out.paymentState, 'paid');
+test('confirm-booking records a far-ahead booking as CARD SAVED — booked, nothing charged', async () => {
+  S.db.customers.push({ id: 'c-9', email: 'robin@x.test', phone: null, stripe_customer_id: null });
+  const made = await call(createPI, { body: { ...slot(9), email: 'robin@x.test' } });
+  const siId = made.out.clientSecret.split('_secret')[0];
 
-  const row = S.db.bookings.find((b) => b.stripe_payment_intent === piId);
-  assert.equal(row.payment_state, 'paid');
-  assert.equal(row.amount_cents, made.out.amount);
-  assert.ok(row.captured_at);
+  // Not finished at Stripe yet → refused, exactly like an unfinished payment.
+  const early = await call(confirmBooking, { body: { paymentIntentId: siId } });
+  assert.equal(early.code, 400);
+
+  Object.assign(S.sis[siId], { status: 'succeeded', payment_method: 'pm_saved' });
+  const r = await call(confirmBooking, { body: { paymentIntentId: siId, name: 'Robin', email: 'robin@x.test' } });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.paymentState, 'card_saved');
+  assert.equal(r.out.amountCents, made.out.amount);
+  assert.ok(r.out.holdDueAt);
+
+  const row = S.db.bookings.find((b) => b.stripe_setup_intent === siId);
+  assert.equal(row.status, 'confirmed', 'the slot is taken');
+  assert.equal(row.payment_state, 'card_saved');
+  assert.equal(row.amount_cents, 0, 'nothing has been charged');
+  assert.equal(row.deferred_cents, made.out.amount);
+  assert.equal(row.stripe_payment_method, 'pm_saved');
+  assert.equal(row.stripe_customer, S.sis[siId].customer);
+  assert.equal(row.hold_due_at, made.out.payment.holdDueAt);
+  assert.equal(row.stripe_payment_intent, undefined, 'no PaymentIntent exists yet');
+  // The Customer is linked so their next far-ahead booking reuses it.
+  assert.equal(S.db.customers.find((c) => c.id === 'c-9').stripe_customer_id, S.sis[siId].customer);
+
+  // A second confirm (retry, or the webhook) is harmless.
+  const again = await call(confirmBooking, { body: { paymentIntentId: siId } });
+  assert.equal(again.out.already, true);
+  assert.equal(S.db.bookings.filter((b) => b.stripe_setup_intent === siId).length, 1);
 });
 
 test('a PaymentIntent that is neither succeeded nor requires_capture is still refused', async () => {
@@ -831,4 +930,236 @@ test('read-only staff may see the list — chasing holds is not a money-moving a
   S.users['tok-ro'] = { id: 'u-ro', email: 'ro@invictus.test' };
   const { code } = await call(seriesApi, { method: 'GET', query: { action: 'holds' }, headers: { authorization: 'Bearer tok-ro' } });
   assert.equal(code, 200);
+});
+
+// =============================================================================================
+// 9. Deferred holds: save the card at checkout, hold it leadDays before the session (0035)
+// =============================================================================================
+//
+// A far-ahead booking is 'card_saved': nothing charged, the card saved at Stripe. placeDueHolds()
+// turns it into an ordinary hold. The owner's rules for a decline: the booking STANDS, the
+// customer is NOT told, and staff see a flag and take payment at the counter.
+
+const SAVED = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+function savedBooking(over = {}) {
+  const row = { id: SAVED, bay_id: 'B1', booking_date: dayAhead(2), start_min: 1200, end_min: 1260, status: 'confirmed',
+    amount_cents: 0, refunded_cents: 0, authorized_cents: null, payment_state: 'card_saved', deferred_cents: 3000,
+    hold_due_at: inHours(-1), hold_attempts: 0, hold_error: null, stripe_setup_intent: 'seti_s',
+    stripe_payment_method: 'pm_s', stripe_customer: 'cus_s', customer_name: 'Robin Saver', group_id: null, ...over };
+  S.db.bookings.push(row);
+  return row;
+}
+const runJob = () => placeDueHolds({ stripe: new FakeStripe() });
+const declined = () => Object.assign(new Error('Your card was declined.'),
+  { type: 'StripeCardError', code: 'card_declined', payment_intent: { id: 'pi_dead' } });
+
+test('a saved card is held when it falls due — off-session, manual capture, the saved card and Customer', async () => {
+  savedBooking();
+  const t = await runJob();
+  assert.equal(t.due, 1);
+  assert.equal(t.held, 1);
+
+  const [, params, opts] = calls('paymentIntents.create')[0];
+  assert.equal(params.amount, 3000);
+  assert.equal(params.capture_method, 'manual', 'a hold, captured at check-in like any other');
+  assert.equal(params.off_session, true, 'merchant-initiated: nobody is at the keyboard');
+  assert.equal(params.confirm, true);
+  assert.equal(params.customer, 'cus_s');
+  assert.equal(params.payment_method, 'pm_s');
+  assert.equal(params.metadata.deferredBookingId, SAVED);
+  assert.equal(params.metadata.dateISO, undefined, 'no dateISO: that is what makes the webhook write a NEW booking');
+  assert.equal(opts.idempotencyKey, `invictus_deferred_hold_${SAVED}_0`);
+
+  const row = booking(SAVED);
+  assert.equal(row.payment_state, 'held');
+  assert.equal(row.status, 'confirmed');
+  assert.equal(row.authorized_cents, 3000);
+  assert.equal(row.amount_cents, 0, 'still nothing charged');
+  assert.ok(row.stripe_payment_intent.startsWith('pi_'));
+  // No capture_before from Stripe here, so the merchant-initiated Visa window (4d18h) is assumed.
+  const hrs = (new Date(row.hold_expires_at) - Date.now()) / 3600000;
+  assert.ok(hrs > 113 && hrs <= 114, `expected ~114h, got ${hrs}`);
+});
+
+test('a saved card that is not due yet is left alone', async () => {
+  savedBooking({ hold_due_at: inHours(30) });
+  const t = await runJob();
+  assert.equal(t.due, 0);
+  assert.equal(calls('paymentIntents.create').length, 0);
+  assert.equal(booking(SAVED).payment_state, 'card_saved');
+});
+
+test('DECLINED: the booking stands, staff get the flag, the customer is not told', async () => {
+  savedBooking();
+  S.createThrows = declined();
+  const t = await runJob();
+  assert.equal(t.declined, 1);
+
+  const row = booking(SAVED);
+  assert.equal(row.status, 'confirmed', 'the booking is kept — payment is taken at the counter');
+  assert.equal(row.payment_state, 'hold_failed');
+  assert.match(row.hold_error, /declined/);
+  assert.equal(row.hold_attempts, 1);
+  assert.deepEqual(calls('paymentIntents.cancel').map((c) => c[1]), ['pi_dead'], 'the dead PaymentIntent is tidied away');
+  assert.equal((S.db.notifications || []).length, 0, 'nothing is queued to the customer');
+});
+
+test('Stripe unreachable: nothing changes, and the retry reuses the SAME key so a card is never held twice', async () => {
+  savedBooking();
+  S.createThrows = Object.assign(new Error('connect ECONNRESET'), { type: 'StripeConnectionError' });
+  const first = await runJob();
+  assert.equal(first.retry, 1);
+  assert.equal(booking(SAVED).payment_state, 'card_saved');
+  assert.equal(booking(SAVED).hold_attempts, 0);
+
+  S.createThrows = null;
+  const second = await runJob();
+  assert.equal(second.held, 1);
+  const keys = calls('paymentIntents.create').map((c) => c[2].idempotencyKey);
+  assert.equal(keys[0], keys[1]);
+});
+
+test('running the job twice — or twice at once — holds the card once', async () => {
+  savedBooking();
+  const [a, b] = await Promise.all([runJob(), runJob()]);
+  assert.ok(a.busy || b.busy, 'the overlapping run stands aside');
+  await runJob();
+  assert.equal(calls('paymentIntents.create').length, 1);
+});
+
+test('cancelled while its hold was being placed: the new hold is let go at once', async () => {
+  savedBooking();
+  S.beforeCreate = async () => { Object.assign(booking(SAVED), { status: 'cancelled', payment_state: 'released' }); };
+  const t = await runJob();
+  assert.equal(t.held, 0);
+  const pi = calls('paymentIntents.create').length && Object.keys(S.pis).pop();
+  assert.deepEqual(calls('paymentIntents.cancel').map((c) => c[1]), [pi]);
+  assert.equal(booking(SAVED).payment_state, 'released');
+});
+
+test('Charge at the counter on a saved card the job has not reached: held, captured, card forgotten', async () => {
+  savedBooking({ hold_due_at: inHours(30) });
+  const { code, out } = await staffPost('tok-admin', 'capture', { bookingId: SAVED });
+  assert.equal(code, 200, JSON.stringify(out));
+  assert.equal(out.moneyMoved, true);
+  assert.equal(out.capturedCents, 3000);
+  assert.equal(calls('paymentIntents.create').length, 1);
+  assert.equal(calls('paymentIntents.capture').length, 1);
+  assert.equal(booking(SAVED).payment_state, 'paid');
+  assert.equal(booking(SAVED).amount_cents, 3000);
+  assert.deepEqual(calls('paymentMethods.detach').map((c) => c[1]), ['pm_s'], 'the venue does not keep cards');
+});
+
+test('Charge on a DECLINED saved card tries again with a fresh key, and says plainly if it fails again', async () => {
+  savedBooking({ payment_state: 'hold_failed', hold_attempts: 1, hold_error: 'Your card was declined' });
+  S.createThrows = declined();
+  const { code, out } = await staffPost('tok-admin', 'capture', { bookingId: SAVED });
+  assert.equal(code, 402);
+  assert.equal(out.moneyMoved, false);
+  assert.match(out.error, /could not be held.*Take payment at the counter/);
+  assert.equal(calls('paymentIntents.create')[0][2].idempotencyKey, `invictus_deferred_hold_${SAVED}_1`,
+    'a new key — otherwise Stripe would just replay the last decline');
+  assert.equal(booking(SAVED).hold_attempts, 2);
+  assert.equal(booking(SAVED).payment_state, 'hold_failed');
+});
+
+test('cancelling a saved-card booking: nothing refunded, nothing at Stripe to cancel, card forgotten', async () => {
+  savedBooking({ booking_date: dayAhead(9), hold_due_at: inHours(170) });
+  const look = await call(bookingApi, { method: 'GET', query: { id: SAVED } });
+  assert.equal(look.out.booking.cancelEffect, 'release');
+
+  const { code, out } = await call(bookingApi, { body: { id: SAVED } });
+  assert.equal(code, 200, JSON.stringify(out));
+  assert.equal(out.refund, undefined);
+  assert.equal(out.release.released, true);
+  assert.equal(out.release.moneyMoved, false);
+  assert.match(out.release.message, /nothing was charged/);
+  assert.equal(calls('refunds.create').length, 0);
+  assert.equal(calls('paymentIntents.cancel').length, 0);
+  assert.deepEqual(calls('paymentMethods.detach').map((c) => c[1]), ['pm_s']);
+  assert.equal(booking(SAVED).status, 'cancelled');
+  assert.equal(booking(SAVED).payment_state, 'released');
+
+  // …so the job never holds it afterwards.
+  await runJob();
+  assert.equal(calls('paymentIntents.create').length, 0);
+});
+
+test('the webhook for a server-placed hold updates the EXISTING booking and never writes a new one', async () => {
+  savedBooking();
+  const before = S.db.bookings.length;
+  const e = capturableEvent({ id: 'pi_def', amount: 3000, amount_capturable: 3000,
+    metadata: { deferredBookingId: SAVED, paymentMode: 'hold', bayName: 'Bay 1' } });
+  await fire(e);
+  assert.equal(S.db.bookings.length, before);
+  assert.equal(booking(SAVED).payment_state, 'held');
+  assert.equal(booking(SAVED).stripe_payment_intent, 'pi_def');
+  assert.equal(booking(SAVED).authorized_cents, 3000);
+
+  // Captured from the Stripe dashboard: settled to paid, and the card forgotten.
+  const c = capturableEvent({ id: 'pi_def', status: 'succeeded', amount: 3000, amount_received: 3000,
+    metadata: { deferredBookingId: SAVED, paymentMode: 'hold' } });
+  c.type = 'payment_intent.succeeded';
+  await fire(c);
+  assert.equal(S.db.bookings.length, before);
+  assert.equal(booking(SAVED).payment_state, 'paid');
+  assert.equal(booking(SAVED).amount_cents, 3000);
+  assert.deepEqual(calls('paymentMethods.detach').map((x) => x[1]), ['pm_s']);
+});
+
+test('setup_intent.succeeded writes the saved-card booking once, whichever of it and the page lands first', async () => {
+  const made = await call(createPI, { body: { ...slot(9), email: 'robin@x.test' } });
+  const siId = made.out.clientSecret.split('_secret')[0];
+  Object.assign(S.sis[siId], { status: 'succeeded', payment_method: 'pm_w' });
+
+  const { code } = await fire({ id: 'evt_si', object: 'event', livemode: false, type: 'setup_intent.succeeded',
+    data: { object: S.sis[siId] } });
+  assert.equal(code, 200);
+  const r = await call(confirmBooking, { body: { paymentIntentId: siId } });
+  assert.equal(r.out.already, true);
+
+  const rows = S.db.bookings.filter((b) => b.stripe_setup_intent === siId);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].payment_state, 'card_saved');
+  assert.equal(rows[0].customer_name, 'Robin Saver', 'from the saved card\'s billing details');
+});
+
+test('place-holds runs for the Vercel cron secret or Money staff — nobody else', async () => {
+  process.env.CRON_SECRET = 'cron-test-secret';
+  try {
+    savedBooking();
+    const anon = await call(seriesApi, { method: 'GET', query: { action: 'place-holds' } });
+    assert.equal(anon.code, 401);
+    const wrong = await call(seriesApi, { method: 'GET', query: { action: 'place-holds' }, headers: { authorization: 'Bearer nope' } });
+    assert.equal(wrong.code, 401);
+    const emp = await call(seriesApi, { query: { action: 'place-holds' }, headers: { authorization: 'Bearer tok-emp' } });
+    assert.equal(emp.code, 403);
+    assert.equal(calls('paymentIntents.create').length, 0, 'none of those touched a card');
+
+    const cron = await call(seriesApi, { method: 'GET', query: { action: 'place-holds' }, headers: { authorization: 'Bearer cron-test-secret' } });
+    assert.equal(cron.code, 200, JSON.stringify(cron.out));
+    assert.equal(cron.out.held, 1);
+  } finally {
+    delete process.env.CRON_SECRET;
+  }
+});
+
+test('the holds list flags declined saved cards for staff, with the bank\'s reason', async () => {
+  savedBooking({ payment_state: 'hold_failed', hold_error: 'Your card was declined', hold_attempts: 1 });
+  const { out } = await call(seriesApi, { method: 'GET', query: { action: 'holds' }, headers: { authorization: 'Bearer tok-admin' } });
+  assert.equal(out.failed.length, 1);
+  assert.equal(out.failed[0].bookingId, SAVED);
+  assert.equal(out.failed[0].amountCents, 3000);
+  assert.equal(out.failed[0].error, 'Your card was declined');
+  assert.equal(out.failed[0].customerName, 'Robin Saver');
+});
+
+test('gift cards and promos can read a saved-card checkout: its amount comes from the server\'s metadata', async () => {
+  S.sis.seti_g = { id: 'seti_g', status: 'succeeded', metadata: { chargeCents: '1850', dateISO: dayAhead(9), bayId: 'B1' } };
+  const i = await retrieveCheckoutIntent(new FakeStripe(), 'seti_g');
+  assert.equal(i.amount, 1850);
+  assert.equal(i.status, 'succeeded');
+  assert.equal(i.metadata.bayId, 'B1');
+  // …and a PaymentIntent id still goes where it always went.
+  assert.equal((await retrieveCheckoutIntent(new FakeStripe(), 'pi_held')).id, 'pi_held');
 });

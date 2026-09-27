@@ -283,7 +283,7 @@
     font-size: 13px; line-height: 1.55; background: var(--near-black); border: 1px solid var(--border);
     color: var(--muted); }
   .pay-mode.is-shown { display: block; }
-  .pay-mode.is-hold { background: rgba(240,82,61,.06); border-color: rgba(240,82,61,.35); }
+  .pay-mode.is-hold, .pay-mode.is-save { background: rgba(240,82,61,.06); border-color: rgba(240,82,61,.35); }
   .pay-mode b { color: var(--white); font-weight: 700; }
   .loading { color: var(--dim); font-size: 14px; text-align: center; padding: 40px 0; }
 
@@ -1323,6 +1323,7 @@ const piIdOf = cs => String(cs||'').split('_secret')[0] || null;
 function payModeOf(src){
   const m = (src && src.payment && src.payment.mode) || (src && src.paymentMode) || null;
   if(m==='hold') return 'hold';
+  if(m==='save') return 'save';     // too far ahead to hold: card saved, nothing charged (migration 0035)
   if(m==='charge') return 'charge';
   return null;
 }
@@ -1331,6 +1332,8 @@ function payModeOf(src){
    means it is gone. Neither is inferred from anything the page hoped would happen. */
 function payModeOfPI(pi){
   if(!pi) return null;
+  // A SetupIntent that succeeded: the card was saved and not a cent was touched.
+  if(pi.object==='setup_intent' || String(pi.id||'').startsWith('seti_')) return pi.status==='succeeded' ? 'save' : null;
   if(pi.status==='requires_capture') return 'hold';
   if(pi.status==='succeeded') return 'charge';
   return payModeOf(pi);
@@ -1643,6 +1646,15 @@ function renderPayMode(mode, amountCents, serverMessage){
       host.className='pay-mode is-shown is-hold';
     }
     if(btn) btn.innerHTML=`Hold <span id="sc-amt">${escHtml(amt)}</span>`;
+  }else if(mode==='save'){
+    // Nothing is charged or even held today — the card is saved and held later, server-side.
+    if(host){
+      host.innerHTML=`<b>Nothing charged today.</b> `
+        + escHtml(serverMessage
+          || `Your card is saved for this booking only. We hold ${amt} on it shortly before your session, and you pay when you check in.`);
+      host.className='pay-mode is-shown is-save';
+    }
+    if(btn) btn.innerHTML=`Book — pay <span id="sc-amt">${escHtml(amt)}</span> at check-in`;
   }else{
     if(btn) btn.innerHTML=`Pay <span id="sc-amt">${escHtml(amt)}</span>`;
   }
@@ -1796,14 +1808,42 @@ $('#sc-pay').onclick=async ()=>{
   paying=true;
   const btn=$('#sc-pay'); const label=btn.innerHTML;
   btn.disabled=true; btn.textContent='Processing…'; $('#pay-error').textContent='';
+  const billing = { billing_details:{
+    name:$('#sc-name').value||undefined, email:$('#sc-email').value||undefined, phone:$('#sc-phone').value||undefined,
+  } };
+  // A far-ahead booking is a SetupIntent: the card is saved, not charged — confirmSetup, not
+  // confirmPayment. Everything after it is the same flow with the SetupIntent's id in the
+  // paymentIntentId field, which confirm-booking and the gift-card/promo endpoints all accept.
+  if(piCache && piCache.payMode==='save'){
+    const { error, setupIntent } = await STRIPE.confirmSetup({
+      elements, redirect:'if_required',
+      confirmParams:{ return_url: location.origin + '/', payment_method_data: billing },
+    });
+    paying=false;
+    if(error){ $('#pay-error').textContent=error.message||'Your card could not be saved.'; btn.innerHTML=label; btn.disabled=false; return; }
+    if(setupIntent && setupIntent.status==='succeeded'){
+      btn.textContent='Confirming…';
+      const amountCents = piCache.amount;
+      try{
+        await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+          paymentIntentId: setupIntent.id,
+          name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim(),
+          note:($('#sc-note')?.value||'').trim(),
+          sms: $('#sc-sms') ? $('#sc-sms').checked : undefined,
+          smsConsent: smsConsentGiven() }) });
+      }catch(e){ /* the card is saved; the webhook backup can still write the booking */ }
+      await settleCredits(setupIntent.id);
+      $('#pay-overlay').classList.remove('show');
+      showConfirmation($('#sc-name').value.trim()||'Guest', amountCents, 'save');
+    }else{ btn.innerHTML=label; btn.disabled=false; }
+    return;
+  }
   const { error, paymentIntent } = await STRIPE.confirmPayment({
     elements,
     redirect:'if_required',
     confirmParams:{
       return_url: location.origin + '/',
-      payment_method_data:{ billing_details:{
-        name:$('#sc-name').value||undefined, email:$('#sc-email').value||undefined, phone:$('#sc-phone').value||undefined,
-      } },
+      payment_method_data: billing,
       receipt_email: $('#sc-email').value || undefined,
     },
   });
@@ -1901,6 +1941,26 @@ if($('#gift-apply')) $('#gift-apply').onclick=applyGift;
 
 /* Return from a redirect-based payment method (test cards don't redirect). */
 async function handleReturn(){
+  // A saved card (far-ahead booking) comes back as a SetupIntent. Its slot and amount are not
+  // readable with the publishable key, so the booking is confirmed and the server's answer shown.
+  const scs=new URLSearchParams(location.search).get('setup_intent_client_secret');
+  if(scs && STRIPE){
+    try{
+      const { setupIntent }=await STRIPE.retrieveSetupIntent(scs);
+      if(setupIntent && setupIntent.status==='succeeded'){
+        let r=null;
+        try{ r=await (await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ paymentIntentId: setupIntent.id }) })).json(); }catch(e){}
+        HELD=null; holdActive=false; stopHoldTimer(); piCache=null;
+        $('#conf-code').textContent='JH-'+Math.abs([...setupIntent.id].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
+        $('#conf-msg').textContent=confMsg('', 'save', ((r && r.amountCents) || 0)/100);
+        $('#conf-recap').innerHTML=(r && r.amountCents) ? moneyLine('save', r.amountCents/100) : '';
+        $('#conf-overlay').classList.add('show');
+        setStep(4);
+      }
+    }catch(e){}
+    history.replaceState({}, '', location.pathname);
+    return;
+  }
   const cs=new URLSearchParams(location.search).get('payment_intent_client_secret');
   if(!cs || !STRIPE) return;
   try{
@@ -1937,13 +1997,17 @@ function fillWaiverCTA(email, phone, name){
 function moneyLine(mode, price){
   return mode==='hold'
     ? `<div class="row"><span class="k">On hold</span><span>${money(price)}</span></div>`
-    : `<div class="row"><span class="k">Paid</span><span>${money(price)}</span></div>`;
+    : mode==='save'
+      ? `<div class="row"><span class="k">Due at check-in</span><span>${money(price)}</span></div>`
+      : `<div class="row"><span class="k">Paid</span><span>${money(price)}</span></div>`;
 }
 function confMsg(name, mode, price){
   const hi = `You're all set${name && name!=='Guest' ? ', '+name : ''}! Your bay is reserved`;
   return mode==='hold'
     ? `${hi}. We've put a ${money(price)} hold on your card — nothing has been taken yet, and you pay the ${money(price)} when you arrive.`
-    : `${hi} — we'll see you at Invictus Golf.`;
+    : mode==='save'
+      ? `${hi}. Nothing has been charged. Your card is saved for this booking only — we hold ${money(price)} on it shortly before your session, and you pay when you arrive.`
+      : `${hi} — we'll see you at Invictus Golf.`;
 }
 
 function showStripeConfirmation(pi){

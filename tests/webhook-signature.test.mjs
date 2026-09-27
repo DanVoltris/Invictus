@@ -59,6 +59,10 @@ mock.module(url('lib', 'db.js'), { namedExports: {
   pendingRefundFor: async () => null,
   bookingForRefund: async () => null,
   bookingByPaymentIntent: async () => null,
+  // Saved-card holds (migration 0035) — owned by tests/holds.test.mjs, not exercised here.
+  dueDeferredHolds: async () => ({ rows: [] }),
+  bookingExistsForSetupIntent: async () => false,
+  rememberStripeCustomer: async () => {},
 } });
 mock.module(url('lib', 'notify.js'), { namedExports: {
   notifyBookingConfirmed: rec('notifyBookingConfirmed', {}),

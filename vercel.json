@@ -1,5 +1,11 @@
 {
   "framework": null,
+  "crons": [
+    {
+      "path": "/api/booking-series?action=place-holds",
+      "schedule": "0 15 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/config",

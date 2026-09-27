@@ -1342,7 +1342,8 @@ let CUST_STATS = {};    // { 'email|phone key': {count, last} } derived from boo
 let OVERRIDES = [];      // active schedule overrides that touch the visible range
 // Bookings whose card is authorised but not charged yet. Kept here (not inside the tab) so the
 // sidebar can carry the count on every screen — a hold running out is not a thing to discover.
-let HOLDS = { rows:null, due:0, critical:0, expired:0, error:null, loading:false };
+// `failed` are far-ahead bookings whose saved card was declined when the hold was placed (0035).
+let HOLDS = { rows:null, due:0, critical:0, expired:0, failed:[], error:null, loading:false };
 // How many days ahead the server will still take a HOLD rather than charging outright, and how
 // long an authorisation survives. Filled in by boot() from /api/config — never assumed, because
 // a wrong number here would be a promise the bank does not keep. See holdWindowText().
@@ -1675,10 +1676,13 @@ function renderSideNav(){
     // whatever screen the person happens to be on, not only from its own tab.
     // Nothing left to charge but something already expired still has to be seen, so the count
     // falls back to the expired one rather than disappearing.
-    const hn = HOLDS.due || HOLDS.expired;
+    // A declined saved card counts too: that booking has no money behind it at all.
+    const nFailed = (HOLDS.failed||[]).length;
+    const hn = (HOLDS.due + nFailed) || HOLDS.expired;
     const badge = t.id==='holds' && hn
-      ? `<span class="side-badge${(HOLDS.critical||HOLDS.expired)?' is-critical':''}" title="${
-          HOLDS.due ? (HOLDS.critical?HOLDS.critical+' running out today':'waiting to be charged')
+      ? `<span class="side-badge${(HOLDS.critical||HOLDS.expired||nFailed)?' is-critical':''}" title="${
+          nFailed ? nFailed+' card'+(nFailed===1?'':'s')+' declined — take payment at the counter'
+          : HOLDS.due ? (HOLDS.critical?HOLDS.critical+' running out today':'waiting to be charged')
                     : HOLDS.expired+' expired, nothing can be charged'}">${hn}</span>`
       : '';
     out+=`<div class="tab${t.id===ACTIVE_TAB?' active':''}" data-tab="${t.id}">${esc(t.label)}${badge}</div>`;
@@ -2250,7 +2254,7 @@ function renderHoldPolicy(){
   const host=$('#pay-hold-how'); if(!host) return;
   const p=(SETTINGS&&SETTINGS.pay)||{}, r=holdRules();
   const method=String(p.captureMethod||'Credit Card Hold');
-  const cut=r.cutoffDays, win=r.authWindowDays;
+  const cut=r.cutoffDays, win=r.authWindowDays, lead=r.leadDays;
   if(method!=='Credit Card Hold'){
     host.innerHTML=`<div class="hold-box is-paid"><div class="hb-h">Cards are charged in full at booking</div>
       <div class="hb-s">Capture method is set to <b>${esc(method)}</b> on the Prices tab, so nothing is held —
@@ -2270,13 +2274,16 @@ function renderHoldPolicy(){
                             :'An authorisation lasts about a week.'}
         After that the bank releases it and <b>the money can never be collected</b> — not by this portal,
         not by Stripe, not by anyone. That is what the Holds to Charge screen is for.</div></div>
-    <div class="hold-box is-paid"><div class="hb-h">The cut-off — when a booking is charged instead</div>
+    <div class="hold-box is-paid"><div class="hb-h">Further ahead — the card is saved, then held</div>
       <div class="hb-s">${cut
-        ? `A session <b>more than ${cut} day${cut===1?'':'s'} away</b> is charged in full at the time of booking,
-           because a hold would expire before the customer ever arrived. Anything closer than that is held.`
-        : `Your settings do not name a cut-off, so the server's own default applies. It is
-           <code>settings.pay.hold.cutoffDays</code> — sessions further ahead than that are charged in full at
-           booking, because a hold would expire first. Ask whoever set up payments what it is set to.`}</div></div>`;
+        ? `A session <b>more than ${cut} day${cut===1?'':'s'} away</b> cannot be held at booking — the hold would
+           expire before the customer arrived.`
+        : `Sessions further ahead than <code>settings.pay.hold.cutoffDays</code> (the server's default applies,
+           as your settings do not name one) cannot be held at booking — the hold would expire first.`}
+        Instead <b>nothing is charged</b>: the card is saved for that booking only, and the system puts the hold on it
+        ${lead?`<b>${lead} day${lead===1?'':'s'}</b>`:'a couple of days'} before the session. From then on it is an ordinary hold.
+        If the bank declines, the booking stays and shows at the top of Holds to Charge — take payment at the counter.
+        The customer is not told.</div></div>`;
   if($('#pay-hold-go')) $('#pay-hold-go').onclick=()=>{ showTab('holds'); loadHolds(); };
 }
 
@@ -4534,6 +4541,10 @@ function openManage(id){
          </div>
          <div class="dim" style="font-size:12px;margin-top:8px;line-height:1.5">Charging takes the money and can only be undone as a refund. Releasing cancels the hold and the customer is never charged. Both ask you to confirm.</div>`
       : `<div class="ro-note">Only staff with the Money permission can charge or release a hold.</div>`) : ''}
+    ${hasSavedCard(b) && can('money.write')
+      ? `<div class="row" style="flex-wrap:nowrap;gap:8px;margin-top:10px">
+           <button class="btn btn-primary btn-sm" id="m-charge" style="flex:1">${payState(b)==='hold_failed'?'Try card again':'Charge now'}</button>
+         </div>` : ''}
 
     <div class="sec-h">Transactions</div>
     <div class="txn">${txn}</div>
@@ -4655,10 +4666,15 @@ function openManage(id){
       const rel = await holdPost('release', { bookingId:b.id, reason:'cancelled by staff' }, b, 0);
       if(!rel.ok){ toast((rel.error || 'The card hold could not be released.')+' The booking was not cancelled.','err'); return; }
     }
+    // A saved card with no hold on it: nothing to release, only the card to forget. Best-effort —
+    // a cancelled booking is never held by the daily job whatever happens here.
+    const saved = hasSavedCard(b);
+    if(saved && can('money.write')) await holdPost('release', { bookingId:b.id, reason:'cancelled by staff' }, b, 0);
     let r = await sb.from('bookings').update({status:'cancelled', cancelled_at:new Date().toISOString()}).eq('id',id);
     if(r.error && /cancelled_at/.test(r.error.message||'')) r = await sb.from('bookings').update({status:'cancelled'}).eq('id',id);
     if(r.error){ toast((held?'The card hold was released, but the booking could not be cancelled: ':'Failed: ')+r.error.message,'err'); return; }
-    closeSheet(); toast(held ? 'Cancelled — slot freed, card hold released (never charged)' : 'Removed — slot freed','ok'); loadSchedule();
+    closeSheet(); toast(held ? 'Cancelled — slot freed, card hold released (never charged)'
+      : saved ? 'Cancelled — slot freed, nothing was charged' : 'Removed — slot freed','ok'); loadSchedule();
   };
 }
 
@@ -5162,6 +5178,10 @@ const HOLD_SELECT = 'id,bay_id,booking_date,start_min,end_min,status,status_labe
 
 const payState   = b => (b && b[HOLD_COLS.state]) ? String(b[HOLD_COLS.state]) : null;
 const isHeld     = b => payState(b)==='held';
+// A far-ahead booking (migration 0035): the card is saved and nothing is held or charged yet.
+// 'hold_failed' means the bank declined it when the server tried to hold it.
+const hasSavedCard = b => payState(b)==='card_saved' || payState(b)==='hold_failed';
+const savedCents = b => { const n=Number(b && b.deferred_cents); return Number.isFinite(n) && n>0 ? n : 0; };
 const isCaptured = b => payState(b)==='paid';
 const heldCents  = b => { const n=Number(b && b[HOLD_COLS.amount]); return Number.isFinite(n) && n>0 ? n : 0; };
 function holdDeadline(b){ const t=b && b[HOLD_COLS.expires]; if(!t) return null; const d=new Date(t); return isNaN(d.getTime())?null:d; }
@@ -5212,6 +5232,12 @@ async function fetchHolds(){
   const r = await sb.from('bookings').select(HOLD_SELECT)
     .eq(HOLD_COLS.state,'held').neq('status','cancelled')
     .order(HOLD_COLS.expires,{ ascending:true });
+  // Declined saved cards (migration 0035). A database without 0035 has no such rows — or no such
+  // columns — and simply shows none, rather than failing the whole screen.
+  const f = await sb.from('bookings').select('id,bay_id,booking_date,start_min,end_min,status,customer_name,'
+      + 'customer_phone,customer_email,payment_state,deferred_cents,hold_error,hold_attempts')
+    .eq(HOLD_COLS.state,'hold_failed').neq('status','cancelled').order('booking_date',{ ascending:true });
+  HOLDS.failed = f.error ? [] : (f.data||[]);
   HOLDS.loading = false;
   if(r.error){
     HOLDS.rows=null; HOLDS.due=0; HOLDS.critical=0; HOLDS.expired=0;
@@ -5258,6 +5284,7 @@ const holdWhen = b => `${dateLabel(b.booking_date)}, ${fmtMin(b.start_min)}–${
 // neither will this form — it says why rather than letting the server refuse it.
 function chargeHoldFlow(b, done){
   if(!can('money.write')) return;
+  if(hasSavedCard(b)) return chargeSavedCardFlow(b, done);
   const cents = heldCents(b);
   if(holdUrgency(b).key==='expired'){
     toast('That hold has already expired — the money can no longer be taken.','err'); return;
@@ -5279,6 +5306,27 @@ function chargeHoldFlow(b, done){
       const r = await holdPost('capture', { bookingId:b.id, amountCents:want }, b, want);
       if(!r.ok) return r.error || 'That could not be charged.';
       toast(r.message || `Charged ${holdMoney(want)}${r.demo?' (demo — no real card)':''}`,'ok');
+      done && done();
+      return null;
+    },
+  });
+}
+
+// A far-ahead booking's SAVED card (migration 0035), charged at the counter: the server holds it and
+// captures it in one go. For a declined card this is "try it again" — the bank may say yes now.
+function chargeSavedCardFlow(b, done){
+  const cents = savedCents(b), failed = payState(b)==='hold_failed';
+  promptSheet({
+    title: failed ? 'Try the saved card again?' : 'Charge the saved card?',
+    body:`${esc(b.customer_name||'This customer')}’s card is saved for ${esc(holdWhen(b))}, and
+      ${failed?'the bank declined it last time':'nothing has been held or charged yet'}.<br /><br />
+      Confirming <b>charges ${esc(holdMoney(cents))} now</b>. If the bank says no again, nothing is charged —
+      take payment at the counter instead.`,
+    okLabel: failed ? 'Try the card' : 'Charge the card',
+    onOk: async ()=>{
+      const r = await holdPost('capture', { bookingId:b.id }, b, cents);
+      if(!r.ok) return r.error || 'The card could not be charged.';
+      toast(r.message || `Charged ${holdMoney(cents)}${r.demo?' (demo — no real card)':''}`,'ok');
       done && done();
       return null;
     },
@@ -5329,6 +5377,23 @@ function holdBoxHTML(b){
       <div class="hb-h">Charged, then refunded</div>
       <div class="hb-s">See the refunds on this booking for what went back and when.</div></div>`;
   }
+  if(st==='card_saved'){
+    const due = b.hold_due_at ? new Date(b.hold_due_at) : null;
+    return `<div class="hold-box">
+      <div class="hb-h">Card saved — nothing charged or held yet</div>
+      <div class="hb-amt">${esc(holdMoney(savedCents(b)))}</div>
+      <div class="hb-s">This session was too far ahead to hold the card at booking. The system puts the hold on
+        ${due && !isNaN(due.getTime()) ? `<b>${esc(fmtTs(due.toISOString()))}</b>` : 'the saved card shortly before the session'},
+        and then it is charged at check-in like any other. <b>Charge now</b> takes it straight away.</div></div>`;
+  }
+  if(st==='hold_failed'){
+    return `<div class="hold-box is-critical">
+      <div class="hb-h">Card declined — take payment at the counter</div>
+      <div class="hb-amt">${esc(holdMoney(savedCents(b)))}</div>
+      <div class="hb-s">The bank refused the hold on the saved card${b.hold_error?` (<i>${esc(b.hold_error)}</i>)`:''}.
+        <b>Nothing has been charged</b> and the customer has not been told. The booking still stands.
+        <b>Try card again</b> if they have sorted it out with their bank.</div></div>`;
+  }
   if(st!=='held') return '';
   const cents=heldCents(b), u=holdUrgency(b), d=holdDeadline(b);
   if(u.key==='expired'){
@@ -5377,6 +5442,31 @@ function holdRowHTML(b, now){
   </div>`;
 }
 
+// A booking whose saved card the bank declined (migration 0035). Not a countdown like the rows
+// below — there is no hold to expire — just the booking, the amount, the bank's reason and a phone.
+function failedRowHTML(b){
+  const phone=(b.customer_phone||'').trim();
+  const act = can('money.write')
+    ? `<button class="btn btn-primary btn-sm hr-retry">Try card again</button>
+       <button class="btn btn-ghost btn-sm hr-open">Open</button>`
+    : `<button class="btn btn-ghost btn-sm hr-open">Open</button>`;
+  return `<div class="hold-row is-critical is-failed" data-id="${esc(b.id)}">
+    <div class="hr-who">
+      <div class="hr-name">${esc(b.customer_name||'No name on the booking')}</div>
+      <div class="hr-when">${esc(shortDate2(b.booking_date))} ${esc(fmtMin(b.start_min))}–${esc(fmtMin(b.end_min))} ·
+        ${esc(bayName(b.bay_id))}<br />
+        ${phone?`<a class="hr-phone" href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(phone)}</a>`
+               :'<span class="dim">No phone number on file</span>'}</div>
+    </div>
+    <div class="hr-amt"><div class="hr-cents">${esc(holdMoney(savedCents(b)))}</div><div class="hr-amt-l">Not collected</div></div>
+    <div class="hr-due">
+      <div class="hr-left">Card declined</div>
+      <div class="hr-dead">${esc(b.hold_error||'The bank refused the hold')}</div>
+    </div>
+    <div class="hr-act">${act}</div>
+  </div>`;
+}
+
 function renderHoldsTab(){
   const sub=$('#holds-sub'), stats=$('#holds-stats'), list=$('#holds-list');
   if(!sub) return;
@@ -5410,6 +5500,12 @@ function renderHoldsTab(){
     <div class="stat"><div class="stat-n">${esc(cash(total))}</div><div class="stat-l">${esc(holdCur())} held, not taken</div></div>`;
 
   let html='';
+  const failed = HOLDS.failed||[];
+  if(failed.length){
+    html += `<div class="holds-band">Card declined — take payment at the counter (${failed.length}). `
+          + `Nothing was charged and the customer has not been told.</div>`
+          + failed.map(b=>failedRowHTML(b)).join('');
+  }
   if(due.length){
     html += `<div class="holds-band">Charge these — most urgent first</div>`
           + due.map(b=>holdRowHTML(b, now)).join('');
@@ -5425,6 +5521,12 @@ function renderHoldsTab(){
   }
   if(!html) html=`<div class="card"><div class="empty">Every authorised card has been dealt with. Nothing is waiting.</div></div>`;
   list.innerHTML=html;
+  list.querySelectorAll('.hold-row.is-failed').forEach(row=>{
+    const b=failed.find(x=>x.id===row.dataset.id); if(!b) return;
+    const on=(sel,fn)=>{ const el=row.querySelector(sel); if(el) el.onclick=fn; };
+    on('.hr-retry', ()=>chargeSavedCardFlow(b, ()=>{ fetchHolds().then(renderHoldsTab); loadSchedule(); }));
+    on('.hr-open',  ()=>goToBooking(b.id, b.booking_date));
+  });
 
   const after=()=>{ fetchHolds().then(renderHoldsTab); loadSchedule(); };
   list.querySelectorAll('.hold-row').forEach(row=>{
@@ -5445,7 +5547,7 @@ function holdRules(){
   const h = (HOLD_WINDOW && HOLD_WINDOW.cutoffDays!=null) ? HOLD_WINDOW
           : ((SETTINGS && SETTINGS.pay && SETTINGS.pay.hold) || {});
   const n = v => (Number.isFinite(Number(v)) && Number(v)>0) ? Number(v) : null;
-  return { cutoffDays:n(h.cutoffDays), authWindowDays:n(h.authWindowDays) };
+  return { cutoffDays:n(h.cutoffDays), authWindowDays:n(h.authWindowDays), leadDays:n(h.leadDays) };
 }
 
 /* ============================================================================

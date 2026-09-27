@@ -12,6 +12,7 @@ import {
   reservePromo, releasePromo, redeemPromo, customerKeyFor, isLeaguePlayer, leaguePlayerForRequest
 } from '../lib/db.js';
 import { notifyGiftCard } from '../lib/notify.js';
+import { retrieveCheckoutIntent } from '../lib/holds.js';
 
 // One function for the whole gift-card flow (kept single to stay within the Hobby function limit).
 // Dispatch on ?action= — list | checkout | confirm | balance | quote | book | reserve | release | redeem.
@@ -414,7 +415,7 @@ async function reserve(req, res) {
 
   const stripe = stripeClient(process.env);
   let pi;
-  try { pi = await stripe.paymentIntents.retrieve(b.paymentIntentId); }
+  try { pi = await retrieveCheckoutIntent(stripe, b.paymentIntentId); }   // pi_… or a saved card's seti_…
   catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
   if (pi.status === 'succeeded' || pi.status === 'canceled') {
     return res.status(409).json({ ok: false, error: 'That payment is already finished.' });
@@ -506,7 +507,7 @@ async function redeem(req, res) {
 
   const stripe = stripeClient(process.env);
   let pi;
-  try { pi = await stripe.paymentIntents.retrieve(b.paymentIntentId); }
+  try { pi = await retrieveCheckoutIntent(stripe, b.paymentIntentId); }   // pi_… or a saved card's seti_…
   catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
   if (pi.status !== 'succeeded') return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
 
