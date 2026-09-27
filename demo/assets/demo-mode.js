@@ -658,9 +658,9 @@
     bookings: BOOKINGS,
     customers: CUSTOMERS,
     booking_statuses: [
-      { id: uid('st'), label: 'Booked', color: '#4AA3FF', sort: 1, kind: 'open', created_at: hoursAgo(900) },
-      { id: uid('st'), label: 'Checked In', color: '#067647', sort: 2, kind: 'open', created_at: hoursAgo(900) },
-      { id: uid('st'), label: 'No Show', color: '#B26A15', sort: 3, kind: 'open', created_at: hoursAgo(900) },
+      { id: uid('st'), label: 'Booked', color: '#4AA3FF', sort: 1, kind: 'booking', created_at: hoursAgo(900) },
+      { id: uid('st'), label: 'Checked In', color: '#067647', sort: 2, kind: 'booking', created_at: hoursAgo(900) },
+      { id: uid('st'), label: 'No Show', color: '#B26A15', sort: 3, kind: 'booking', created_at: hoursAgo(900) },
       { id: uid('st'), label: 'Cancelled', color: '#D92D20', sort: 4, kind: 'closed', created_at: hoursAgo(900) },
       { id: uid('st'), label: 'Maintenance', color: '#555C68', sort: 5, kind: 'closed', created_at: hoursAgo(900) },
     ],

@@ -4311,9 +4311,21 @@ function confirmSheet({title, body, okLabel, onOk}){
 }
 
 
+// "At a glance" is who is still to come. Once staff mark a booking Checked-in (or Completed, the
+// step after it) it drops off the strip — it stays on the grid and in the list. The one exception:
+// a captain who still owes league money stays, flag and all, until it is collected.
+const DONE_LABEL = /^(checked[\s-]?in|completed)$/i;
+const isDone = b => DONE_LABEL.test(String(b.status_label||'').trim());
+function glanceDone(b){
+  if(leagueOwedFor(b).length) return false;
+  if(!isGroupBooking(b)) return isDone(b);
+  const rows=GROUP_MEMBERS[b.group_id]||[];
+  return rows.length ? rows.every(isDone) : isDone(b);
+}
 function renderDayList(){
-  const items=BK.filter(b=>b.status!=='held').sort((a,b)=>a.start_min-b.start_min);
-  if(!items.length){ $('#day-list').innerHTML='<div class="empty">Nothing booked yet.</div>'; return; }
+  const booked=BK.filter(b=>b.status!=='held');
+  const items=booked.filter(b=>!glanceDone(b)).sort((a,b)=>a.start_min-b.start_min);
+  if(!items.length){ $('#day-list').innerHTML=`<div class="empty">${booked.length?'Everyone booked today has checked in.':'Nothing booked yet.'}</div>`; return; }
   // A party across four bays is one line in the day's list, not four. Everything else is
   // unchanged, so a normal booking still gets exactly the card it always had.
   const seen=new Set();
