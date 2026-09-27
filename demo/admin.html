@@ -4185,6 +4185,16 @@ const findBooking = (bayId,iso,m) => BK.find(b => b.bay_id===bayId && b.booking_
 const isLeagueRound = b => !!(LG31.rounds && b && b.league_team_id);
 const statusColor = label => (STATUSES.find(s=>s.label===label)||{}).color || '#4ec06a';
 const tagColor = name => (TAGS.find(t=>t.name===name)||{}).color || '#B5B5B5';
+// A booking box takes its STATUS's colour (Statuses tab): check a customer in and the box turns the
+// Checked-in colour. Light fill, stronger border, and the text darkened so it stays readable on a
+// pale fill. No status — or a label not in the list — keeps the default booked green.
+function statusCellStyle(b){
+  const st = b && b.status_label ? STATUSES.find(s=>s.label===b.status_label && !isScheduleStatus(s)) : null;
+  const c = st && /^#[0-9a-f]{6}$/i.test(st.color||'') ? st.color : null;
+  if(!c) return '';
+  const dark = '#' + [1,3,5].map(i=>Math.round(parseInt(c.slice(i,i+2),16)*0.5).toString(16).padStart(2,'0')).join('');
+  return ` style="background:${c}24;border-color:${c}80;color:${dark}"`;
+}
 // Compact status + tag indicators shown directly on a booking tile.
 function cellMeta(b, maxTags){
   if(!b || b.status==='blocked') return '';
@@ -4224,7 +4234,7 @@ function renderGrid(){
           return;
         }
         const cls=(bk.status==='blocked'?'bl':'bk')+(isGroupBooking(bk)?' grp':'')+(isLeagueRound(bk)?' is-league':'');
-        h+=`<td class="cell ${cls}${hc}" rowspan="${span}" data-bid="${bk.id}" data-bay="${b.id}" data-min="${visStart}"><span class="nm">${bk.status==='blocked'?'Blocked':esc(bk.customer_name||'Booked')}</span>${cellMeta(bk)}</td>`;
+        h+=`<td class="cell ${cls}${hc}" rowspan="${span}" data-bid="${bk.id}" data-bay="${b.id}" data-min="${visStart}"${bk.status==='blocked'?'':statusCellStyle(bk)}><span class="nm">${bk.status==='blocked'?'Blocked':esc(bk.customer_name||'Booked')}</span>${cellMeta(bk)}</td>`;
         return;
       }
       h+=openCellTD(b, date, m);
