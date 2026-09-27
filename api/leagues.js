@@ -2,21 +2,28 @@ import { stripeStatus, stripeClient, normalizeSettings, winnipegTodayISO } from 
 import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmLeagueCheckout, leaguesForCustomer,
          customerHoursByContact, isLeaguePlayer, normPhone, accountCustomerForRequest, staffContext,
          listTeamLeagues, teamLeagueById, leagueTeamById, createLeagueTeam, confirmLeagueTeamCheckout,
-         createTeamInvite, teamInviteByToken, claimTeamInvite, teamsForCustomer, MIGRATION_0031 } from '../lib/db.js';
+         createTeamInvite, teamInviteByToken, claimTeamInvite, teamsForCustomer, MIGRATION_0031,
+         splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor } from '../lib/db.js';
 import { notifyTeamInvite } from '../lib/notify.js';
+// The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
+const L = globalThis.InvictusLeagues;
 
 // Leagues, for customers. One function, dispatched on ?action=, to keep the serverless function
 // count down (Vercel's limit is 12 and this project is already near it).
 //
-// SINCE MIGRATION 0031 A LEAGUE IS SOLD BY THE TEAM. One captain pays one price for the whole
-// team, invites friends by phone number, and the team plays once a week whenever it likes — a free
-// booking made from the ordinary booking page (api/booking.js ?action=league-round).
+// SINCE MIGRATION 0031 A LEAGUE IS SOLD BY THE TEAM, and since 0036 it is PAID SEAT BY SEAT: the
+// captain picks the team's size (between the league's team_min and team_size), the team price is
+// shared across those seats, the captain pays one share and each friend pays one when they accept
+// the invite. Seats nobody pays for are owed by the captain and collected by staff. The team plays
+// once a week whenever it likes — a free booking made from the ordinary booking page
+// (api/booking.js ?action=league-round).
 //
 //   POST ?action=list           (public)        leagues you can buy a team in
-//   POST ?action=buy-team       (signed in)     { leagueId, teamName } → Stripe Checkout, or a free team
+//   POST ?action=buy-team       (signed in)     { leagueId, teamName, seats } → Stripe Checkout, or a free team
 //   POST ?action=invite         (captain/staff) { teamId, phone, name? } → the link to send a friend
-//   POST ?action=invite-info    (public)        { token } → whose team, and is it still open
-//   POST ?action=invite-claim   (signed in)     { token } → you're on the team
+//   POST ?action=invite-info    (public)        { token } → whose team, is it still open, what joining costs
+//   POST ?action=invite-claim   (signed in)     { token } → you're on the team, or Checkout for your seat
+//   POST ?action=pay-seats      (captain)       { teamId, seats } → Checkout to cover seats for friends
 //   POST ?action=my-teams       (signed in)     the teams you play for: roster, weeks, standings
 //   POST ?action=confirm        { sessionId }   the success page; the Stripe webhook does the same
 //   POST ?action=window         (optional auth) how far ahead this visitor may book
@@ -56,6 +63,7 @@ export default async function handler(req, res) {
     if (action === 'invite') return await invite(req, res);
     if (action === 'invite-info') return await inviteInfo(req, res);
     if (action === 'invite-claim') return await inviteClaim(req, res);
+    if (action === 'pay-seats') return await paySeats(req, res);
     if (action === 'my-teams') return await myTeams(req, res);
     if (action === 'join') return await join(req, res);
     if (action === 'confirm') return await confirm(req, res);
@@ -82,7 +90,7 @@ async function list(req, res) {
 async function buyTeam(req, res) {
   const me = await accountCustomerForRequest(req);
   if (!me) return res.status(401).json({ ok: false, error: 'Sign in to buy a team.' });
-  const { leagueId, teamName } = req.body || {};
+  const { leagueId, teamName, seats: askedSeats } = req.body || {};
   const nm = String(teamName || '').trim().replace(/\s+/g, ' ').slice(0, 60);
   if (!nm) return res.status(400).json({ ok: false, error: 'Give your team a name — everyone sees it on the standings.' });
   if (!admin()) return res.status(503).json({ ok: false, error: 'Leagues aren’t available right now — please call the shop.' });
@@ -101,9 +109,20 @@ async function buyTeam(req, res) {
     return res.status(409).json({ ok: false, error: `You’re already on ${already.team.name} in this league.`, teamId: already.team.id });
   }
 
+  // How many golfers: the captain's pick, within the league's range. With min = max there is
+  // nothing to pick. A league with no maximum has no seats — the captain pays the whole price.
+  const range = L.seatRange(league);
+  let seats = null;
+  if (range) {
+    seats = range.min === range.max ? range.max : Math.floor(Number(askedSeats));
+    if (!(seats >= range.min && seats <= range.max)) {
+      return res.status(400).json({ ok: false, error: `Pick how many golfers are on your team — ${range.min} to ${range.max}.` });
+    }
+  }
+
   // A free league: the team exists the moment they ask for it.
   if (!(league.fee_cents > 0)) {
-    const r = await createLeagueTeam({ leagueId: league.id, name: nm, captainCustomerId: me.id });
+    const r = await createLeagueTeam({ leagueId: league.id, name: nm, captainCustomerId: me.id, seats: seats && await splitPaymentsReady() ? seats : null, shareCents: 0 });
     return r.error ? res.status(r.code || 400).json({ ok: false, error: r.error })
                    : res.status(200).json({ ok: true, teamId: r.teamId, free: true });
   }
@@ -117,15 +136,23 @@ async function buyTeam(req, res) {
   if (!enabled) return res.status(503).json({ ok: false, error: 'Online payment isn’t available right now — please call the shop to buy your team.' });
   const settings = normalizeSettings(await getSettings());
   const origin = req.headers.origin || `https://${req.headers.host}`;
-  const size = league.team_size ? `${league.team_size} players` : 'your team';
+  // Seat by seat: the captain pays one share now. Without migration 0036 there is nowhere to record
+  // seats, so the captain pays the whole price exactly as before.
+  const split = !!seats && await splitPaymentsReady();
+  const share = split ? L.shareOf(league.fee_cents, seats) : league.fee_cents;
+  const money = (c) => `$${(c / 100).toFixed(2)}`;
+  const size = seats ? `${seats} golfers` : (league.team_size ? `${league.team_size} players` : 'your team');
   // Dynamic payment methods: no payment_method_types, exactly as api/gift-cards.js does it.
   const session = await stripeClient(process.env).checkout.sessions.create({
     mode: 'payment',
-    line_items: [{ quantity: 1, price_data: { currency: settings.currency, unit_amount: league.fee_cents,
-      product_data: { name: `${league.name} — team entry`,
-        description: `One season for ${size}.${league.description ? ' ' + league.description : ''}` } } }],
+    line_items: [{ quantity: 1, price_data: { currency: settings.currency, unit_amount: share,
+      product_data: { name: split ? `${league.name} — your share of the team` : `${league.name} — team entry`,
+        description: split
+          ? `Team of ${seats}: ${money(league.fee_cents)} shared ${seats} ways. Your teammates each pay their own share when they join.`
+          : `One season for ${size}.${league.description ? ' ' + league.description : ''}` } } }],
     customer_email: validEmail(me.email) ? me.email : undefined,
-    metadata: { kind: 'league-team', leagueId: league.id, teamName: nm, captainCustomerId: String(me.id) },
+    metadata: { kind: 'league-team', leagueId: league.id, teamName: nm, captainCustomerId: String(me.id),
+      ...(split ? { seats: String(seats), shareCents: String(share) } : {}) },
     success_url: `${origin}/leagues?success=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/leagues?canceled=1`,
   });
@@ -187,11 +214,12 @@ async function inviteInfo(req, res) {
   const { invite: inv, team, league } = found;
 
   const db = admin();
-  let teamFull = false;
-  if (db && league && league.team_size) {
-    const { data } = await db.from('league_members').select('id').eq('team_id', team.id).eq('status', 'active');
-    teamFull = (data || []).length >= Number(league.team_size);
-  }
+  // Full = every seat has a player (the team's own size since 0036, else the league's maximum).
+  // payToJoin: no paid seat is waiting for them, so joining costs one share.
+  const found2 = await teamMoneyFor(team.id);
+  const money = found2 && found2.money;
+  const size = Number(team.seats) || Number(league && league.team_size) || 0;
+  const teamFull = !!(size && money && money.players >= size);
   let invitedBy = null;
   if (db && inv.invited_by) {
     const { data } = await db.from('customers').select('name').eq('id', inv.invited_by).maybeSingle();
@@ -206,6 +234,9 @@ async function inviteInfo(req, res) {
     claimed: !!inv.claimed_at,
     revoked: !!inv.revoked_at,
     weeklyMins: (league && league.weekly_min_mins) || null,
+    seats: size || null,
+    payToJoin: !!(money && money.split && money.freeSeats < 1),
+    shareCents: money && money.split ? money.shareCents : 0,
   });
 }
 
@@ -217,7 +248,59 @@ async function inviteClaim(req, res) {
   if (!me) return res.status(401).json({ ok: false, error: 'Sign in (or make an account) first, then open your invite link again.' });
   const r = await claimTeamInvite({ token, customerId: me.id });
   if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  // No paid seat is waiting for them: their share first, through Checkout. The invite is spent and
+  // they join the team when the payment settles (confirm, or the Stripe webhook).
+  if (r.payRequired) {
+    const { enabled } = stripeStatus(process.env);
+    if (!enabled) return res.status(503).json({ ok: false, error: 'Online payment isn’t available right now — please call the shop to join the team.' });
+    const settings = normalizeSettings(await getSettings());
+    const origin = req.headers.origin || `https://${req.headers.host}`;
+    const session = await stripeClient(process.env).checkout.sessions.create({
+      mode: 'payment',
+      line_items: [{ quantity: 1, price_data: { currency: settings.currency, unit_amount: r.shareCents,
+        product_data: { name: `${(r.league && r.league.name) || 'League'} — your seat on ${r.team.name}`,
+          description: `Your share of the team price (a team of ${r.team.seats}).` } } }],
+      customer_email: validEmail(me.email) ? me.email : undefined,
+      metadata: { kind: 'league-seat', teamId: r.team.id, inviteId: r.invite.id, customerId: String(me.id) },
+      success_url: `${origin}/leagues?success=1&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/leagues?invite=${encodeURIComponent(token)}`,
+    });
+    return res.status(200).json({ ok: true, payRequired: true, url: session.url, shareCents: r.shareCents });
+  }
   return res.status(200).json({ ok: true, teamId: r.teamId, leagueId: r.leagueId, already: !!r.already });
+}
+
+// The captain covers seats for friends who have not joined (or will not pay) — so those friends
+// join for nothing, or so the venue is not left chasing the captain for them later.
+async function paySeats(req, res) {
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to pay for your team.' });
+  const { teamId, seats } = req.body || {};
+  const found = await teamMoneyFor(teamId);
+  if (!found) return res.status(404).json({ ok: false, error: 'That team no longer exists.' });
+  const { team, league, money } = found;
+  if (team.captain_customer_id !== me.id) return res.status(403).json({ ok: false, error: 'Only the team’s captain can pay for other seats.' });
+  if (!money.split) return res.status(409).json({ ok: false, error: 'Your team was paid for in full — there are no seats to cover.' });
+  if (!money.unpaidSeats) return res.status(409).json({ ok: false, error: 'Every seat on your team is already paid for.' });
+  const n = Math.floor(Number(seats));
+  if (!(n >= 1 && n <= money.unpaidSeats)) {
+    return res.status(400).json({ ok: false, error: `You can pay for 1 to ${money.unpaidSeats} seat${money.unpaidSeats === 1 ? '' : 's'}.` });
+  }
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) return res.status(503).json({ ok: false, error: 'Online payment isn’t available right now — you can pay at the counter.' });
+  const settings = normalizeSettings(await getSettings());
+  const origin = req.headers.origin || `https://${req.headers.host}`;
+  const session = await stripeClient(process.env).checkout.sessions.create({
+    mode: 'payment',
+    line_items: [{ quantity: n, price_data: { currency: settings.currency, unit_amount: money.shareCents,
+      product_data: { name: `${(league && league.name) || 'League'} — seat on ${team.name}`,
+        description: 'Paid by the captain. A friend who joins one of these seats pays nothing.' } } }],
+    customer_email: validEmail(me.email) ? me.email : undefined,
+    metadata: { kind: 'league-seat', teamId: team.id, seats: String(n), payerCustomerId: String(me.id) },
+    success_url: `${origin}/leagues?success=1&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/leagues?canceled=1`,
+  });
+  return res.status(200).json({ ok: true, url: session.url, amountCents: n * money.shareCents });
 }
 
 // The teams this player is on: roster, the season week by week, and the standings.
@@ -287,6 +370,9 @@ async function confirm(req, res) {
   // "not a league team" is the one answer that means "try the other kind"; everything else is the
   // real reason this payment could not be settled.
   if (!/not a league team/.test(team.error || '')) return res.status(team.code || 400).json({ ok: false, error: team.error });
+  const seat = await confirmLeagueSeatCheckout(stripe, sessionId);
+  if (seat.ok) return res.status(200).json({ ok: true, teamId: seat.teamId, leagueName: seat.league && seat.league.name, seat: true });
+  if (!/not a league seat/.test(seat.error || '')) return res.status(seat.code || 400).json({ ok: false, error: seat.error, refunded: !!seat.refunded });
   const r = await confirmLeagueCheckout(stripe, sessionId);
   if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
   return res.status(200).json({ ok: true, leagueName: r.league && r.league.name, email: r.email });

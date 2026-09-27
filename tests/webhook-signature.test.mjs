@@ -48,6 +48,7 @@ mock.module(url('lib', 'db.js'), { namedExports: {
   redeemPromo: rec('redeemPromo', {}),
   confirmLeagueCheckout: rec('confirmLeagueCheckout', {}),
   confirmLeagueTeamCheckout: rec('confirmLeagueTeamCheckout', {}),
+  confirmLeagueSeatCheckout: rec('confirmLeagueSeatCheckout', {}),   // 0036 seats — owned by tests/league-teams.test.mjs
   recordStripeEvent: rec('recordStripeEvent', { recorded: true }),
   forgetStripeEvent: rec('forgetStripeEvent', {}),
   // Reached through lib/refunds.js when api/webhook.js handles charge.refunded. Nothing in this

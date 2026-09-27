@@ -1,6 +1,6 @@
 import { stripeStatus, stripeClient, normalizeSettings } from '../lib/booking.js';
 import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingByPaymentIntent, setPaymentState,
-         redeemGiftCard, redeemPromo, confirmLeagueCheckout, confirmLeagueTeamCheckout,
+         redeemGiftCard, redeemPromo, confirmLeagueCheckout, confirmLeagueTeamCheckout, confirmLeagueSeatCheckout,
   recordStripeEvent, forgetStripeEvent, bookingForHold, bookingExistsForSetupIntent, rememberStripeCustomer } from '../lib/db.js';
 import { notifyBookingConfirmed } from '../lib/notify.js';
 import { applyChargeRefunded } from '../lib/refunds.js';
@@ -97,6 +97,17 @@ async function fulfil(event, stripe) {
     if (r.error && r.retry) throw new Error(`league team not saved: ${r.error}`);   // 500 → Stripe retries
     if (r.error) console.warn('⚠ League team ignored:', r.error);
     else console.log(`✅ League team saved — ${(r.team && r.team.name) || r.teamId}${r.already ? ' (already there)' : ''}`);
+    return;
+  }
+
+  // A seat on a team (migration 0036): a friend paying to join, or the captain covering seats.
+  // Backup for the success page; idempotent on the session, and it refunds by itself when the seat
+  // cannot be given (the team filled up while they paid).
+  if (sessionKind === 'league-seat') {
+    const r = await confirmLeagueSeatCheckout(stripe, event.data.object.id);
+    if (r.error && r.retry) throw new Error(`league seat not saved: ${r.error}`);   // 500 → Stripe retries
+    if (r.error) console.warn('⚠ League seat not given:', r.error);
+    else console.log(`✅ League seat paid — ${(r.team && r.team.name) || r.teamId}${r.already ? ' (already recorded)' : ''}`);
     return;
   }
 

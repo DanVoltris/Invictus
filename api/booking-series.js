@@ -9,7 +9,7 @@ import {
   getSettings, getOverridesForDate, staffContext,
   createSeries, seriesById, updateSeries, seriesNeedingHorizon, seriesOccurrences, seriesDatesPreview,
   groupConflicts, bookGroup, groupById, recordSeriesException, cancelGroup, moveGroup, recordRefund,
-  customerHoursByContact, heldBookings, bookingForHold, failedHolds,
+  customerHoursByContact, heldBookings, bookingForHold, failedHolds, recordSeatCollection,
 } from '../lib/db.js';
 
 // Group + recurring bookings. Dispatch on ?action= —
@@ -78,6 +78,7 @@ export default async function handler(req, res) {
   if (action === 'capture') return capture(req, res);
   if (action === 'release') return release(req, res);
   if (action === 'place-holds') return placeHolds(req, res);
+  if (action === 'league-collect') return leagueCollect(req, res);
   return res.status(400).json({ ok: false, error: 'Unknown action' });
 }
 
@@ -847,6 +848,33 @@ async function placeHolds(req, res) {
   if (out.error) return res.status(500).json({ ok: false, error: out.error });
   console.log(`place-holds: ${out.busy ? 'already running' : `${out.due} due · ${out.held} held · ${out.declined} declined · ${out.retry} to retry`}`);
   return res.status(200).json({ ok: true, ...out });
+}
+
+// ----- league-collect: staff took a captain's money for unpaid seats (migration 0036) ---------
+//
+//   POST /api/booking-series?action=league-collect   { teamId, seats, note? }   money.write
+//
+// A league team is paid seat by seat, and seats nobody paid for are owed by the captain. Holds to
+// Charge lists them and the tee sheet flags the captain on the days they come in; this is the
+// button staff press once they have the money (at the till or in Toast — nothing is charged here).
+// `seats` fewer than owed is a part payment: the rest stays flagged.
+async function leagueCollect(req, res) {
+  const who = await staff(req, res, 'money.write');
+  if (!who) return;
+  const b = req.body || {};
+  const teamId = String(b.teamId || '').trim();
+  if (!teamId || teamId.length > 64) return res.status(400).json({ ok: false, error: 'Which team? Send a teamId.' });
+  const out = await recordSeatCollection({
+    teamId, seats: b.seats, note: b.note || null,
+    by: (who.user && who.user.email) || (who.staff && who.staff.email) || 'manager',
+  });
+  if (!out.ok) return res.status(out.code || 400).json({ ok: false, error: out.error });
+  return res.status(200).json({
+    ok: true, collectedCents: out.collectedCents, seats: out.seats,
+    owedCents: out.money ? out.money.owedCents : null, unpaidSeats: out.money ? out.money.unpaidSeats : null,
+    message: `Recorded ${out.seats} seat${out.seats === 1 ? '' : 's'} collected for ${out.team.name}.`
+      + (out.money && out.money.unpaidSeats ? ` ${out.money.unpaidSeats} still unpaid.` : ' Every seat is now paid.'),
+  });
 }
 
 // ----- end ----------------------------------------------------------------------------------

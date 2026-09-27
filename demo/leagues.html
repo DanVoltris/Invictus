@@ -82,6 +82,21 @@
   .ck li{position:relative;padding-left:20px}
   .ck li:before{content:'✓';position:absolute;left:0;top:0;color:var(--ok);font-weight:700}
   .ck b{color:var(--white);font-weight:700}
+  /* "How many golfers?" — a built dropdown, not the browser's own (which the OS draws in its own
+     colours and ignores this stylesheet). Keyboard: arrows, Home/End, Enter/Space, Escape, Tab. */
+  .dd{position:relative}
+  .dd-btn{display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;cursor:pointer}
+  .dd-btn .dd-caret{color:var(--dim);flex:none;transition:transform .15s}
+  .dd-btn[aria-expanded="true"]{border-color:var(--orange)}
+  .dd-btn[aria-expanded="true"] .dd-caret{transform:rotate(180deg)}
+  .dd-list{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 6px);list-style:none;background:var(--surface);border:1px solid var(--border);
+    border-radius:12px;padding:6px;box-shadow:0 12px 32px rgba(20,22,26,.14);outline:none;max-height:260px;overflow:auto}
+  .dd-list[hidden]{display:none}
+  .dd-list li{display:flex;justify-content:space-between;gap:12px;padding:11px 12px;border-radius:9px;cursor:pointer;font-size:14.5px;color:var(--white)}
+  .dd-list li .dd-sub{color:var(--dim);font-size:13px}
+  .dd-list li.is-active{background:var(--surface-2)}
+  .dd-list li[aria-selected="true"]{color:var(--orange);font-weight:700}
+  .dd-list li[aria-selected="true"] .dd-sub{color:var(--orange)}
 </style>
 </head>
 <body>
@@ -102,8 +117,10 @@
 /* ============================================================================
    Leagues, sold by the team (migration 0031).
 
-   One captain pays one price for the whole team, then invites friends by phone number. There is no
-   league night: each team plays once a week whenever it likes, booked from the ordinary booking
+   The captain picks how many golfers (between the league's minimum and maximum), and the team price
+   is shared across them (migration 0036): the captain pays one share, each friend pays one when they
+   accept the invite, and a friend joining a seat the captain already covered pays nothing. There is
+   no league night: each team plays once a week whenever it likes, booked from the ordinary booking
    page, and those rounds are free because the season was paid up front.
 
    This page does three jobs:
@@ -136,9 +153,10 @@ const signInHref = back => '/account?next=' + encodeURIComponent(back);
 /*  POST /api/leagues?action=…
       list          (public)     → { ok, leagues:[{ id, name, description, fee_cents, team_size,
                                      weekly_min_mins, season_start, season_end, teamCount, myTeamId }] }
-      buy-team      (signed in)  { leagueId, teamName } → { ok, url } | { ok, teamId }
-      invite-info   (public)     { token } → { ok, leagueName, teamName, invitedBy, teamFull, claimed }
-      invite-claim  (signed in)  { token } → { ok, teamId }
+      buy-team      (signed in)  { leagueId, teamName, seats } → { ok, url } | { ok, teamId }
+      invite-info   (public)     { token } → { ok, leagueName, teamName, invitedBy, teamFull, claimed,
+                                             payToJoin, shareCents, seats }
+      invite-claim  (signed in)  { token } → { ok, teamId } | { ok, payRequired, url }
       my-teams      (signed in)  → { ok, teams:[…] }
     A 404 means the action is not deployed yet; 401/403 means "not signed in". Both get words, never
     a blank screen. */
@@ -181,11 +199,11 @@ function listView(){
     <div class="head-block">
       <div class="eyebrow">Invictus Golf leagues</div>
       <h1>Start a team</h1>
-      <div class="sub">A league here is sold by the team, not by the player. One person pays once for the whole team, invites their friends, and then you play a round a week whenever it suits you — and those rounds cost nothing.</div>
+      <div class="sub">A league here is sold by the team. The team price is split between the players, everyone pays their own share, and then you play a round a week whenever it suits you — and those rounds cost nothing.</div>
     </div>
     <div class="how">
-      <div class="how-step"><div class="n">Step 1</div><div class="t">Pay for the team</div><div class="d">One price, one payment, the whole season. You name the team.</div></div>
-      <div class="how-step"><div class="n">Step 2</div><div class="t">Invite your players</div><div class="d">Add them by mobile number from My Account. They tap the link and they are on the team.</div></div>
+      <div class="how-step"><div class="n">Step 1</div><div class="t">Start the team</div><div class="d">Name it, pick how many golfers, and pay your own share. You are the captain.</div></div>
+      <div class="how-step"><div class="n">Step 2</div><div class="t">Invite your players</div><div class="d">Add them by mobile number from My Account. They tap the link, pay their share, and they are on the team.</div></div>
       <div class="how-step"><div class="n">Step 3</div><div class="t">Play once a week</div><div class="d">Book any bay at any time you like. Anyone on the team can book it, and it is free.</div></div>
     </div>
     <div class="plans">${LEAGUES.map(planCard).join('')}</div>
@@ -202,13 +220,19 @@ function planCard(l){
   const mine = myTeamIn(l);
   const size = l.team_size != null ? l.team_size : l.capacity;   // 0031 moves capacity → team_size
   const hrs = Math.round(((l.weekly_min_mins || 180)/60)*10)/10;
+  const range = L.seatRange({ team_size: size, team_min: l.team_min });
+  // Per golfer: one figure for a fixed size, a from–to for a range (fewer golfers pay more each).
+  const each = !(l.fee_cents > 0) || !range ? ''
+    : range.min === range.max ? `${money(L.shareOf(l.fee_cents, range.max))} per golfer`
+    : `${money(L.shareOf(l.fee_cents, range.max))}–${money(L.shareOf(l.fee_cents, range.min))} per golfer`;
   return `<div class="plan">
     <div class="plan-name"><span class="cdot" style="background:${esc(l.color||'#4AA3FF')}"></span>${esc(l.name)}</div>
     <div class="plan-when">${esc(L.scheduleLabel(l))}</div>
     <div class="plan-price">${l.fee_cents>0 ? money(l.fee_cents)+'<span class="per">per team / season</span>' : 'Free<span class="per">per team</span>'}</div>
     <ul class="facts">
+      ${each ? `<li><b>${each}</b> — everyone pays their own share</li>` : ''}
       <li>${esc(season(l))}</li>
-      <li>${size ? `Up to <b>${size} players</b> on a team` : 'As many players as you like on a team'}</li>
+      <li>${range ? (range.min === range.max ? `Teams of <b>${range.max} golfers</b>` : `Teams of <b>${range.min} to ${range.max} golfers</b> — you pick`) : 'As many players as you like on a team'}</li>
       <li>One round a week, <b>any bay, any time</b> — about ${hrs} hour${hrs===1?'':'s'} is the usual</li>
       <li>Every round is <b>free</b> — the season is paid up front</li>
       ${l.teamCount!=null ? `<li>${l.teamCount} team${l.teamCount===1?'':'s'} signed up so far</li>` : ''}
@@ -222,29 +246,66 @@ function planCard(l){
   </div>`;
 }
 
-/* ---------- start a team: name it, pay for it ---------- */
+/* ---------- start a team: name it, pick its size, pay your share ---------- */
 function startView(league){
   if(!league) return;
   const paid = league.fee_cents > 0;
   const size = league.team_size != null ? league.team_size : league.capacity;
+  const range = L.seatRange({ team_size: size, team_min: league.team_min });
+  let seats = range ? range.max : null;              // biggest team = smallest share, until they pick
+  const shareFor = n => (paid && n) ? L.shareOf(league.fee_cents, n) : 0;
+  const pickable = !!(range && range.min < range.max);
+
   render(`
     <div class="card">
       <h2>Start a team in ${esc(league.name)}</h2>
       <div class="sub">${esc(season(league))} · ${esc(L.scheduleLabel(league))}</div>
-      <div class="summary"><span class="s-name">One team, whole season</span><span class="s-price">${paid ? money(league.fee_cents) : 'Free'}</span></div>
-      <ul class="ck">
-        <li>You pay <b>once for the team</b>, not per player.</li>
-        <li>You are the captain: you invite ${size ? `up to <b>${size-1} more player${size-1===1?'':'s'}</b>` : 'your players'} by mobile number from My Account.</li>
-        <li>Your team plays <b>once a week, whenever suits you</b> — there is no fixed league night.</li>
-        <li>Those weekly rounds are <b>free</b>, in any bay, and anyone on the team can book one.</li>
-      </ul>
+      <div class="summary"><span class="s-name" id="t-sum-l"></span><span class="s-price" id="t-sum-p"></span></div>
+      <ul class="ck" id="t-ck"></ul>
       <label class="fld" for="t-name">Team name</label>
       <input class="input" id="t-name" maxlength="60" placeholder="e.g. The Mulligans" autocomplete="off" />
+      ${pickable ? `
+      <label class="fld" id="t-seats-l">How many golfers?</label>
+      <div class="dd" id="t-seats">
+        <button type="button" class="input dd-btn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="t-seats-l t-seats-v">
+          <span id="t-seats-v"></span><svg class="dd-caret" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <ul class="dd-list" role="listbox" tabindex="-1" aria-labelledby="t-seats-l" hidden>
+          ${Array.from({ length: range.max - range.min + 1 }, (_, i) => range.min + i).map(n =>
+            `<li role="option" id="t-seat-${n}" data-v="${n}" aria-selected="false"><span>${n} golfers</span>${paid ? `<span class="dd-sub">${money(shareFor(n))} each</span>` : ''}</li>`).join('')}
+        </ul>
+      </div>` : ''}
       <div class="err" id="t-err"></div>
-      <button class="btn btn-primary" id="t-go">${paid ? 'Continue to secure payment' : 'Start the team'}</button>
+      <button class="btn btn-primary" id="t-go"></button>
       <button class="btn btn-ghost" id="t-back">Back to leagues</button>
-      ${paid ? '<div class="fine">You finish on Stripe\'s secure checkout. One payment for the season — no auto-renewal.</div>' : ''}
+      ${paid ? '<div class="fine">You finish on Stripe\'s secure checkout. One payment for your share of the season — no auto-renewal.</div>' : ''}
     </div>`);
+
+  // Everything that depends on the team size, redrawn whenever it changes.
+  const goLabel = () => paid ? (seats ? `Pay my share — ${money(shareFor(seats))}` : 'Continue to secure payment') : 'Start the team';
+  function refresh(){
+    const share = shareFor(seats);
+    $('#t-sum-l').textContent = seats ? `Team of ${seats}${paid ? ` · ${money(league.fee_cents)} for the team` : ''}` : 'One team, whole season';
+    $('#t-sum-p').textContent = !paid ? 'Free' : seats ? `${money(share)} each` : money(league.fee_cents);
+    $('#t-ck').innerHTML = (paid && seats ? [
+        `You pay <b>your own share, ${money(share)}</b>, now.`,
+        `You invite <b>${seats-1} more golfer${seats-1===1?'':'s'}</b> by mobile number from My Account, and each pays their own ${money(share)} when they join.`,
+        `Any seat nobody has paid for by the time the season starts is <b>collected from you</b> at the shop — or pay for a friend's seat yourself from My Account.`,
+      ] : [
+        paid ? 'You pay <b>once for the team</b>, not per player.' : 'It costs <b>nothing</b> to start a team.',
+        `You are the captain: you invite ${size ? `up to <b>${size-1} more player${size-1===1?'':'s'}</b>` : 'your players'} by mobile number from My Account.`,
+      ]).concat([
+        'Your team plays <b>once a week, whenever suits you</b> — there is no fixed league night.',
+        'Those weekly rounds are <b>free</b>, in any bay, and anyone on the team can book one.',
+      ]).map(x => `<li>${x}</li>`).join('');
+    $('#t-go').textContent = goLabel();
+    if(pickable){
+      $('#t-seats-v').innerHTML = `${seats} golfers${paid ? ` <span style="color:var(--dim)">· ${money(share)} each</span>` : ''}`;
+      document.querySelectorAll('#t-seats [role=option]').forEach(o => o.setAttribute('aria-selected', String(Number(o.dataset.v) === seats)));
+    }
+  }
+  refresh();
+  if(pickable) wireDropdown($('#t-seats'), () => seats, v => { seats = v; refresh(); });
+
   $('#t-back').onclick = listView;
   const nameEl = $('#t-name'), err = $('#t-err'), go = $('#t-go');
   nameEl.addEventListener('input', () => nameEl.classList.remove('invalid'));
@@ -254,10 +315,10 @@ function startView(league){
     const teamName = nameEl.value.trim();
     if(teamName.length < 2){ err.textContent = 'Give your team a name of two characters or more — it is what the other teams see in the standings.'; nameEl.classList.add('invalid'); nameEl.focus(); return; }
     err.textContent=''; go.disabled=true; go.textContent = paid ? 'Redirecting to payment…' : 'Starting…';
-    const r = await leaguesApi('buy-team', { leagueId: league.id, teamName });
+    const r = await leaguesApi('buy-team', { leagueId: league.id, teamName, seats: seats || undefined });
     if(r.ok && r.url){ window.location.href = r.url; return; }
     if(r.ok && r.teamId){ doneView(teamName, league.name); return; }
-    go.disabled=false; go.textContent = paid ? 'Continue to secure payment' : 'Start the team';
+    go.disabled=false; go.textContent = goLabel();
     const back = '/leagues?start=' + encodeURIComponent(league.id);
     if(r.status===401 || r.status===403){
       err.innerHTML = `Your sign-in has expired. <a href="${esc(signInHref(back))}">Sign in again</a> and we will bring you back here.`;
@@ -268,6 +329,42 @@ function startView(league){
     if(r.status===409 && r.teamId){ err.innerHTML = `${esc(r.error || 'You are already on a team in this league.')} <a href="/account">See your team</a>.`; return; }
     err.textContent = r.error || `Could not start your team. Please try again, or call the shop at ${SHOP}.`;
   };
+}
+
+// A listbox dropdown with full keyboard support: on the button, ↓/↑/Enter/Space open it; inside it,
+// ↑/↓ move, Home/End jump, Enter/Space pick, Escape closes without picking, Tab closes. A click
+// outside closes it. get()/set() read and write the chosen number.
+function wireDropdown(root, get, set){
+  const btn = root.querySelector('.dd-btn'), list = root.querySelector('[role=listbox]');
+  const opts = [...list.querySelectorAll('[role=option]')];
+  let active = 0;
+  const show = i => {
+    active = Math.max(0, Math.min(opts.length - 1, i));
+    opts.forEach((o, j) => o.classList.toggle('is-active', j === active));
+    list.setAttribute('aria-activedescendant', opts[active].id);
+    opts[active].scrollIntoView({ block: 'nearest' });
+  };
+  const open = () => {
+    list.hidden = false; btn.setAttribute('aria-expanded', 'true');
+    show(Math.max(0, opts.findIndex(o => Number(o.dataset.v) === get())));
+    list.focus();
+  };
+  const close = (refocus) => { list.hidden = true; btn.setAttribute('aria-expanded', 'false'); if(refocus) btn.focus(); };
+  const choose = i => { set(Number(opts[i].dataset.v)); close(true); };
+  btn.onclick = () => list.hidden ? open() : close(false);
+  btn.onkeydown = e => { if(['ArrowDown','ArrowUp','Enter',' '].includes(e.key)){ e.preventDefault(); open(); } };
+  list.onkeydown = e => {
+    const k = e.key;
+    if(k === 'ArrowDown'){ e.preventDefault(); show(active + 1); }
+    else if(k === 'ArrowUp'){ e.preventDefault(); show(active - 1); }
+    else if(k === 'Home'){ e.preventDefault(); show(0); }
+    else if(k === 'End'){ e.preventDefault(); show(opts.length - 1); }
+    else if(k === 'Enter' || k === ' '){ e.preventDefault(); choose(active); }
+    else if(k === 'Escape'){ e.preventDefault(); close(true); }
+    else if(k === 'Tab'){ close(false); }
+  };
+  opts.forEach((o, i) => { o.onmousemove = () => show(i); o.onclick = () => choose(i); });
+  document.addEventListener('mousedown', e => { if(!list.hidden && !root.contains(e.target)) close(false); });
 }
 
 function doneView(teamName, leagueName){
@@ -293,7 +390,10 @@ async function successView(sessionId){
   // the other side, so whichever arrives first wins and the second one is a no-op.
   if(sessionId){
     const c = await leaguesApi('confirm', { sessionId });
+    // A seat payment: a friend who just paid to join, or a captain who covered seats.
+    if(c.ok && c.seat){ seatPaidView(c.leagueName); return; }
     if(c.ok){ doneView(c.teamName || 'Your team', c.leagueName); return; }
+    if(c.refunded){ inviteProblem('Refunded — no seat left', c.error || 'The team filled up while you were paying, so your payment has been refunded in full.'); return; }
   }
   await loadMyTeams();
   const team = (MY_TEAMS||[])[0];
@@ -338,9 +438,14 @@ async function inviteView(token){
     return;
   }
 
+  // Seat by seat (0036): either a paid seat is waiting (join free) or they pay their own share.
+  const pay = !!r.payToJoin && r.shareCents > 0;
+  const joinLabel = pay ? `Pay my share — ${money(r.shareCents)} — and join` : `Join ${team}`;
   render(`<div class="card">
     <h2>You are invited</h2>
-    <div class="sub">Joining a team costs you nothing — the season is already paid for.</div>
+    <div class="sub">${pay ? `Your share of the team is <b>${esc(money(r.shareCents))}</b>${r.seats ? ` — the team price split ${r.seats} ways` : ''}. You pay it on the next screen, then you are on the team.`
+      : r.shareCents > 0 ? 'Your seat is already paid for — joining costs you nothing.'
+      : 'Joining a team costs you nothing — the season is already paid for.'}</div>
     <div class="invited">
       <div class="who">${esc(by)} wants you on ${esc(team)}</div>
       <div class="what">${esc(league)}</div>
@@ -352,7 +457,7 @@ async function inviteView(token){
     </ul>
     <div class="err" id="i-err"></div>
     ${SIGNED_IN
-      ? `<button class="btn btn-primary" id="i-join">Join ${esc(team)}</button>`
+      ? `<button class="btn btn-primary" id="i-join">${esc(joinLabel)}</button>`
       : `<a class="btn btn-primary" href="${esc(signInHref(back))}">Create an account to join</a>
          <div class="fine">You need an account so the team knows who you are. It takes about a minute — we text you a code — and we bring you straight back to this invitation.</div>`}
     <a class="btn btn-ghost" href="/leagues">See the leagues first</a>
@@ -360,16 +465,31 @@ async function inviteView(token){
 
   if(SIGNED_IN) $('#i-join').onclick = async () => {
     const btn = $('#i-join'), err = $('#i-err');
-    btn.disabled = true; btn.textContent = 'Joining…'; err.textContent = '';
+    btn.disabled = true; btn.textContent = pay ? 'Opening secure payment…' : 'Joining…'; err.textContent = '';
     const j = await leaguesApi('invite-claim', { token });
+    if(j.ok && j.payRequired && j.url){ location.href = j.url; return; }
     if(j.ok){ joinedView(team, league, j.already); return; }
-    btn.disabled = false; btn.textContent = 'Join ' + team;
+    btn.disabled = false; btn.textContent = joinLabel;
     if(j.status===401 || j.status===403){ err.innerHTML = `Your sign-in has expired. <a href="${esc(signInHref(back))}">Sign in again</a> and we will bring you back to this invitation.`; return; }
     if(j.status===409){ err.textContent = j.error || `That invitation has just been used, or the team filled up. Ask ${by} to send another, or call the shop at ${SHOP}.`; return; }
     if(j.status===404){ err.textContent = `Joining a team online is not switched on yet. Call the shop at ${SHOP}, tell them ${by} invited you, and we will add you.`; return; }
     if(j.status===503){ err.textContent = `Team leagues are still being set up here, so we cannot add you yet. Call the shop at ${SHOP}, tell them ${by} invited you, and we will do it by hand.`; return; }
     err.textContent = j.error || `Could not join the team. Please try again, or call the shop at ${SHOP}.`;
   };
+}
+
+function seatPaidView(leagueName){
+  render(`<div class="center">
+    <div class="big ok">✓</div>
+    <h1>Payment received</h1>
+    <div class="note is-ok" style="text-align:left;margin-top:16px">
+      Your seat${leagueName ? ' in ' + esc(leagueName) : ''} is paid. Your team, its seats and the weeks you have played are on My Account —
+      and your weekly rounds are free, booked from the booking page any time.
+    </div>
+    <a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">See my team</a>
+    <a class="btn btn-ghost" href="/?league-round=1" style="max-width:320px;margin:10px auto 0">Book this week's round</a>
+  </div>`);
+  history.replaceState({}, '', '/leagues');
 }
 
 function inviteProblem(title, body, account){

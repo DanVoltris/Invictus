@@ -119,6 +119,15 @@
   .inv-link .btn{width:auto;margin:0;padding:0 16px;font-size:13px;white-space:nowrap}
   .inv-ok{color:var(--ok);font-size:12.5px;margin-top:8px;line-height:1.5}
   .lg-note{border-radius:12px;padding:13px 15px;font-size:13px;line-height:1.55;background:var(--near-black);border:1px solid var(--border);color:var(--muted)}
+  /* Seats (migration 0036): the team price shared seat by seat. */
+  .seat-bar{display:flex;gap:4px;margin:8px 0 6px}
+  .seat-bar i{flex:1;height:8px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border)}
+  .seat-bar i.is-paid{background:#4ec06a;border-color:#3aa857}
+  .lg-note.is-owed{background:rgba(240,82,61,.08);border-color:rgba(240,82,61,.4);color:#A8321F}
+  .seat-pick{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+  .seat-pick button{border:1px solid var(--border);background:var(--near-black);color:var(--muted);border-radius:10px;padding:8px 13px;font-family:'Space Grotesk';font-weight:700;font-size:13.5px;cursor:pointer}
+  .seat-pick button.is-on{border-color:var(--orange);color:var(--orange);background:rgba(240,82,61,.08)}
+  .seat-pick button:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
 </style>
 </head>
 <body>
@@ -601,7 +610,10 @@ function teamCard(t, idx, opts){
   const paidCents = team.paid_cents != null ? team.paid_cents : (t.paidCents || 0);
   const paidAt = team.paid_at || t.paidAt || null;
   const seasonPaid = !(lg.fee_cents > 0) || !!paidAt || paidCents > 0;
+  // Seat by seat (0036): the team price shared across the seats the captain picked.
+  const st = t.seats || null;
   const paidPill = !(lg.fee_cents > 0) ? '<span class="pill ok">Free to play</span>'
+    : st ? (st.paidSeats >= st.seats ? '<span class="pill ok">Every seat paid</span>' : `<span class="pill warn">${st.paidSeats} of ${st.seats} seats paid</span>`)
     : seasonPaid ? '<span class="pill ok">Season paid</span>' : '<span class="pill warn">Not paid yet</span>';
 
   // This week: the whole point of the card. Either it is booked and here is where to turn up, or
@@ -653,15 +665,40 @@ function teamCard(t, idx, opts){
     ? `<div class="chips">${roster.map(p => `<span class="chip${isMe(p)?' is-you':''}">${esc(L.publicName(p.name))}${isCap(p)?' · captain':''}${isMe(p)?' (you)':''}</span>`).join('')}</div>`
     : '<div class="empty" style="padding:8px 0">Nobody else on the team yet.</div>';
 
-  const size = lg.team_size != null ? lg.team_size : lg.capacity;
+  const size = st ? st.seats : (lg.team_size != null ? lg.team_size : lg.capacity);
   const room = size ? Math.max(0, size - roster.length) : null;
+
+  // Seats and payments. Everyone sees how many are paid; the captain — who owes for the rest — also
+  // sees the amount, who is still to accept, and can pay for seats (their friends then join free).
+  let seatsBlock = '';
+  if(st){
+    const bar = Array.from({ length: st.seats }, (_, i) => `<i class="${i < st.paidSeats ? 'is-paid' : ''}"></i>`).join('');
+    const intro = `Team of ${st.seats} · ${money(st.shareCents)} per golfer. ${st.paidSeats} of ${st.seats} seat${st.seats===1?'':'s'} paid`
+      + `${st.freeSeats ? ` — ${st.freeSeats} paid seat${st.freeSeats===1?' is':'s are'} waiting, so the next ${st.freeSeats===1?'friend joins':st.freeSeats+' friends join'} free` : ''}.`;
+    let capPart = '';
+    if(iAmCaptain && st.unpaidSeats){
+      const invited = (st.invited || []).length ? ` Still to accept: ${(st.invited||[]).map(i => esc(i.name)).join(', ')}.` : '';
+      capPart = `<div class="lg-note is-owed" style="margin-top:10px"><b>${money(st.owedCents)} unpaid</b> for ${st.unpaidSeats} seat${st.unpaidSeats===1?'':'s'}.
+          Each friend pays their own ${money(st.shareCents)} when they accept your invite.${invited}
+          ${st.due ? ' <b>The season has started, so the shop will collect whatever is still unpaid from you</b> — or pay for the seats now.'
+                   : ' Anything still unpaid when the season starts is collected from you at the shop.'}</div>
+        <div class="sub" style="margin:12px 0 0">Pay for seats yourself — a friend who joins a paid seat pays nothing:</div>
+        <div class="seat-pick" role="radiogroup" aria-label="How many seats to pay for">${Array.from({ length: st.unpaidSeats }, (_, i) => i + 1)
+          .map(n => `<button type="button" role="radio" aria-checked="${n===1}" class="${n===1?'is-on':''}" data-seats="${n}" tabindex="${n===1?0:-1}">${n} · ${money(n * st.shareCents)}</button>`).join('')}</div>
+        <div class="err seat-err"></div>
+        <button class="btn btn-ghost seat-go" data-share="${st.shareCents}" style="margin-top:8px">Pay for 1 seat — ${money(st.shareCents)}</button>`;
+    }
+    seatsBlock = `<div class="sec-title">Seats &amp; payments</div>
+      <div class="seat-bar" aria-hidden="true">${bar}</div>
+      <div class="sub" style="margin:0">${intro}</div>${capPart}`;
+  }
   // Not the captain: say who can add a player rather than showing a control the server will refuse.
   const invite = iAmCaptain === false ? `
     <div class="lg-note" style="margin-top:12px">${captain
       ? `Only the captain can add players. Ask ${esc(L.publicName(captain.name))} to send an invite from their own My Account.`
       : 'Only the team captain can add players, and the shop has not recorded one for this team. Call 204-488-6177 and we will add your player for you.'}</div>` : `
     <div class="sec-title">Invite a player</div>
-    <div class="sub" style="margin-bottom:10px">${iAmCaptain === null ? 'If you are the captain, you' : 'You'} can add players by mobile number${room!=null ? ` — room for ${room} more` : ''}. We give you a link to send them; they tap it and they are on the team.</div>
+    <div class="sub" style="margin-bottom:10px">${iAmCaptain === null ? 'If you are the captain, you' : 'You'} can add players by mobile number${room!=null ? ` — room for ${room} more` : ''}. We give you a link to send them; they tap it${st ? `, pay their own ${money(st.shareCents)} share (nothing if you have covered their seat),` : ''} and they are on the team.</div>
     <label class="fld" for="inv-phone-${idx}">Their mobile number</label>
     <input class="input inv-phone" id="inv-phone-${idx}" type="tel" inputmode="tel" placeholder="(204) 000-0000" ${room===0?'disabled':''} />
     <label class="fld" for="inv-name-${idx}" style="margin-top:12px">Their name <span class="opt">(optional)</span></label>
@@ -679,7 +716,8 @@ function teamCard(t, idx, opts){
     ['Format', `${lg.team_mode === false ? 'Individual play' : 'Teams'} · ${strokes ? 'strokes — lowest average wins' : 'points — most points wins'}`],
     ['Captain', captain ? `${L.publicName(captain.name)}${isMe(captain) ? ' (you)' : ''}` : 'Not recorded'],
     ['Season fee', lg.fee_cents > 0
-      ? (seasonPaid ? `${money(paidCents || lg.fee_cents)} paid for the team${paidAt ? ' ' + fmtDate(venueDate(paidAt)) : ''}` : `${money(lg.fee_cents)} for the team — not paid yet`)
+      ? (st ? `${money(st.shareCents * st.seats)} for the team — ${money(st.shareCents)} each, ${st.paidSeats} of ${st.seats} paid`
+        : seasonPaid ? `${money(paidCents || lg.fee_cents)} paid for the team${paidAt ? ' ' + fmtDate(venueDate(paidAt)) : ''}` : `${money(lg.fee_cents)} for the team — not paid yet`)
       : 'Free'],
   ];
 
@@ -690,6 +728,7 @@ function teamCard(t, idx, opts){
     ${now}
     <div class="sec-title">On the team</div>
     ${chips}
+    ${seatsBlock}
     ${invite}
     <div class="sec-title">Week by week</div>
     ${weeks.length ? `<div class="sched">${weekRows}</div>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`
@@ -703,6 +742,36 @@ function teamCard(t, idx, opts){
 
 // The captain's invite control: a phone number in, a single-use link out.
 function wireTeams(teams){
+  // The captain paying for seats: pick how many (a radio group with arrow keys), then Checkout.
+  document.querySelectorAll('[data-team-card]').forEach(card => {
+    const go = card.querySelector('.seat-go');
+    if(!go) return;
+    const opts = [...card.querySelectorAll('.seat-pick button')], err = card.querySelector('.seat-err');
+    const money = c => '$' + (c/100).toFixed(c % 100 ? 2 : 0);
+    const share = Number(go.dataset.share) || 0;
+    let n = 1;
+    const pick = (b, focus) => {
+      opts.forEach(x => { const on = x === b; x.classList.toggle('is-on', on); x.setAttribute('aria-checked', String(on)); x.tabIndex = on ? 0 : -1; });
+      n = Number(b.dataset.seats); go.textContent = `Pay for ${n} seat${n===1?'':'s'} — ${money(n * share)}`;
+      if(focus) b.focus();
+    };
+    opts.forEach((b, i) => {
+      b.onclick = () => pick(b);
+      b.onkeydown = e => {
+        const k = e.key, last = opts.length - 1;
+        const to = k==='ArrowRight'||k==='ArrowDown' ? Math.min(last, i+1) : k==='ArrowLeft'||k==='ArrowUp' ? Math.max(0, i-1)
+          : k==='Home' ? 0 : k==='End' ? last : null;
+        if(to!=null){ e.preventDefault(); pick(opts[to], true); }
+      };
+    });
+    go.onclick = async () => {
+      err.textContent = ''; go.disabled = true; go.textContent = 'Opening secure payment…';
+      const r = await leaguesPost('pay-seats', { teamId: card.dataset.teamId, seats: n });
+      if(r.ok && r.url){ location.href = r.url; return; }
+      go.disabled = false; go.textContent = `Pay for ${n} seat${n===1?'':'s'} — ${money(n * share)}`;
+      err.textContent = r.error || 'Could not open the payment. Try again, or pay at the shop — 204-488-6177.';
+    };
+  });
   document.querySelectorAll('[data-team-card]').forEach(card => {
     const btn = card.querySelector('.inv-go');
     if(!btn) return;

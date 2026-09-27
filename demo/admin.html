@@ -296,6 +296,10 @@
   /* A team's weekly league round (migration 0031): a blue stripe, so it never reads as an ordinary booking. */
   .cell.bk.is-league,.cell.bk.grp.is-league{box-shadow:inset 3px 0 0 #4AA3FF}
   .gcard.is-league{border-left:3px solid #4AA3FF}
+  /* League money owed by a captain (migration 0036): shown until staff mark it collected. */
+  .owe-flag{margin-top:6px;padding:6px 8px;border-radius:8px;font-size:11.5px;font-weight:700;line-height:1.35;
+    background:rgba(240,82,61,.10);border:1px solid rgba(240,82,61,.45);color:#B3261E}
+  .owe-flag .dim{font-weight:500;color:#B3261E;opacity:.85}
   .gtag{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;
     padding:1px 6px;border-radius:999px;line-height:1.6;white-space:nowrap;background:rgba(240,82,61,.12);color:#B3261E;border:1px solid rgba(240,82,61,.4)}
   .gtag.srs{background:rgba(74,163,255,.12);color:#1B62B5;border-color:rgba(74,163,255,.4)}
@@ -1373,6 +1377,9 @@ let OVERRIDES = [];      // active schedule overrides that touch the visible ran
 // sidebar can carry the count on every screen — a hold running out is not a thing to discover.
 // `failed` are far-ahead bookings whose saved card was declined when the hold was placed (0035).
 let HOLDS = { rows:null, due:0, critical:0, expired:0, failed:[], error:null, loading:false };
+// League seats owed by captains (migration 0036) — declared up here with HOLDS because the sidebar
+// draws its count on the very first render. Filled by fetchLeagueOwed().
+let LEAGUE_OWED = { rows:[], at:0 };
 // How many days ahead the server will still take a HOLD rather than charging outright, and how
 // long an authorisation survives. Filled in by boot() from /api/config — never assumed, because
 // a wrong number here would be a promise the bank does not keep. See holdWindowText().
@@ -1706,11 +1713,12 @@ function renderSideNav(){
     // Nothing left to charge but something already expired still has to be seen, so the count
     // falls back to the expired one rather than disappearing.
     // A declined saved card counts too: that booking has no money behind it at all.
-    const nFailed = (HOLDS.failed||[]).length;
-    const hn = (HOLDS.due + nFailed) || HOLDS.expired;
+    const nFailed = (HOLDS.failed||[]).length, nOwed = LEAGUE_OWED.rows.length;
+    const hn = (HOLDS.due + nFailed + nOwed) || HOLDS.expired;
     const badge = t.id==='holds' && hn
-      ? `<span class="side-badge${(HOLDS.critical||HOLDS.expired||nFailed)?' is-critical':''}" title="${
+      ? `<span class="side-badge${(HOLDS.critical||HOLDS.expired||nFailed||nOwed)?' is-critical':''}" title="${
           nFailed ? nFailed+' card'+(nFailed===1?'':'s')+' declined — take payment at the counter'
+          : nOwed ? nOwed+' league captain'+(nOwed===1?'':'s')+' owe money'
           : HOLDS.due ? (HOLDS.critical?HOLDS.critical+' running out today':'waiting to be charged')
                     : HOLDS.expired+' expired, nothing can be charged'}">${hn}</span>`
       : '';
@@ -2930,13 +2938,15 @@ async function loadLeaguesTab(){
   if(leagueRoute()) return openLeaguePage(leagueRoute());   // the address bar is showing one league
   showLeagueIndex();
   const host=$('#lea-list');
-  const [l, m, t, p] = await Promise.all([
+  const [l, m, t, p, p36] = await Promise.all([
     sb.from('leagues').select('*').order('sort').order('season_start'),
     sb.from('league_members').select('league_id,status'),
     sb.from('league_teams').select('league_id'),
     sb.from('leagues').select('id,team_size,weekly_min_mins').limit(1),   // has migration 0031 been run?
+    sb.from('leagues').select('id,team_min').limit(1),                    // …and 0036 (min team size)?
   ]);
   LG31.league = !p.error;
+  LG31.min = !p36.error;
   renderBookingWindowCard();
   if(l.error){
     if(isAuthError(l.error)) return;
@@ -2955,7 +2965,7 @@ async function loadLeaguesTab(){
         <span class="sub">${esc(LG().scheduleLabel(x))}</span>
         <span class="kv"><span class="k">Season</span><span>${esc(seasonText(x))}${pr.total?` · ${cur?'week '+cur.number+' of '+pr.total:pr.total+' weeks'}`:''}</span></span>
         <span class="kv"><span class="k">${x.team_mode?'Teams':'Players'}</span><span>${x.team_mode?`${teamCounts[x.id]||0} · ${n} player${n===1?'':'s'}`:n}</span></span>
-        <span class="kv"><span class="k">Price</span><span>${x.fee_cents?money(x.fee_cents)+(x.team_mode?' per team':' per player'):'Free'}</span></span>
+        <span class="kv"><span class="k">Price</span><span>${x.fee_cents?money(x.fee_cents)+(x.team_mode?' per team':' per player'):'Free'}${x.fee_cents&&x.team_size?` · ${teamSizeText(x)}`:''}</span></span>
         <span class="kv" style="border:none"><span class="k">Sign-up</span><span>${x.join_online?'Online and staff':'Staff only'}</span></span>
       </button>`; }).join('')}</div>`
     : `<div class="card"><div class="empty">No leagues yet. Create one with “+ New league”.</div></div>`;
@@ -3005,17 +3015,26 @@ const ROUND_LENGTHS = [60,90,120,150,180,210,240,300];
 const roundLenOptions = sel => ROUND_LENGTHS.concat(ROUND_LENGTHS.includes(sel)||!sel?[]:[sel]).sort((a,b)=>a-b)
   .map(m=>`<option value="${m}" ${m===sel?'selected':''}>${m%60?(m/60).toFixed(1):m/60} hour${m===60?'':'s'}</option>`).join('');
 
+// "teams of 4 · $150 each", or "teams of 3–5 · $120–$200 each" — what a captain will be offered.
+function teamSizeText(x){
+  const r=LG().seatRange(x); if(!r) return '';
+  const each = x.fee_cents>0 ? (r.min===r.max ? money(LG().shareOf(x.fee_cents,r.max))
+    : money(LG().shareOf(x.fee_cents,r.max))+'–'+money(LG().shareOf(x.fee_cents,r.min)))+' each' : '';
+  return `teams of ${r.min===r.max?r.max:r.min+'–'+r.max}${each?' · '+each:''}`;
+}
+
 function openLeagueEditor(x){
   if(!can('booking.write')) return;
   const isNew=!x;
   x=x||{ team_mode:true, scoring:'points', join_online:true, is_active:true, bay_ids:[], fee_cents:0, weekly_min_mins:180 };
   const bays=new Set(x.bay_ids||[]);
   const cols31 = isNew ? LG31.league : ('weekly_min_mins' in x);   // 0031 columns readable here?
+  const cols36 = isNew ? !!LG31.min : ('team_min' in x);            // 0036: minimum team size
   sheet.classList.remove('res-wide');
   sheet.innerHTML=`
     <button class="sheet-close" id="x">✕</button>
     <h3>${isNew?'New league':'Edit league'}</h3>
-    <div class="sub">A season sold by the team: one captain pays for the whole team, and the team books its own round once a week, whenever suits them.</div>
+    <div class="sub">A season sold by the team. The captain picks how many golfers (between your minimum and maximum), the team price is split between them, and each golfer pays their own share. The team books its own round once a week, whenever suits them.</div>
     <div class="field"><label for="le-name">Name</label><input class="input" id="le-name" maxlength="80" value="${esc(x.name||'')}" placeholder="e.g. Winter Team League" /></div>
     <div class="field"><label for="le-desc">Description <span class="dim">(shown on the Leagues page)</span></label><textarea class="input" id="le-desc" rows="2" maxlength="500">${esc(x.description||'')}</textarea></div>
     <div class="grid2">
@@ -3023,13 +3042,17 @@ function openLeagueEditor(x){
       <div class="field"><label>Season ends</label><input class="input" id="le-to" type="date" value="${esc(x.season_end||'')}" /></div>
     </div>
     <div class="field"><label>Bays <span class="dim">(where rounds may be booked — leave empty for any bay)</span></label><div class="chips" id="le-bays">${chipButtons(realBays().map(b=>[b.id,b.name]), bays)}</div></div>
-    <div class="grid3 lea-grid">
+    <div class="grid2 lea-grid">
       <div class="field"><label for="le-fee">Price per team for the season ($)</label><input class="input" id="le-fee" type="number" min="0" step="0.01" value="${(x.fee_cents||0)/100}" /></div>
-      <div class="field"><label for="le-cap">Players per team</label><input class="input" id="le-cap" type="number" min="1" step="1" value="${x.team_size||''}" placeholder="No limit" /></div>
       <div class="field"><label for="le-scoring">Scoring</label><select class="input" id="le-scoring">
         <option value="points" ${x.scoring!=='strokes'?'selected':''}>Points (most wins)</option>
         <option value="strokes" ${x.scoring==='strokes'?'selected':''}>Strokes (lowest wins)</option></select></div>
     </div>
+    <div class="grid2 lea-grid">
+      <div class="field"><label for="le-min">Fewest golfers per team</label><input class="input" id="le-min" type="number" min="1" step="1" value="${x.team_min||''}" placeholder="Same as most" ${cols36?'':'disabled'} /></div>
+      <div class="field"><label for="le-cap">Most golfers per team</label><input class="input" id="le-cap" type="number" min="1" step="1" value="${x.team_size||''}" placeholder="No limit" /></div>
+    </div>
+    <div class="dim" id="le-split" style="font-size:12.5px;margin:-4px 0 12px;line-height:1.5"></div>
     <div class="field"><label for="le-mins">Recommended weekly round</label>
       <select class="input" id="le-mins">${roundLenOptions(x.weekly_min_mins||180)}</select>
       <div class="dim" style="font-size:12px;margin-top:6px">One captain pays this price for the whole team. The team then books one round a week itself, in any bay, at any time — this length is only a suggestion shown to players, never enforced.</div></div>
@@ -3037,12 +3060,21 @@ function openLeagueEditor(x){
     ${switchRow('le-online','Online sign-up','Listed on the Leagues page, where a captain can buy a team and invite their friends.',x.join_online)}
     ${switchRow('le-active','Active','Turn off to hide the league everywhere without deleting its history.',x.is_active)}
     ${cols31?'':`<div class="note-flag" style="margin-top:10px"><span>${esc(MIG31_NOTE)} Until then the team size and the round length can’t be saved — everything else can.</span></div>`}
+    ${cols31 && !cols36?`<div class="note-flag" style="margin-top:10px"><span>Run supabase/migrations/0036_league_split_payments.sql to set a minimum team size and split the price between golfers. Until then captains pay the whole team price.</span></div>`:''}
     <div class="err" id="le-err"></div>
     <button class="btn btn-primary" id="le-save" style="width:100%;margin-top:8px">${isNew?'Create league':'Save league'}</button>`;
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
   enhanceSelects(sheet); buildDatePicker($('#le-from')); buildDatePicker($('#le-to'));
   wireChips($('#le-bays'), bays);
+  // What a captain will be offered, recalculated as the manager types.
+  const splitText=()=>{
+    const fee=Math.round(Number($('#le-fee').value||0)*100), max=Number($('#le-cap').value)||null, min=Number($('#le-min').value)||null;
+    const t = max ? teamSizeText({ fee_cents:fee, team_size:max, team_min:min }) : '';
+    $('#le-split').textContent = !max ? 'No maximum: the captain pays the whole team price and invites as many as they like.'
+      : `Captains will be offered ${t}. ${min&&min<max?'They pick the size; fewer golfers means a bigger share each.':'Every team is this size.'}`;
+  };
+  ['#le-fee','#le-cap','#le-min'].forEach(id=>$(id).addEventListener('input',splitText)); splitText();
   $('#le-name').focus();
   $('#le-save').onclick=async()=>{
     const err=m=>{ $('#le-err').textContent=m; };
@@ -3050,16 +3082,21 @@ function openLeagueEditor(x){
     const from=$('#le-from').value||null, to=$('#le-to').value||null;
     const fee=Math.round(Number($('#le-fee').value||0)*100);
     const size=$('#le-cap').value===''?null:Number($('#le-cap').value);
+    const tmin=$('#le-min').value===''?null:Number($('#le-min').value);
     const mins=Number($('#le-mins').value);
     if(!name) return err('Give the league a name.');
     if(from && to && to<from) return err('The season ends before it starts.');
     if(!(fee>=0)) return err('The price can’t be negative.');
-    if(size!=null && !(Number.isInteger(size) && size>0)) return err('Players per team must be a whole number above zero, or empty for no limit.');
+    if(size!=null && !(Number.isInteger(size) && size>0)) return err('Most golfers per team must be a whole number above zero, or empty for no limit.');
+    if(tmin!=null && !(Number.isInteger(tmin) && tmin>0)) return err('Fewest golfers per team must be a whole number above zero, or empty.');
+    if(tmin!=null && size==null) return err('Set the most golfers per team too — a minimum needs a maximum to split the price by.');
+    if(tmin!=null && tmin>size) return err('The fewest golfers can’t be more than the most.');
     if(!(Number.isInteger(mins) && mins>0)) return err('Pick a recommended round length.');
     const row={ name, description:$('#le-desc').value.trim()||null,
       season_start:from, season_end:to, bay_ids:[...bays], fee_cents:fee, scoring:$('#le-scoring').value,
       team_mode:$('#le-teams').checked, join_online:$('#le-online').checked, is_active:$('#le-active').checked,
-      ...(cols31 ? { team_size:size, weekly_min_mins:mins } : {}) };
+      ...(cols31 ? { team_size:size, weekly_min_mins:mins } : {}),
+      ...(cols36 ? { team_min:tmin } : {}) };
     $('#le-save').disabled=true;
     const ok = isNew ? await dbInsert('leagues',{ ...row, sort:LEAGUES.length }) : await dbUpdate('leagues',x.id,row);
     $('#le-save').disabled=false;
@@ -3097,7 +3134,7 @@ window.addEventListener('hashchange', applyLeagueRoute);
 // and tables are not there, so every read that needs them degrades on its own and says so.
 const MIG31_NOTE = 'Run migration 0031 (supabase/migrations/0031_league_teams.sql) to record team captains, team payments, invites and the weekly rounds teams book for themselves.';
 const mig31Flag = (ok, extra) => ok ? '' : `<div class="note-flag" style="margin-top:10px"><span>${esc(MIG31_NOTE)}${extra?' '+esc(extra):''}</span></div>`;
-let LG31 = { league:true, rounds:true };   // 0031 columns: on leagues (loadLeaguesTab) / on bookings (loadLeagueIndex)
+let LG31 = { league:true, rounds:true, min:true };   // 0031 columns: on leagues (loadLeaguesTab) / on bookings (loadLeagueIndex)
 
 // The person staff ring about a team: its captain, or failing that whoever joined first.
 function teamCaptain(team, members){
@@ -3263,11 +3300,13 @@ async function openLeaguePage(id){
   const teamIds=teams.map(x=>x.id);
   // The two reads migration 0031 makes possible. Either can fail on its own (column or table not
   // there yet); each then reads as null and the screens that need it say so instead of breaking.
-  const [rd, iv] = await Promise.all([
+  const [rd, iv, sp] = await Promise.all([
     sb.from('bookings').select('id,bay_id,booking_date,start_min,end_min,status,customer_name,league_team_id,league_week')
       .not('league_team_id','is',null).order('booking_date'),
     sb.from('league_team_invites').select('*').order('created_at'),
+    sb.from('league_seat_payments').select('*').eq('league_id',id),   // 0036 — null before it
   ]);
+  const payments = sp.error ? null : (sp.data||[]);
   [rd.error, iv.error].forEach(err=>{ if(err && !missingSchema(err)) isAuthError(err); });
   const rounds  = rd.error ? null : (rd.data||[]).filter(b=>teamIds.includes(b.league_team_id));
   const invites = iv.error ? null : (iv.data||[]).filter(x=>teamIds.includes(x.team_id));
@@ -3295,7 +3334,7 @@ async function openLeaguePage(id){
       ${views.map(([v,lbl])=>`<button type="button" role="tab" data-v="${v}" class="${LEAGUE_VIEW===v?'on':''}" aria-selected="${LEAGUE_VIEW===v}">${lbl}</button>`).join('')}
     </div>
     <div id="lo-body" style="margin-top:14px"></div>`;
-  const ctx={ league, teams, members, results, rounds, invites, mig31, edit, today, reload:()=>openLeaguePage(id) };
+  const ctx={ league, teams, members, results, rounds, invites, payments, mig31, edit, today, reload:()=>openLeaguePage(id) };
   $('#lo-back').onclick=closeLeaguePage;
   if($('#lo-addp')) $('#lo-addp').onclick=()=>openAddPlayer(ctx, null);
   if($('#lo-edit')) $('#lo-edit').onclick=()=>openLeagueEditor(league);
@@ -3445,7 +3484,7 @@ function openAddPlayer(ctx, presetTeamId){
     const err=msg=>{ $('#ap-err').textContent=msg; };
     const teamId=($('#ap-team')&&$('#ap-team').value)||null;
     if(league.team_size && teamId && members.filter(x=>x.status==='active' && x.team_id===teamId).length>=league.team_size)
-      return err(`That team is full — it already has ${league.team_size} player${league.team_size===1?'':'s'}. Raise “Players per team” in Edit league first.`);
+      return err(`That team is full — it already has ${league.team_size} player${league.team_size===1?'':'s'}. Raise “Most golfers per team” in Edit league first.`);
     let customer=chosen, created=false;
     if(mode==='new'){
       const name=$('#ap-name').value.trim(), phone=$('#ap-phone').value.trim(), email=$('#ap-email').value.trim().toLowerCase();
@@ -3480,16 +3519,21 @@ function openAddPlayer(ctx, presetTeamId){
 }
 
 function leagueTeamsBoard(ctx){
-  const { league, teams, members, rounds, invites, mig31, edit, today, reload } = ctx;
+  const { league, teams, members, rounds, invites, payments, mig31, edit, today, reload } = ctx;
   const active=members.filter(x=>x.status==='active');
+  // Seat by seat (0036): a team bought with seats shows its seats, not paid/unpaid for the whole.
+  const seatMoney=t=>(payments && t && t.seats && t.share_cents>0)
+    ? LG().teamMoney({ league, team:t, payments, members, invites:invites||[], todayISO:today }) : null;
   const week=LG().currentWeek(league, today);
   // Booking a round is free bay time, so it needs the same permission a price does.
   const roundBooking = edit && mig31.rounds && LG31.rounds && canLeagueRound() && !!week;
   const roundFor=t=>(rounds||[]).find(r=>r.league_team_id===t.id && r.status!=='cancelled' && week && roundWeek(r)===week.start);
   const moveOpts=(cur)=>`<option value="" ${!cur?'selected':''}>No team</option>`+teams.map(t=>`<option value="${t.id}" ${t.id===cur?'selected':''}>${esc(t.name)}</option>`).join('');
   const playerRow=(x,team)=>{ const isCap=team && team.captain_customer_id===x.customer_id;
+    // Paid their own seat online (0036)? Players who took a seat the captain covered show nothing.
+    const ownSeat=(payments||[]).some(p=>team && p.team_id===team.id && p.for_customer_id===x.customer_id);
     return `<div class="tb-player" data-id="${x.id}">
-      <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
+      <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}${ownSeat?' <span class="pill confirmed">Paid own seat</span>':''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
       ${edit?`<div class="row" style="gap:6px;flex-wrap:nowrap;align-items:center">
         ${team&&!isCap&&mig31.cols?'<button class="btn btn-ghost btn-sm tb-cap" aria-label="Make '+esc(x.name)+' the captain">Make captain</button>':''}
         <select class="input tb-move" aria-label="Move ${esc(x.name)} to a team" style="padding:6px 9px;font-size:12.5px;min-width:120px">${moveOpts(x.team_id)}</select>
@@ -3505,6 +3549,14 @@ function leagueTeamsBoard(ctx){
     </div>`; };
   const payLine=t=>{
     if(!mig31.cols) return '<div class="dim" style="font-size:12.5px;padding:6px 0">Payment needs migration 0031.</div>';
+    const sm=seatMoney(t);
+    if(sm){
+      const owedRow = sm.unpaidSeats ? `<span class="pill ${sm.due?'cancelled':'warn'}">${esc(money(sm.owedCents))} ${sm.due?'owed by the captain':'unpaid — season not started'}</span>` : '';
+      return `<div style="padding:6px 0"><span class="pill ${sm.unpaidSeats?'warn':'confirmed'}">${sm.paidSeats} of ${sm.seats} seats paid</span>
+        <span class="dim" style="font-size:12px">${esc(money(sm.shareCents))} a seat${sm.freeSeats?` · ${sm.freeSeats} paid seat${sm.freeSeats===1?'':'s'} waiting for a player`:''}</span>
+        ${owedRow ? '<br />'+owedRow : ''}
+        ${sm.unpaidSeats && can('money.write')?' <button class="btn btn-ghost btn-sm tb-collect">Mark collected</button>':''}</div>`;
+    }
     if(teamPaid(t)) return `<div style="padding:6px 0"><span class="pill confirmed">Paid ${money(t.paid_cents||league.fee_cents)}</span>
       <span class="dim" style="font-size:12px">${esc([t.paid_at&&shortDate2(String(t.paid_at).slice(0,10)), t.stripe_session_id&&'online'].filter(Boolean).join(' · '))}</span>
       ${edit?' <button class="link-btn tb-unpay">Undo</button>':''}</div>`;
@@ -3525,7 +3577,7 @@ function leagueTeamsBoard(ctx){
     const cap=t&&teamCaptain(t,members), inv=t?(invites||[]).filter(i=>i.team_id===t.id):[];
     return `<div class="card tb-team" data-team="${t?t.id:''}" style="margin:0">
       <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><h3 class="card-h" style="margin:0;flex:1 1 110px;min-width:0;overflow-wrap:break-word">${t?esc(t.name):'No team yet'}</h3>
-        <span class="pill manager">${list.length}${t&&league.team_size?' / '+league.team_size:''}</span>
+        <span class="pill manager">${list.length}${t&&(t.seats||league.team_size)?' / '+(t.seats||league.team_size):''}</span>
         ${edit&&t?`<button class="btn btn-ghost btn-sm tb-rename">Rename</button><button class="btn btn-ghost btn-sm tb-del" aria-label="Delete team ${esc(t.name)}">Delete</button>`:''}</div>
       ${t?`<div class="dim" style="font-size:12.5px;margin-top:4px">Captain: ${cap?`${esc(cap.name)}${cap.phone?' · '+esc(fmtPhone(cap.phone)):''}${cap.assumed?' (assumed — nobody set)':''}`:'nobody yet'}</div>
         ${payLine(t)}${roundLine(t)}`:'<div class="dim" style="font-size:12.5px;margin-top:4px">Players who have joined the league but aren’t on a team yet.</div>'}
@@ -3544,6 +3596,11 @@ function leagueTeamsBoard(ctx){
   enhanceSelects($('#lo-body'));
   // Opening a round is only looking at it, so it is wired before the read-only bail-out below.
   $('#lo-body').querySelectorAll('.tb-open').forEach(b=>b.onclick=e=>{ e.stopPropagation(); goToBooking(b.dataset.bid, b.dataset.date); });
+  // Money, not Bookings: wired before the read-only bail-out so a Money-only login can use it.
+  $('#lo-body').querySelectorAll('.tb-collect').forEach(b=>b.onclick=()=>{
+    const t=teams.find(x=>x.id===b.closest('.tb-team').dataset.team); if(!t) return;
+    leagueCollectFlow({ team:t, league, money:seatMoney(t), captain:CUSTOMERS.find(c=>c.id===t.captain_customer_id)||null }, reload);
+  });
   if(!edit) return;
   $('#tb-create').onclick=async()=>{
     const name=$('#tb-new').value.trim();
@@ -4100,7 +4157,10 @@ async function loadSchedule(){
   }
   $('#day-label').textContent = dateLabel(date);
   await loadOverridesFor([date]);
-  const { data, error } = await sb.from('bookings').select('*').eq('booking_date',date).neq('status','cancelled').order('start_min');
+  const [{ data, error }] = await Promise.all([
+    sb.from('bookings').select('*').eq('booking_date',date).neq('status','cancelled').order('start_min'),
+    fetchLeagueOwed(),   // captains who owe league money are flagged on At a glance
+  ]);
   if(error){ if(!isAuthError(error)) toast('Load failed: '+error.message,'err'); return; }
   BK=liveBookings(data); await loadGroupsFor(BK); renderOverrideBanner(date); updateStats(); $('#day-list-card').style.display=''; buildDayPaint(); renderPalette(); renderGrid(); renderDayList();
 }
@@ -4268,12 +4328,14 @@ function renderDayList(){
         <div class="g-s">${rows.length} bays · ${esc(b.customer_name||'Booked')}</div>
         ${cellMeta(b,2)}
         <div class="baylist">${rows.map(r=>`<span>${esc(bayName(r.bay_id))}</span>`).join('')}</div>
+        ${oweFlagHTML(b)}
       </div>`;
     }
     return `<div class="gcard ${bl?'bl':''}${isLeagueRound(b)?' is-league':''}" data-id="${b.id}">
       <div class="g-t"><span class="dot ${bl?'bl':'bk'}"></span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}</div>
       <div class="g-s">${esc(bayName(b.bay_id))} · ${bl?'Blocked':esc(b.customer_name||'Booked')}</div>
       ${cellMeta(b,3)}
+      ${bl?'':oweFlagHTML(b)}
     </div>`;
   }).join('');
   $('#day-list').querySelectorAll('.gcard[data-id]').forEach(el=>el.onclick=()=>openManage(el.dataset.id));
@@ -4607,6 +4669,7 @@ function openManage(id){
     </div>
 
     <div class="sec-h">Payments</div>
+    ${oweBoxHTML(b)}
     ${holdBoxHTML(b)}
     <div class="pay-box">${payLine}${cardLine}</div>
     <!-- "Capture held funds" / "Cancel hold" / "Capture total balance" used to sit here and only
@@ -4667,6 +4730,8 @@ function openManage(id){
   {
     const settled=()=>{ closeSheet(); fetchHolds().then(()=>{ if(ACTIVE_TAB==='holds') renderHoldsTab(); }); loadSchedule(); };
     if($('#m-charge'))  $('#m-charge').onclick =()=>chargeHoldFlow(b, settled);
+    sheet.querySelectorAll('.owe-collect').forEach(btn=>btn.onclick=()=>
+      leagueCollectFlow(LEAGUE_OWED.rows.find(r=>r.team.id===btn.dataset.team), ()=>{ closeSheet(); loadSchedule(); }));
     if($('#m-release')) $('#m-release').onclick=()=>releaseHoldFlow(b, settled);
   }
   if($('#m-wv-copy')) $('#m-wv-copy').onclick=()=>{ const link=`${location.origin}/waiver?c=${cust.id}`; navigator.clipboard&&navigator.clipboard.writeText(link); toast('Waiver link copied — text or email it to the customer','ok'); };
@@ -5335,6 +5400,7 @@ async function fetchHolds(){
     HOLDS.critical = att.filter(b=>holdUrgency(b, now).key==='critical').length;
     HOLDS.expired  = HOLDS.rows.filter(b=>holdUrgency(b, now).key==='expired').length;
   }
+  await fetchLeagueOwed(true);
   renderSideNav();      // the count in the sidebar, on whatever screen the person is looking at
   return HOLDS;
 }
@@ -5492,6 +5558,99 @@ function holdBoxHTML(b){
       After that the hold lapses and the money cannot be collected at all.</div></div>`;
 }
 
+/* ----- League seats owed by captains (migration 0036) ------------------------------------
+   A league team is paid seat by seat. Seats nobody paid for are owed by the captain, and once the
+   season has started staff are told three ways: a section on this screen (and the sidebar count),
+   a flag on the tee sheet's At a glance card whenever the captain — or their team's round — is in,
+   and a box on that booking's sheet. All of it clears the moment staff mark the money collected.
+   What is owed is worked out by InvictusLeagues.teamMoney, the same function the server uses. */
+async function fetchLeagueOwed(force){
+  if(!force && Date.now()-LEAGUE_OWED.at < 60000) return LEAGUE_OWED.rows;
+  const [l,t,p,m,i] = await Promise.all([
+    sb.from('leagues').select('*'),
+    sb.from('league_teams').select('*'),
+    sb.from('league_seat_payments').select('team_id,seats,amount_cents,method,created_at'),
+    sb.from('league_members').select('team_id,customer_id,status'),
+    sb.from('league_team_invites').select('team_id,name,phone,claimed_at,revoked_at'),
+  ]);
+  LEAGUE_OWED.at = Date.now();
+  // Before migration 0036 there is no payments table: nothing can be owed seat by seat.
+  if(l.error||t.error||p.error||m.error){ LEAGUE_OWED.rows=[]; return []; }
+  if(!CUSTOMERS.length) await fetchCustomers();
+  const today=todayISO();
+  LEAGUE_OWED.rows = (t.data||[]).filter(team=>team.seats && team.share_cents>0).map(team=>{
+    const league=(l.data||[]).find(x=>x.id===team.league_id);
+    if(!league) return null;
+    const owe=LG().teamMoney({ league, team, payments:p.data||[], members:m.data||[], invites:i.error?[]:(i.data||[]), todayISO:today });
+    if(!owe.due) return null;
+    return { team, league, money:owe, captain: CUSTOMERS.find(c=>c.id===team.captain_customer_id)||null };
+  }).filter(Boolean).sort((a,b)=>b.money.owedCents-a.money.owedCents);
+  return LEAGUE_OWED.rows;
+}
+// What a booking's customer owes: their team's round, or the captain themselves by email/phone.
+function leagueOwedFor(b){
+  if(!b || !LEAGUE_OWED.rows.length) return [];
+  const e=(b.customer_email||'').trim().toLowerCase(), ph=digitsOf(b.customer_phone);
+  return LEAGUE_OWED.rows.filter(r=>(b.league_team_id && b.league_team_id===r.team.id)
+    || (r.captain && ((e && (r.captain.email||'').trim().toLowerCase()===e) || (ph && ph.length>=7 && digitsOf(r.captain.phone)===ph))));
+}
+const oweDetail = m => [`${m.paidSeats} of ${m.seats} seats paid`,
+  m.openInvites ? `${m.openInvites} invited, not joined` : '', m.emptySeats ? `${m.emptySeats} seat${m.emptySeats===1?'':'s'} never filled` : ''].filter(Boolean).join(' · ');
+function oweFlagHTML(b){
+  return leagueOwedFor(b).map(r=>`<div class="owe-flag" title="${esc(oweDetail(r.money))}">Collect ${esc(money(r.money.owedCents))} from ${esc((r.captain&&r.captain.name)||'the captain')}
+    <span class="dim">· ${esc(r.league.name)} · ${esc(r.team.name)} (${r.money.unpaidSeats} seat${r.money.unpaidSeats===1?'':'s'} unpaid)</span></div>`).join('');
+}
+// The booking sheet's box, with the button when this person may record money.
+function oweBoxHTML(b){
+  return leagueOwedFor(b).map(r=>`<div class="hold-box is-critical">
+    <div class="hb-h">League money to collect — ${esc(r.team.name)}</div>
+    <div class="hb-amt">${esc(money(r.money.owedCents))}</div>
+    <div class="hb-s">${esc((r.captain&&r.captain.name)||'The captain')} is captain in ${esc(r.league.name)} and owes for
+      ${r.money.unpaidSeats} unpaid seat${r.money.unpaidSeats===1?'':'s'} at ${esc(money(r.money.shareCents))} each (${esc(oweDetail(r.money))}).
+      Take it at the till, then mark it collected.
+      ${can('money.write')?`<br /><button type="button" class="btn btn-primary btn-sm owe-collect" data-team="${esc(r.team.id)}" style="margin-top:8px">Mark collected</button>`:''}</div></div>`).join('');
+}
+function leagueCollectFlow(r, done){
+  if(!can('money.write') || !r) return;
+  const m=r.money;
+  promptSheet({
+    title:'Mark league money collected',
+    body:`<b>${esc((r.captain&&r.captain.name)||'The captain')}</b> owes <b>${esc(money(m.owedCents))}</b> for ${m.unpaidSeats} unpaid seat${m.unpaidSeats===1?'':'s'}
+      on ${esc(r.team.name)} (${esc(r.league.name)}) — ${esc(money(m.shareCents))} a seat.<br /><br />
+      Take the money at the till or in Toast first — this only records it. Enter fewer seats for a part payment; the rest stays flagged.`,
+    fields:[{ id:'seats', label:`Seats paid for (1 to ${m.unpaidSeats})`, type:'number', step:'1', min:'1', value:String(m.unpaidSeats) }],
+    okLabel:'Record as collected',
+    onOk: async v=>{
+      const n=Number(v.seats);
+      if(!Number.isInteger(n) || n<1 || n>m.unpaidSeats) return `Enter a whole number from 1 to ${m.unpaidSeats}.`;
+      const res = DEMO_MODE
+        ? await sb.from('league_seat_payments').insert({ team_id:r.team.id, league_id:r.league.id, seats:n, amount_cents:n*m.shareCents,
+            method:'counter', payer_customer_id:r.team.captain_customer_id||null, recorded_by:'demo' })
+            .then(({ error })=>error?{ ok:false, error:error.message }:{ ok:true, message:`Recorded ${n} seat${n===1?'':'s'} (demo — nothing saved)` })
+        : await apiPost('/api/booking-series?action=league-collect', { teamId:r.team.id, seats:n });
+      if(!res.ok) return res.error || 'That could not be recorded.';
+      toast(res.message || 'Recorded','ok');
+      await fetchLeagueOwed(true); renderSideNav();
+      done && done();
+      return null;
+    },
+  });
+}
+function leagueOweRowHTML(r){
+  const cap=r.captain, phone=((cap&&cap.phone)||'').trim(), m=r.money;
+  return `<div class="hold-row is-critical is-owed" data-team="${esc(r.team.id)}">
+    <div class="hr-who">
+      <div class="hr-name">${esc((cap&&cap.name)||'No captain recorded')} <span class="dim" style="font-weight:500">· captain of ${esc(r.team.name)}</span></div>
+      <div class="hr-when">${esc(r.league.name)} · ${esc(oweDetail(m))}<br />
+        ${phone?`<a class="hr-phone" href="tel:${esc(phone.replace(/[^\d+]/g,''))}">${esc(fmtPhone(phone))}</a>`:'<span class="dim">No phone number on file</span>'}</div>
+    </div>
+    <div class="hr-amt"><div class="hr-cents">${esc(holdMoney(m.owedCents))}</div><div class="hr-amt-l">${m.unpaidSeats} seat${m.unpaidSeats===1?'':'s'} × ${esc(money(m.shareCents))}</div></div>
+    <div class="hr-due"><div class="hr-left">Owed by the captain</div><div class="hr-dead">Flagged on the tee sheet when they are in</div></div>
+    <div class="hr-act">${can('money.write')?'<button class="btn btn-primary btn-sm hr-collect">Mark collected</button>':''}
+      <button class="btn btn-ghost btn-sm hr-league">Open league</button></div>
+  </div>`;
+}
+
 /* ----- Holds to Charge: the screen that stops money being forgotten -------------------- */
 function loadHolds(){ renderHoldsTab(); fetchHolds().then(renderHoldsTab); }
 
@@ -5586,6 +5745,11 @@ function renderHoldsTab(){
           + `Nothing was charged and the customer has not been told.</div>`
           + failed.map(b=>failedRowHTML(b)).join('');
   }
+  if(LEAGUE_OWED.rows.length){
+    html += `<div class="holds-band">League money to collect from captains (${LEAGUE_OWED.rows.length}) — `
+          + `seats nobody paid for, owed since the season started</div>`
+          + LEAGUE_OWED.rows.map(leagueOweRowHTML).join('');
+  }
   if(due.length){
     html += `<div class="holds-band">Charge these — most urgent first</div>`
           + due.map(b=>holdRowHTML(b, now)).join('');
@@ -5601,6 +5765,12 @@ function renderHoldsTab(){
   }
   if(!html) html=`<div class="card"><div class="empty">Every authorised card has been dealt with. Nothing is waiting.</div></div>`;
   list.innerHTML=html;
+  list.querySelectorAll('.hold-row.is-owed').forEach(row=>{
+    const r=LEAGUE_OWED.rows.find(x=>x.team.id===row.dataset.team); if(!r) return;
+    const on=(sel,fn)=>{ const el=row.querySelector(sel); if(el) el.onclick=fn; };
+    on('.hr-collect', ()=>leagueCollectFlow(r, ()=>{ renderHoldsTab(); loadSchedule(); }));
+    on('.hr-league',  ()=>{ showTab('leagues'); goToLeague(r.league.id); });
+  });
   list.querySelectorAll('.hold-row.is-failed').forEach(row=>{
     const b=failed.find(x=>x.id===row.dataset.id); if(!b) return;
     const on=(sel,fn)=>{ const el=row.querySelector(sel); if(el) el.onclick=fn; };

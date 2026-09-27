@@ -171,6 +171,52 @@
     return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
   }
 
+  // ----- Paying seat by seat (migration 0036) -----
+  //
+  // The team price is shared across the team's SEATS — the size the captain picked, between the
+  // league's team_min and team_size. One seat costs the price ÷ seats, rounded UP to the cent, so
+  // the venue never collects less than the team price. Seats nobody pays for are owed by the captain.
+
+  // The team sizes a captain may pick, or null for a league with no maximum (the captain then pays
+  // the whole price, as before 0036).
+  function seatRange(league) {
+    const max = Math.floor(Number(league && league.team_size)) || 0;
+    if (!(max > 0)) return null;
+    const min = Math.min(max, Math.max(1, Math.floor(Number(league.team_min)) || max));
+    return { min, max };
+  }
+
+  function shareOf(feeCents, seats) {
+    const fee = Math.max(0, Math.round(Number(feeCents) || 0)), n = Math.floor(Number(seats)) || 0;
+    return fee > 0 && n > 0 ? Math.ceil(fee / n) : 0;
+  }
+
+  // Where one team stands on money. `payments` are league_seat_payments rows, `members` the
+  // league_members rows, `invites` the league_team_invites rows — any of the league's, filtered here.
+  //   paidSeats    seats somebody has paid for (never more than the team has)
+  //   freeSeats    paid seats nobody sits in yet — the next friend to join takes one for nothing
+  //   unpaidSeats  seats nobody has paid for; owedCents is what the captain owes for them
+  //   due          owed AND the season has started: this is when staff are told to collect
+  function teamMoney({ league, team, payments = [], members = [], invites = [], todayISO }) {
+    const seats = Math.floor(Number(team && team.seats)) || 0;
+    const share = Math.max(0, Math.round(Number(team && team.share_cents) || 0));
+    const split = seats > 0 && share > 0;
+    const paid = payments.filter((p) => p.team_id === team.id).reduce((s, p) => s + (Math.floor(Number(p.seats)) || 0), 0);
+    const paidSeats = split ? Math.min(seats, paid) : 0;
+    const players = members.filter((m) => m.team_id === team.id && m.status === 'active').length;
+    const openInvites = invites.filter((i) => i.team_id === team.id && !i.claimed_at && !i.revoked_at).length;
+    const unpaidSeats = split ? Math.max(0, seats - paidSeats) : 0;
+    const owedCents = unpaidSeats * share;
+    const started = !league || !league.season_start || !todayISO || league.season_start <= todayISO;
+    return {
+      split, seats, shareCents: share, paidSeats, players, openInvites,
+      freeSeats: split ? Math.max(0, paidSeats - players) : 0,
+      emptySeats: seats ? Math.max(0, seats - players - openInvites) : 0,
+      unpaidSeats, owedCents, due: owedCents > 0 && started,
+    };
+  }
+
   root.InvictusLeagues = { DAY_NAMES, timeLabel, scheduleLabel, weekOf, weeks, currentWeek, progress,
-    teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName };
+    teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName,
+    seatRange, shareOf, teamMoney };
 })(typeof window !== 'undefined' ? window : globalThis);

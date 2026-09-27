@@ -33,6 +33,8 @@ const UNIQUE = {
     && rows.some((r) => r.league_team_id === row.league_team_id && r.league_week === row.league_week && r.status !== 'cancelled')
     ? 'bookings_league_round_once' : null),
   league_members: (row, rows) => (rows.some((r) => r.league_id === row.league_id && r.customer_id === row.customer_id) ? 'league_members_once' : null),
+  // 0036: one payment row per Checkout Session.
+  league_seat_payments: (row, rows) => (row.stripe_session_id && rows.some((r) => r.stripe_session_id === row.stripe_session_id) ? 'league_seat_payments_session' : null),
 };
 
 function builder(table) {
@@ -95,13 +97,15 @@ class FakeStripe {
       create: async (p) => {
         S.stripe.push(['checkout.sessions.create', p]);
         const id = `cs_${++seq}`;
-        S.sessions[id] = { id, payment_status: 'paid', amount_total: p.line_items[0].price_data.unit_amount, metadata: p.metadata };
+        S.sessions[id] = { id, payment_status: 'paid', payment_intent: `pi_${id}`,
+          amount_total: p.line_items[0].price_data.unit_amount * (p.line_items[0].quantity || 1), metadata: p.metadata };
         return { id, url: `https://checkout.stripe.test/${id}` };
       },
       retrieve: async (id) => { S.stripe.push(['checkout.sessions.retrieve', id]); const s = S.sessions[id]; if (!s) throw new Error('No such session'); return s; },
     } };
     this.paymentIntents = { create: async (p) => { S.stripe.push(['paymentIntents.create', p]); return { id: 'pi_1', client_secret: 'x' }; } };
     this.customers = { create: async () => ({ id: `cus_${++seq}` }), del: async () => ({}) };
+    this.refunds = { create: async (p, o) => { S.stripe.push(['refunds.create', p, o]); return { id: `re_${++seq}`, status: 'succeeded' }; } };
     this.webhooks = { constructEvent: (buf) => JSON.parse(String(buf)) };
   }
 }
@@ -111,6 +115,7 @@ const db = await import(ROOT + 'lib/db.js');
 const { default: leaguesApi } = await import(ROOT + 'api/leagues.js');
 const { default: bookingApi } = await import(ROOT + 'api/booking.js');
 const { default: webhookApi } = await import(ROOT + 'api/webhook.js');
+const { default: seriesApi } = await import(ROOT + 'api/booking-series.js');
 const { winnipegTodayISO } = await import(ROOT + 'lib/booking.js');
 const L = globalThis.InvictusLeagues;
 
@@ -125,7 +130,7 @@ function world(extra = {}) {
   seq = 0;
   Object.assign(S, {
     stripe: [], sessions: {}, fail: {}, missing0031: null, hideTeamRounds: false,
-    tokens: { 'tok-cap': 'user-cap', 'tok-friend': 'user-friend', 'tok-other': 'user-other' },
+    tokens: { 'tok-cap': 'user-cap', 'tok-friend': 'user-friend', 'tok-other': 'user-other', 'tok-admin': 'u-admin', 'tok-emp': 'u-emp' },
     db: {
       customers: [
         { id: 'c-cap', name: 'Murad Cheway', phone: '+12049906530', email: 'murad@voltrisai.com', user_id: 'user-cap' },
@@ -144,8 +149,15 @@ function world(extra = {}) {
         { id: 'L-over', name: 'Summer League', is_active: true, join_online: true, season_start: addDays(-120), season_end: addDays(-1),
           team_mode: true, scoring: 'points', fee_cents: 0, team_size: 4, weekly_min_mins: 180, capacity: null, bay_ids: [], sort: 2 },
       ],
-      league_teams: [], league_members: [], league_results: [], league_team_invites: [],
-      bookings: [], schedule_overrides: [], staff: [], notifications: [],
+      league_teams: [], league_members: [], league_results: [], league_team_invites: [], league_seat_payments: [],
+      bookings: [], schedule_overrides: [], notifications: [],
+      // An admin and an employee WITHOUT the Money permission, for the staff "Mark collected" action.
+      staff: [
+        { user_id: 'u-admin', email: 'admin@invictus.test', role: 'admin', is_active: true },
+        { user_id: 'u-emp', email: 'emp@invictus.test', role: 'employee', is_active: true },
+      ],
+      capabilities: ['booking.write', 'money.write'].map((key, sort) => ({ key, sort })),
+      role_permissions: [{ role: 'employee', capability: 'booking.write', allowed: true }, { role: 'employee', capability: 'money.write', allowed: false }],
       ...extra,
     },
   });
@@ -179,7 +191,7 @@ test('list: the leagues you can buy a team in, with the team count and your own 
   assert.equal(anon.code, 200);
   assert.deepEqual(anon.out.leagues.map((l) => l.id), ['L-team', 'L-free'], 'the finished season is not offered');
   assert.deepEqual(anon.out.leagues[0], { id: 'L-team', name: 'Winter Team League', description: 'Six weeks, play when you like.',
-    fee_cents: 30000, team_size: 4, weekly_min_mins: 180, season_start: addDays(-14), season_end: addDays(42), teamCount: 0, myTeamId: null });
+    fee_cents: 30000, team_size: 4, team_min: null, weekly_min_mins: 180, season_start: addDays(-14), season_end: addDays(42), teamCount: 0, myTeamId: null });
 
   const teamId = await ownTeam();
   const mine = await run(leaguesApi, { query: { action: 'list' }, ...cap });
@@ -188,7 +200,7 @@ test('list: the leagues you can buy a team in, with the team count and your own 
   assert.equal((await run(leaguesApi, { query: { action: 'list' } })).out.leagues[0].myTeamId, null, 'signed out: nobody else’s team id');
 });
 
-test('buy-team, paid: Stripe Checkout for the TEAM price, and nothing written until it is paid', async () => {
+test('buy-team, paid: Stripe Checkout for the captain\'s SHARE of the team price, nothing written until paid', async () => {
   world();
   const r = await run(leaguesApi, { query: { action: 'buy-team' }, body: { leagueId: 'L-team', teamName: '  the   Aces ' }, ...cap });
   assert.equal(r.code, 200, JSON.stringify(r.out));
@@ -196,8 +208,10 @@ test('buy-team, paid: Stripe Checkout for the TEAM price, and nothing written un
   assert.equal(S.db.league_teams.length, 0, 'no team until the money arrives');
 
   const sent = S.stripe.find((c) => c[0] === 'checkout.sessions.create')[1];
-  assert.equal(sent.line_items[0].price_data.unit_amount, 30000, 'one price for the whole team');
-  assert.deepEqual(sent.metadata, { kind: 'league-team', leagueId: 'L-team', teamName: 'the Aces', captainCustomerId: 'c-cap' });
+  // $300 team, teams of exactly 4 (no minimum set) → the captain pays one $75 share.
+  assert.equal(sent.line_items[0].price_data.unit_amount, 7500, 'the captain pays their own share, not the whole team');
+  assert.deepEqual(sent.metadata, { kind: 'league-team', leagueId: 'L-team', teamName: 'the Aces', captainCustomerId: 'c-cap',
+    seats: '4', shareCents: '7500' });
   assert.equal(sent.customer_email, 'murad@voltrisai.com');
   assert.equal(JSON.stringify(S.stripe).includes('payment_method_types'), false, 'dynamic payment methods, as everywhere else');
 
@@ -208,8 +222,12 @@ test('buy-team, paid: Stripe Checkout for the TEAM price, and nothing written un
   const team = S.db.league_teams[0];
   assert.equal(team.name, 'the Aces');
   assert.equal(team.captain_customer_id, 'c-cap');
-  assert.equal(team.paid_cents, 30000);
+  assert.equal(team.paid_cents, 7500);
+  assert.equal(team.seats, 4);
+  assert.equal(team.share_cents, 7500);
   assert.ok(team.paid_at, 'paid_at stamped');
+  assert.equal(S.db.league_seat_payments.length, 1, 'the captain\'s own seat is the first one paid');
+  assert.deepEqual([S.db.league_seat_payments[0].seats, S.db.league_seat_payments[0].for_customer_id], [1, 'c-cap']);
   assert.equal(team.stripe_session_id, sessionId);
   const member = S.db.league_members.find((m) => m.customer_id === 'c-cap');
   assert.equal(member.team_id, team.id);
@@ -219,6 +237,7 @@ test('buy-team, paid: Stripe Checkout for the TEAM price, and nothing written un
   assert.equal(again.code, 200);
   assert.equal(S.db.league_teams.length, 1, 'settling twice does not make a second team');
   assert.equal(S.db.league_members.length, 1);
+  assert.equal(S.db.league_seat_payments.length, 1, 'nor a second seat');
 });
 
 test('buy-team, paid: a replayed Stripe webhook cannot create a second team', async () => {
@@ -574,4 +593,203 @@ test('before migration 0031: a sentence telling the operator what to run, never 
   assert.equal(r.code, 503);
   assert.match(r.out.error, /0031_league_teams\.sql/);
   assert.equal(S.db.bookings.length, 0);
+});
+
+// ---------------------------------------------------------------- paying seat by seat (0036)
+//
+// The team price is shared across the seats the captain picks (league team_min..team_size). The
+// captain pays one share, each friend pays one to join, the captain may cover seats, and whatever is
+// left is owed by the captain and collected by staff.
+
+// A $600 league whose captains pick 3 to 5 golfers, and a $200 league of fixed pairs.
+const RANGE = { id: 'L-range', name: 'Spring League', is_active: true, join_online: true, season_start: addDays(-7), season_end: addDays(56),
+  team_mode: true, scoring: 'points', fee_cents: 60000, team_size: 5, team_min: 3, weekly_min_mins: 180, capacity: null, bay_ids: [], sort: 3 };
+const PAIRS = { id: 'L-pair', name: 'Pairs League', is_active: true, join_online: true, season_start: addDays(-7), season_end: addDays(56),
+  team_mode: true, scoring: 'points', fee_cents: 20000, team_size: 2, weekly_min_mins: 120, capacity: null, bay_ids: [], sort: 4 };
+function seatWorld() { world(); S.db.leagues.push({ ...RANGE }, { ...PAIRS }); }
+
+// Buy a seat-by-seat team through the real endpoints and settle it. Returns the team id.
+async function buySplitTeam(leagueId, teamName, seats) {
+  const r = await run(leaguesApi, { query: { action: 'buy-team' }, body: { leagueId, teamName, seats }, ...cap });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  const sessionId = r.out.url.split('/').pop();
+  const done = await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId }, ...cap });
+  assert.equal(done.code, 200, JSON.stringify(done.out));
+  return done.out.teamId;
+}
+async function inviteToken(teamId, phone) {
+  const r = await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone }, ...cap });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  return S.db.league_team_invites.find((i) => i.team_id === teamId && i.phone === phone.replace(/\D/g, '').replace(/^(\d{10})$/, '1$1')).token;
+}
+const sessionOf = (url) => url.split('/').pop();
+
+test('seat maths: the captain picks within min–max, and a share is the price ÷ seats rounded UP', () => {
+  assert.deepEqual(L.seatRange({ team_size: 5, team_min: 3 }), { min: 3, max: 5 });
+  assert.deepEqual(L.seatRange({ team_size: 4 }), { min: 4, max: 4 }, 'no minimum = fixed size');
+  assert.deepEqual(L.seatRange({ team_size: 4, team_min: 9 }), { min: 4, max: 4 }, 'a minimum above the maximum is clamped');
+  assert.equal(L.seatRange({ team_size: null }), null, 'no maximum: nothing to split');
+  assert.equal(L.shareOf(60000, 4), 15000);
+  assert.equal(L.shareOf(50000, 3), 16667, '$500 three ways is $166.67 each — never less than the team price');
+  assert.equal(L.shareOf(0, 4), 0);
+});
+
+test('buy-team with a range: the captain must pick a size in it, and pays the price ÷ that size', async () => {
+  seatWorld();
+  const none = await run(leaguesApi, { query: { action: 'buy-team' }, body: { leagueId: 'L-range', teamName: 'Trio' }, ...cap });
+  assert.equal(none.code, 400);
+  assert.match(none.out.error, /3 to 5/);
+  assert.equal((await run(leaguesApi, { query: { action: 'buy-team' }, body: { leagueId: 'L-range', teamName: 'Trio', seats: 6 }, ...cap })).code, 400);
+  assert.equal((await run(leaguesApi, { query: { action: 'buy-team' }, body: { leagueId: 'L-range', teamName: 'Trio', seats: 2 }, ...cap })).code, 400);
+  assert.equal(S.stripe.length, 0, 'nothing sent to Stripe for a size outside the range');
+
+  const ok = await run(leaguesApi, { query: { action: 'buy-team' }, body: { leagueId: 'L-range', teamName: 'Trio', seats: 3 }, ...cap });
+  assert.equal(ok.code, 200, JSON.stringify(ok.out));
+  const sent = S.stripe.find((c) => c[0] === 'checkout.sessions.create')[1];
+  assert.equal(sent.line_items[0].price_data.unit_amount, 20000, '$600 ÷ 3 golfers');
+  assert.equal(sent.metadata.seats, '3');
+});
+
+test('joining an UNPAID seat: the friend pays their own share through Checkout, then they are on the team', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-range', 'Trio', 3);
+  const token = await inviteToken(teamId, '2045550116');
+
+  const info = await run(leaguesApi, { query: { action: 'invite-info' }, body: { token } });
+  assert.deepEqual([info.out.payToJoin, info.out.shareCents, info.out.seats], [true, 20000, 3]);
+
+  const claim = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token }, ...friend });
+  assert.equal(claim.code, 200, JSON.stringify(claim.out));
+  assert.equal(claim.out.payRequired, true);
+  assert.equal(claim.out.shareCents, 20000);
+  const sent = S.stripe.filter((c) => c[0] === 'checkout.sessions.create').pop()[1];
+  assert.deepEqual(sent.metadata, { kind: 'league-seat', teamId, inviteId: S.db.league_team_invites[0].id, customerId: 'c-friend' });
+  assert.equal(S.db.league_team_invites[0].claimed_at, undefined, 'the invite is not spent until the money is in');
+  assert.equal(S.db.league_members.filter((m) => m.team_id === teamId).length, 1, 'not on the team yet');
+
+  const sessionId = sessionOf(claim.out.url);
+  const done = await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId }, ...friend });
+  assert.equal(done.code, 200, JSON.stringify(done.out));
+  assert.equal(done.out.seat, true);
+  assert.equal(S.db.league_members.filter((m) => m.team_id === teamId).length, 2);
+  assert.equal(S.db.league_team_invites[0].claimed_customer_id, 'c-friend');
+  assert.equal(S.db.league_seat_payments.length, 2, 'captain\'s seat + the friend\'s');
+
+  // The success page again, and the webhook: still one seat, still one player.
+  await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId }, ...friend });
+  const hook = await run(webhookApi, { body: Buffer.from(JSON.stringify({ id: 'evt_seat', type: 'checkout.session.completed', livemode: false,
+    data: { object: { id: sessionId, metadata: { kind: 'league-seat' } } } })), headers: { 'stripe-signature': 'sig' } });
+  assert.equal(hook.code, 200);
+  assert.equal(S.db.league_seat_payments.length, 2);
+  assert.equal(S.db.league_members.filter((m) => m.team_id === teamId).length, 2);
+  assert.equal((await db.teamMoneyFor(teamId)).money.paidSeats, 2);
+});
+
+test('the captain covers seats: a friend joining a PAID seat pays nothing and joins straight away', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-range', 'Quad', 4);   // $150 a seat
+
+  assert.equal((await run(leaguesApi, { query: { action: 'pay-seats' }, body: { teamId, seats: 1 }, ...friend })).code, 403, 'captain only');
+  assert.equal((await run(leaguesApi, { query: { action: 'pay-seats' }, body: { teamId, seats: 4 }, ...cap })).code, 400, 'only 3 are unpaid');
+
+  const pay = await run(leaguesApi, { query: { action: 'pay-seats' }, body: { teamId, seats: 2 }, ...cap });
+  assert.equal(pay.code, 200, JSON.stringify(pay.out));
+  assert.equal(pay.out.amountCents, 30000);
+  const done = await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId: sessionOf(pay.out.url) }, ...cap });
+  assert.equal(done.code, 200, JSON.stringify(done.out));
+  const m = (await db.teamMoneyFor(teamId)).money;
+  assert.deepEqual([m.paidSeats, m.freeSeats, m.unpaidSeats, m.owedCents], [3, 2, 1, 15000]);
+
+  const before = S.stripe.length;
+  const token = await inviteToken(teamId, '2045550116');
+  const claim = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token }, ...friend });
+  assert.equal(claim.code, 200, JSON.stringify(claim.out));
+  assert.equal(claim.out.payRequired, undefined, 'a paid seat was waiting');
+  assert.equal(S.stripe.length, before, 'no Checkout at all');
+  assert.equal(S.db.league_members.filter((x) => x.team_id === teamId).length, 2);
+});
+
+test('the team fills up while a friend is paying: they are refunded in full and not added', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-pair', 'Duo', 2);   // one seat left, $100
+  const t1 = await inviteToken(teamId, '2045550116');
+  const t2 = await inviteToken(teamId, '2045550199');
+  const a = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: t1 }, ...friend });
+  const b = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: t2 }, ...other });
+  assert.equal(a.out.payRequired && b.out.payRequired, true, 'both sent to Checkout for the last seat');
+
+  assert.equal((await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId: sessionOf(a.out.url) }, ...friend })).code, 200);
+  const late = await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId: sessionOf(b.out.url) }, ...other });
+  assert.equal(late.code, 409);
+  assert.equal(late.out.refunded, true);
+  assert.match(late.out.error, /filled up .* refunded in full/);
+  const refund = S.stripe.find((c) => c[0] === 'refunds.create');
+  assert.ok(refund, 'Stripe was asked for the refund');
+  assert.equal(refund[1].payment_intent, `pi_${sessionOf(b.out.url)}`);
+  assert.equal(S.db.league_members.some((x) => x.customer_id === 'c-other'), false);
+  assert.equal(S.db.league_seat_payments.length, 2, 'the refunded payment is not a seat');
+});
+
+test('what the captain owes: unpaid seats × share, due once the season has started', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-range', 'Quad', 4);
+  await inviteToken(teamId, '2045550116');
+  let m = (await db.teamMoneyFor(teamId)).money;
+  assert.deepEqual([m.seats, m.paidSeats, m.unpaidSeats, m.owedCents, m.due, m.openInvites], [4, 1, 3, 45000, true, 1]);
+
+  // Before the season starts nobody is chased — friends are still joining.
+  S.db.leagues.find((l) => l.id === 'L-range').season_start = addDays(5);
+  m = (await db.teamMoneyFor(teamId)).money;
+  assert.equal(m.owedCents, 45000);
+  assert.equal(m.due, false);
+
+  // The captain sees it on My Teams, with who is still to accept; a teammate does not see the bill.
+  const mine = await run(leaguesApi, { query: { action: 'my-teams' }, ...cap });
+  const t = mine.out.teams.find((x) => x.team.id === teamId);
+  assert.deepEqual([t.seats.seats, t.seats.paidSeats, t.seats.owedCents, t.seats.invited.length], [4, 1, 45000, 1]);
+});
+
+test('staff "Mark collected": Money permission only, part payments, and nothing past what is owed', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-range', 'Trio', 3);   // 2 seats × $200 owed
+  const collect = (tok, body) => run(seriesApi, { query: { action: 'league-collect' }, body, headers: { authorization: `Bearer ${tok}` } });
+
+  assert.equal((await collect('tok-emp', { teamId, seats: 1 })).code, 403, 'an employee without Money');
+  assert.equal((await run(seriesApi, { query: { action: 'league-collect' }, body: { teamId, seats: 1 } })).code, 401);
+  assert.equal((await collect('tok-admin', { teamId, seats: 3 })).code, 400, 'only 2 are owed');
+  assert.equal((await collect('tok-admin', { teamId, seats: 0 })).code, 400);
+
+  const part = await collect('tok-admin', { teamId, seats: 1 });
+  assert.equal(part.code, 200, JSON.stringify(part.out));
+  assert.deepEqual([part.out.collectedCents, part.out.owedCents, part.out.unpaidSeats], [20000, 20000, 1]);
+  assert.match(part.out.message, /1 still unpaid/);
+  const row = S.db.league_seat_payments.find((p) => p.method === 'counter');
+  assert.deepEqual([row.seats, row.amount_cents, row.recorded_by, row.payer_customer_id], [1, 20000, 'admin@invictus.test', 'c-cap']);
+
+  const rest = await collect('tok-admin', { teamId, seats: 1 });
+  assert.match(rest.out.message, /Every seat is now paid/);
+  assert.equal((await db.teamMoneyFor(teamId)).money.owedCents, 0);
+  assert.equal((await collect('tok-admin', { teamId, seats: 1 })).code, 409, 'nothing left to collect');
+  assert.equal(S.db.league_teams.find((x) => x.id === teamId).paid_cents, 60000, 'the team total adds up');
+});
+
+test('teams bought before seat-by-seat payments are untouched: never asked to pay, never flagged', async () => {
+  seatWorld();
+  const teamId = await ownTeam();   // the old way: whole price, no seats
+  const m = (await db.teamMoneyFor(teamId)).money;
+  assert.deepEqual([m.split, m.owedCents, m.due], [false, 0, false]);
+  const token = await inviteToken(teamId, '2045550116');
+  const claim = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token }, ...friend });
+  assert.equal(claim.out.payRequired, undefined, 'friends of an old team join free, as before');
+  assert.equal((await run(seriesApi, { query: { action: 'league-collect' }, body: { teamId, seats: 1 }, headers: { authorization: 'Bearer tok-admin' } })).code, 409);
+});
+
+test('before migration 0036: leagues and teams still read, with their 0031 sizes', async () => {
+  world();
+  S.missing0031 = ['team_min', 'share_cents'];
+  const r = await run(leaguesApi, { query: { action: 'list' } });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.leagues[0].team_size, 4, 'not dropped back to the pre-0031 columns');
+  const teamId = await ownTeam();
+  assert.equal((await db.leagueTeamById(teamId)).captain_customer_id, 'c-cap');
 });

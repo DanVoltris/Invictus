@@ -92,7 +92,7 @@
   const LEAGUE_THU = { id: uid('lg'), name: 'Winter Team League', description: 'Buy a team, bring three friends, play your round any time that suits you — once a week, all season.',
     day_of_week: null, start_min: null, end_min: null,
     season_start: plusDays(THIS_WEEK, -35), season_end: plusDays(THIS_WEEK, 48),
-    bay_ids: ['B1', 'B2', 'B3', 'B4'], fee_cents: 40000, capacity: 16, team_size: 4, weekly_min_mins: 180,
+    bay_ids: ['B1', 'B2', 'B3', 'B4'], fee_cents: 40000, capacity: 16, team_size: 4, team_min: 3, weekly_min_mins: 180,
     team_mode: true, scoring: 'points', join_online: true,
     is_active: true, series_id: null, color: '#F0523D', sort: 0, created_at: hoursAgo(1200) };
   const LEAGUE_SUN = { id: uid('lg'), name: 'Sunday Stroke Play', description: 'Play your own round. Lowest average across the season takes the jacket.',
@@ -106,7 +106,10 @@
     { name: 'Aces',     captain: 0, paid: 40000, hoursSince: 1100, session: 'cs_demo_team_aces',  bay: 'B1', dow: 1, start: 960,  end: 1140 },
     { name: 'Birdies',  captain: 2, paid: 40000, hoursSince: 1040, session: 'cs_demo_team_birds', bay: 'B2', dow: 2, start: 1020, end: 1200 },
     { name: 'Chippers', captain: 4, paid: 40000, hoursSince: 980,  session: null,                 bay: 'B4', dow: 3, start: 600,  end: 780 },
-    { name: 'Divots',   captain: 6, paid: 0,     hoursSince: null, session: null,                 bay: 'B3', dow: 4, start: 900,  end: 1080 },
+    // Bought seat by seat (migration 0036): a team of 4 at $100 a seat. The captain and one friend
+    // paid; two seats are unpaid and the season has started, so the captain owes $200 — the row on
+    // Holds to Charge and the flag on today's tee sheet (see the booking seeded below).
+    { name: 'Divots',   captain: 6, paid: 20000, hoursSince: 300, session: 'cs_demo_team_divots', bay: 'B3', dow: 4, start: 900,  end: 1080, seats: 4, share: 10000 },
   ];
   const LEAGUE_TEAMS = TEAM_SEED.map((t) => ({
     id: uid('lt'), league_id: LEAGUE_THU.id, name: t.name,
@@ -114,8 +117,16 @@
     paid_cents: t.paid, paid_at: t.paid ? hoursAgo(t.hoursSince) : null,
     stripe_session_id: t.session,
     note: t.paid ? null : 'Paying at the counter — chase this week.',
+    seats: t.seats || null, share_cents: t.share || null,
     created_at: hoursAgo(1100),
   }));
+  // Who paid for which seats (0036). Only the seat-by-seat team has any.
+  const LEAGUE_SEAT_PAYMENTS = [
+    { id: uid('sp'), team_id: LEAGUE_TEAMS[3].id, league_id: LEAGUE_THU.id, seats: 1, amount_cents: 10000, method: 'stripe',
+      payer_customer_id: CUSTOMERS[6].id, for_customer_id: CUSTOMERS[6].id, stripe_session_id: 'cs_demo_team_divots', recorded_by: null, note: null, created_at: hoursAgo(300) },
+    { id: uid('sp'), team_id: LEAGUE_TEAMS[3].id, league_id: LEAGUE_THU.id, seats: 1, amount_cents: 10000, method: 'stripe',
+      payer_customer_id: CUSTOMERS[7].id, for_customer_id: CUSTOMERS[7].id, stripe_session_id: 'cs_demo_seat_divots_2', recorded_by: null, note: null, created_at: hoursAgo(280) },
+  ];
   const LEAGUE_MEMBERS = [
     ...CUSTOMERS.slice(0, 8).map((c, i) => ({ id: uid('lm'), league_id: LEAGUE_THU.id, customer_id: c.id, team_id: LEAGUE_TEAMS[Math.floor(i / 2)].id,
       status: 'active', source: i % 2 ? 'online' : 'staff', paid_cents: 0, paid_at: null,
@@ -584,6 +595,8 @@
       { amount_cents: 0, authorized_cents: null, deferred_cents: 3750, stripe_payment_intent: null,
         hold_error: 'Your card has insufficient funds', hold_attempts: 1, stripe_payment_method: 'pm_demo' }],
   ].forEach((row) => BOOKINGS.push(cardBooking(row)));
+  // The Divots captain is in this afternoon — so At a glance flags the $200 their team still owes.
+  BOOKINGS.push(cardBooking(['B1', 0, 780, 900, CUSTOMERS[6].name, 5000, 'paid', null, { captured_at: hoursAgo(3) }]));
 
   /* ---------- Staff, roles and the activity log (migration 0024) ---------- */
   const CAPABILITIES = [
@@ -715,6 +728,7 @@
     league_members: LEAGUE_MEMBERS,
     league_results: LEAGUE_RESULTS,
     league_team_invites: LEAGUE_INVITES,
+    league_seat_payments: LEAGUE_SEAT_PAYMENTS,
     league_cancelled_nights: LEAGUE_CANCELLED,
     booking_feedback: [],
   };
