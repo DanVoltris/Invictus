@@ -334,8 +334,12 @@
   .sw.booked{background:rgba(78,192,106,.16);border-color:#4ec06a}
   .sw.blocked{background:rgba(240,82,61,.14);border-color:var(--orange);border-style:dashed}
   .grid-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .bkgrid{width:100%;min-width:660px;border-collapse:separate;border-spacing:5px}
-  .bkgrid th{font-family:'Space Grotesk';font-weight:700;font-size:12.5px;color:var(--white);padding:2px 4px 8px;vertical-align:bottom;text-align:center}
+  /* Every bay on screen at once: fixed layout splits the width equally between the bays instead
+     of letting the longest sponsor name ("Assiniboine Credit Union Bay #1") size its column and
+     push the last bays off the edge. Long names wrap in the header; cell text already ellipsises.
+     min-width still lets a phone scroll sideways rather than crush six bays into 300px. */
+  .bkgrid{width:100%;min-width:660px;border-collapse:separate;border-spacing:5px;table-layout:fixed}
+  .bkgrid th{font-family:'Space Grotesk';font-weight:700;font-size:12.5px;color:var(--white);padding:2px 4px 8px;vertical-align:bottom;text-align:center;overflow-wrap:anywhere}
   .bkgrid th small{display:block;font-family:'Raleway';font-weight:500;font-size:10.5px;color:var(--dim);margin-top:2px}
   .bkgrid th.t{width:62px}
   .bkgrid td.t{font-family:'Space Grotesk';font-weight:700;font-size:12px;color:var(--muted);text-align:right;padding-right:8px;white-space:nowrap;width:62px}
@@ -357,7 +361,9 @@
   .cell.held .bnote{color:#7A6420;font-style:normal}
   .cell .nm{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .cell .cont{opacity:.5}
-  .cell .cmeta{display:flex;gap:4px;justify-content:center;align-items:center;flex-wrap:nowrap;overflow:hidden;margin-top:4px;max-width:100%}
+  /* `safe center`: centred when the pills fit, start-aligned when they don't — plain `center`
+     clips both ends in a narrow column, cutting the first pill ("3 BAYS") in half. */
+  .cell .cmeta{display:flex;gap:4px;justify-content:center;justify-content:safe center;align-items:center;flex-wrap:nowrap;overflow:hidden;margin-top:4px;max-width:100%}
   .cell .stl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:999px;line-height:1.5;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
   .stl-more{background:var(--surface-2);color:var(--muted);border:1px solid var(--border);flex:none!important}
   .cell .tgs{display:inline-flex;gap:3px;align-items:center}
@@ -382,6 +388,13 @@
   .cell.ovr .nm{color:var(--white);font-weight:700;font-size:11.5px}
   .cell.ovr:hover{border-color:var(--dim)}
   .seg-sm button{padding:7px 12px;font-size:13px}
+  .cu-filters{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;margin:-4px 0 16px}
+  .cu-f{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .cu-fl{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
+  .cu-rank{display:inline-block;min-width:26px;font-family:'Space Grotesk';font-weight:700;color:var(--dim)}
+  .cu-filters .seg button{white-space:nowrap}
+  /* Long addresses shorten with … (full one on hover) so the Hours column fits without scrolling. */
+  .cu-email{display:block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* Day grid + side list */
   .day-layout{display:grid;grid-template-columns:1fr;gap:18px;align-items:start;margin-bottom:18px}
   /* The tee-sheet card is a grid item, so its automatic min-width is min-content — as wide as
@@ -907,10 +920,25 @@
             <button class="btn btn-primary" id="cu-add">+ Add customer</button>
           </div>
         </div>
-        <div class="stats">
+        <div class="stats" style="grid-template-columns:repeat(4,1fr)">
           <div class="stat"><div class="stat-n" id="cu-total">0</div><div class="stat-l">Customers</div></div>
           <div class="stat"><div class="stat-n" id="cu-members">0</div><div class="stat-l">League players</div></div>
-          <div class="stat"><div class="stat-n" id="cu-visits">0</div><div class="stat-l">Total bookings</div></div>
+          <div class="stat"><div class="stat-n" id="cu-visits">0</div><div class="stat-l" id="cu-visits-l">Total bookings</div></div>
+          <div class="stat"><div class="stat-n" id="cu-hours">0</div><div class="stat-l" id="cu-hours-l">Hours booked</div></div>
+        </div>
+        <!-- Who has booked the most hours, and over what stretch. The period decides what the Bookings
+             and Hours columns (and the two tiles above) count; Sort puts the biggest bookers first. -->
+        <div class="cu-filters">
+          <div class="cu-f"><span class="cu-fl">Count hours</span>
+            <div class="seg seg-sm" id="cu-period" role="tablist" aria-label="Which bookings to count">
+              <button type="button" role="tab" data-v="all">All time</button>
+              <button type="button" role="tab" data-v="30">Last 30 days</button>
+              <button type="button" role="tab" data-v="90">Last 90 days</button>
+              <button type="button" role="tab" data-v="year">This year</button></div></div>
+          <div class="cu-f"><span class="cu-fl">Sort by</span>
+            <div class="seg seg-sm" id="cu-sort" role="tablist" aria-label="Sort customers by">
+              <button type="button" role="tab" data-v="name">Name</button>
+              <button type="button" role="tab" data-v="hours">Most hours</button></div></div>
         </div>
         <div class="card" id="cu-list-wrap"><div class="tbl-scroll"><table id="cu-table"></table></div></div>
         <div id="cu-grid" class="cu-grid" style="display:none"></div>
@@ -1338,7 +1366,8 @@ let CATEGORIES = [];    // bay_categories
 let STATUSES = [];      // booking_statuses
 let TAGS = [];          // tags
 let CUSTOMERS = [];     // customer database
-let CUST_STATS = {};    // { 'email|phone key': {count, last} } derived from bookings
+let CUST_STATS = {};    // { 'email|phone key': {count, mins, last, pCount, pMins} } derived from bookings
+let CUST_BOOKINGS = []; // every confirmed booking (contact, date, start/end) — CUST_STATS is built from it
 let OVERRIDES = [];      // active schedule overrides that touch the visible range
 // Bookings whose card is authorised but not charged yet. Kept here (not inside the tab) so the
 // sidebar can carry the count on every screen — a hold running out is not a thing to discover.
@@ -2565,17 +2594,43 @@ $('#logs-export').onclick=()=>{
 const money = c => '$'+((c||0)/100).toFixed((c||0)%100?2:0);
 const custKeys = c => [ (c.email||'').trim().toLowerCase(), (c.phone||'').trim() ].filter(Boolean);
 async function fetchCustomers(){ const { data } = await sb.from('customers').select('*').order('name'); CUSTOMERS = data||[]; }
+// Every confirmed booking, a page at a time. The database hands back at most 1,000 rows per request
+// and the history holds several thousand, so a single request quietly counted only the first 1,000.
 async function fetchCustStats(){
+  const PAGE=1000, rows=[];
+  for(let from=0; from<500000; from+=PAGE){
+    const { data, error } = await sb.from('bookings').select('id,customer_email,customer_phone,booking_date,start_min,end_min')
+      .eq('status','confirmed').order('id').range(from, from+PAGE-1);
+    if(error || !data) break;
+    rows.push(...data);
+    if(data.length<PAGE) break;
+  }
+  CUST_BOOKINGS=rows;
+  buildCustStats();
+}
+// The stretch the Hours/Bookings columns count. "Last 30/90 days" means sessions already played in
+// that window; "This year" and "All time" include what is booked ahead too.
+function cuPeriod(){
+  const today=todayLocalISO(), d=new Date();
+  if(CU_PERIOD==='30'||CU_PERIOD==='90'){ d.setDate(d.getDate()-Number(CU_PERIOD)); return { since:toISO(d), until:today }; }
+  if(CU_PERIOD==='year') return { since:d.getFullYear()+'-01-01', until:d.getFullYear()+'-12-31' };
+  return { since:null, until:null };
+}
+const inCuPeriod = (date, p) => (!p.since || date>=p.since) && (!p.until || date<=p.until);
+// All-time count/mins/last for the profile, and pCount/pMins for the chosen period.
+function buildCustStats(){
+  const p=cuPeriod();
   CUST_STATS={};
-  const { data } = await sb.from('bookings').select('customer_email,customer_phone,booking_date').eq('status','confirmed');
-  (data||[]).forEach(b=>{
+  CUST_BOOKINGS.forEach(b=>{
+    const mins=Math.max(0,(b.end_min||0)-(b.start_min||0)), inP=inCuPeriod(b.booking_date, p);
     [ (b.customer_email||'').trim().toLowerCase(), (b.customer_phone||'').trim() ].filter(Boolean).forEach(k=>{
-      const s=CUST_STATS[k]||(CUST_STATS[k]={count:0,last:null});
-      s.count++; if(!s.last||b.booking_date>s.last) s.last=b.booking_date;
+      const s=CUST_STATS[k]||(CUST_STATS[k]={count:0,mins:0,last:null,pCount:0,pMins:0});
+      s.count++; s.mins+=mins; if(!s.last||b.booking_date>s.last) s.last=b.booking_date;
+      if(inP){ s.pCount++; s.pMins+=mins; }
     });
   });
 }
-function statsFor(c){ for(const k of custKeys(c)){ if(CUST_STATS[k]) return CUST_STATS[k]; } return {count:0,last:null}; }
+function statsFor(c){ for(const k of custKeys(c)){ if(CUST_STATS[k]) return CUST_STATS[k]; } return {count:0,mins:0,last:null,pCount:0,pMins:0}; }
 // "(431) 374-0022" display for a stored +1XXXXXXXXXX number; anything else shows as saved.
 function fmtPhone(p){ const m=/^\+1(\d{3})(\d{3})(\d{4})$/.exec(p||''); return m?`(${m[1]}) ${m[2]}-${m[3]}`:(p||''); }
 const todayLocalISO = () => toISO(new Date());
@@ -2588,15 +2643,27 @@ async function loadCustomers(){
 }
 let CU_VIEW = localStorage.getItem('jhg-cu-view')==='grid' ? 'grid' : 'list';
 let CU_WHO = ['all','regular','league'].includes(localStorage.getItem('jhg-cu-who')) ? localStorage.getItem('jhg-cu-who') : 'all';
+let CU_PERIOD = ['all','30','90','year'].includes(localStorage.getItem('jhg-cu-period')) ? localStorage.getItem('jhg-cu-period') : 'all';
+let CU_SORT = ['name','hours'].includes(localStorage.getItem('jhg-cu-sort')) ? localStorage.getItem('jhg-cu-sort') : 'name';
+const CU_PERIOD_LABEL = { all:'', '30':' · last 30 days', '90':' · last 90 days', year:' · this year' };
 function renderCustomers(){
   const term=($('#cu-q').value||'').trim().toLowerCase();
   const inLeague=c=>((LEAGUE_INDEX[c.id]||[]).length>0);
   const rows=CUSTOMERS
     .filter(c=>CU_WHO==='all' || (CU_WHO==='league' ? inLeague(c) : !inLeague(c)))
     .filter(c=>!term || [c.name,c.email,c.phone,c.waiver_code].some(x=>(x||'').toLowerCase().includes(term)));
+  // Most hours first; a tie goes to more bookings, then the name, so the order never jumps around.
+  if(CU_SORT==='hours') rows.sort((a,b)=>{ const x=statsFor(a), y=statsFor(b);
+    return (y.pMins-x.pMins) || (y.pCount-x.pCount) || String(a.name||'').localeCompare(String(b.name||'')); });
+  const rank = CU_SORT==='hours' ? c => { const i=rows.indexOf(c); return statsFor(c).pMins>0 ? `<span class="cu-rank">${i+1}</span>` : '<span class="cu-rank"></span>'; } : () => '';
   const members=CUSTOMERS.filter(inLeague).length;
-  const visits=CUSTOMERS.reduce((s,c)=>s+statsFor(c).count,0);   // live bookings only (imported history stays per-row)
-  $('#cu-total').textContent=CUSTOMERS.length; $('#cu-members').textContent=members; $('#cu-visits').textContent=visits;
+  // Straight from the bookings, not summed per customer — a booking whose contact matches no
+  // customer record still counts, and one matched by both email and phone is not counted twice.
+  const p=cuPeriod(), inP=CUST_BOOKINGS.filter(b=>inCuPeriod(b.booking_date, p));
+  const visits=inP.length, mins=inP.reduce((s,b)=>s+Math.max(0,(b.end_min||0)-(b.start_min||0)),0);
+  $('#cu-total').textContent=CUSTOMERS.length; $('#cu-members').textContent=members;
+  $('#cu-visits').textContent=visits.toLocaleString('en-CA'); $('#cu-hours').textContent=Math.round(mins/60).toLocaleString('en-CA');
+  $('#cu-visits-l').textContent='Total bookings'+CU_PERIOD_LABEL[CU_PERIOD]; $('#cu-hours-l').textContent='Hours booked'+CU_PERIOD_LABEL[CU_PERIOD];
   $('#cu-list-wrap').style.display = CU_VIEW==='list' ? '' : 'none';
   $('#cu-grid').style.display = CU_VIEW==='grid' ? '' : 'none';
   const noneHere = CU_WHO==='league' ? 'Nobody has joined a league yet.'
@@ -2605,13 +2672,14 @@ function renderCustomers(){
   if(CU_VIEW==='grid'){ renderCustGrid(rows, empty); return; }
   const tbl=$('#cu-table');
   if(!rows.length){ tbl.innerHTML='<tbody><tr><td class="empty">'+(CUSTOMERS.length?noneHere:'No customers yet — they appear here as soon as someone books.')+'</td></tr></tbody>'; return; }
-  tbl.innerHTML=`<thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>League</th><th>Bookings</th><th>Cancelled</th><th>Waiver</th><th>Last visit</th><th></th></tr></thead><tbody>${
+  tbl.innerHTML=`<thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>League</th><th>Bookings</th><th>Hours</th><th>Cancelled</th><th>Waiver</th><th>Last visit</th><th></th></tr></thead><tbody>${
     rows.map(c=>{ const st=statsFor(c); return `<tr data-id="${c.id}">
-      <td><span class="name-link cu-edit">${esc(c.name||'—')}</span></td>
-      <td class="muted">${esc(c.email||'')}</td>
+      <td style="white-space:nowrap">${rank(c)}<span class="name-link cu-edit">${esc(c.name||'—')}</span></td>
+      <td class="muted"><span class="cu-email" title="${esc(c.email||'')}">${esc(c.email||'')}</span></td>
       <td class="muted" style="white-space:nowrap">${esc(fmtPhone(c.phone))}</td>
       <td>${leaguePills(c.id)||'<span class="dim">—</span>'}${reviewBadge(c)}</td>
-      <td>${st.count+(c.legacy_bookings||0)}</td>
+      <td>${st.pCount+(CU_PERIOD==='all'?(c.legacy_bookings||0):0)}</td>
+      <td class="${st.pMins?'':'dim'}" style="white-space:nowrap">${st.pMins?fmtHrs(st.pMins):'—'}</td>
       <td class="${(c.legacy_cancelled||0)>0?'':'dim'}">${c.legacy_cancelled||0}</td>
       <td>${c.waiver_code?`<span class="wv-code">${esc(c.waiver_code)}</span>`:'<span class="dim">—</span>'}</td>
       <td class="muted">${st.last?shortDate(st.last):'—'}</td>
@@ -2635,7 +2703,7 @@ function renderCustGrid(rows, empty){
     return `<div class="cu-card" data-id="${c.id}">
       <div class="cuc-name"><span>${esc(c.name||'(no name)')}</span>${leaguePills(c.id)}</div>
       <div class="cuc-contact">${esc(fmtPhone(c.phone)||c.email||'—')}${c.phone&&c.email?` · ${esc(c.email)}`:''}</div>
-      <div class="cuc-meta">${st.count+(c.legacy_bookings||0)} booking${(st.count+(c.legacy_bookings||0))===1?'':'s'}${st.last?` · last ${shortDate(st.last)}`:''}</div>
+      <div class="cuc-meta">${st.pCount+(CU_PERIOD==='all'?(c.legacy_bookings||0):0)} booking${(st.pCount+(CU_PERIOD==='all'?(c.legacy_bookings||0):0))===1?'':'s'}${st.pMins?` · ${fmtHrs(st.pMins)}`:''}${st.last?` · last ${shortDate(st.last)}`:''}</div>
       <div class="cuc-badges">
         ${hrs>0?`<span class="pill" style="background:rgba(74,163,255,.12);color:#1257A0;border:1px solid rgba(74,163,255,.4)">${fmtHrs(hrs)}</span>`:''}
         ${c.waiver_code?'<span class="pill confirmed">Waiver</span>':'<span class="pill cancelled">No waiver</span>'}
@@ -2676,6 +2744,18 @@ async function importBookingCustomers(){
   toast(`Added ${toAdd.length} customer${toAdd.length>1?'s':''} from bookings`,'ok');
   return true;
 }
+// Period and sort: same segmented control as All/Regular/League, remembered the same way.
+[['#cu-period','jhg-cu-period',()=>CU_PERIOD,v=>{ CU_PERIOD=v; buildCustStats(); }],
+ ['#cu-sort','jhg-cu-sort',()=>CU_SORT,v=>{ CU_SORT=v; }]].forEach(([sel,key,get,set])=>{
+  $(sel).querySelectorAll('button').forEach(b=>{
+    b.classList.toggle('on', b.dataset.v===get()); b.setAttribute('aria-selected', String(b.dataset.v===get()));
+    b.onclick=()=>{
+      set(b.dataset.v); localStorage.setItem(key, b.dataset.v);
+      $(sel).querySelectorAll('button').forEach(x=>{ const on=x===b; x.classList.toggle('on',on); x.setAttribute('aria-selected',String(on)); });
+      renderCustomers();
+    };
+  });
+});
 $('#cu-who').querySelectorAll('button').forEach(b=>{
   b.classList.toggle('on', b.dataset.v===CU_WHO); b.setAttribute('aria-selected', String(b.dataset.v===CU_WHO));
   b.onclick=()=>{
@@ -2690,7 +2770,7 @@ function openCustomer(c){
   sheet.innerHTML=`
     <button class="sheet-close" id="x">✕</button>
     <h3>${isNew?'New customer':esc(c.name||'Customer')}</h3>
-    <div class="sub">${isNew?'Add someone to your customer database.':`${st.count} booking${st.count===1?'':'s'}${st.last?' · last '+shortDate(st.last):''}`}</div>
+    <div class="sub">${isNew?'Add someone to your customer database.':`${st.count} booking${st.count===1?'':'s'}${st.mins?' · '+fmtHrs(st.mins)+' booked':''}${st.last?' · last '+shortDate(st.last):''}`}</div>
     <div class="field"><label>Name</label><input class="input" id="c-name" value="${esc(c.name||'')}" placeholder="Full name" /></div>
     <div class="field"><label>Email</label><input class="input" id="c-email" value="${esc(c.email||'')}" placeholder="name@email.com" /></div>
     <div class="field"><label>Phone</label><input class="input" id="c-phone" value="${esc(c.phone||'')}" placeholder="Optional" /></div>

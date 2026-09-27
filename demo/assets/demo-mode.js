@@ -791,7 +791,7 @@
   function from(table) {
     const st = {
       table, mode: 'select', cols: '*', filters: [], orders: [],
-      limitN: null, head: false, count: false, payload: null,
+      limitN: null, offset: 0, head: false, count: false, payload: null,
       single: false, maybeSingle: false, returning: false,
     };
 
@@ -858,7 +858,7 @@
         });
       });
       const total = out.length;
-      if (st.limitN != null) out = out.slice(0, st.limitN);
+      if (st.limitN != null) out = out.slice(st.offset, st.offset + st.limitN);
       if (st.head) return { data: null, error: null, count: total };
 
       // embedded relation, e.g. select('minutes,...,customers(name)')
@@ -903,7 +903,7 @@
 
       order(col, opts) { st.orders.push({ col, asc: !opts || opts.ascending !== false }); return api; },
       limit(n) { st.limitN = n; return api; },
-      range(a, b) { st.limitN = b - a + 1; return api; },
+      range(a, b) { st.offset = a; st.limitN = b - a + 1; return api; },   // like PostgREST: rows a..b
       single() { st.single = true; return api; },
       maybeSingle() { st.maybeSingle = true; return api; },
 
