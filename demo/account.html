@@ -247,20 +247,38 @@ function viewLanding(msg){
   $('#l-up').onclick = () => viewPhone();
 }
 
+/* ---------- "Save this password?" ----------
+   Two routes, because phones differ:
+     · Android Chrome (and desktop Chrome/Edge) take the login directly through the Credential
+       Management API — navigator.credentials.store(PasswordCredential) opens the save prompt.
+     · iPhone Safari has no such API. It offers to save when it sees a <form> with a username and
+       a password field submitted and then replaced — which the sign-in and sign-up forms below are,
+       the moment viewProfile() draws the account over them.
+   Best-effort: a browser that says no, or does not support it, changes nothing else. */
+async function rememberLogin(email, password, name){
+  try{
+    if(window.PasswordCredential && navigator.credentials && navigator.credentials.store){
+      await navigator.credentials.store(new PasswordCredential({ id: email, password, name: name || email }));
+    }
+  }catch(e){ /* declined or unsupported — nothing to do */ }
+}
+
 /* ---------- SIGN IN — email + password, no code ---------- */
 function viewSignIn(msg){
-  render(`<div class="card">
+  // A real <form> with username/current-password fields: that is what lets the phone's password
+  // manager fill it in, and offer to save the login once it works (see rememberLogin).
+  render(`<form class="card" id="s-form" method="post" action="/account" autocomplete="on">
     <h1>Sign in</h1>
     <div class="sub">Use the email and password you signed up with.</div>
     <label class="fld" for="s-email">Email</label>
-    <input class="input" id="s-email" type="email" autocomplete="email" placeholder="you@example.com" />
+    <input class="input" id="s-email" name="email" type="email" autocomplete="username" placeholder="you@example.com" />
     <label class="fld" for="s-pass" style="margin-top:14px">Password</label>
-    <input class="input" id="s-pass" type="password" autocomplete="current-password" placeholder="Your password" />
+    <input class="input" id="s-pass" name="password" type="password" autocomplete="current-password" placeholder="Your password" />
     <div class="err" id="s-err">${esc(msg||'')}</div>
-    <button class="btn btn-primary" id="s-go">Sign in</button>
-    <button class="btn btn-ghost" id="s-up">Create an account instead</button>
+    <button class="btn btn-primary" id="s-go" type="submit">Sign in</button>
+    <button class="btn btn-ghost" id="s-up" type="button">Create an account instead</button>
     <div class="switch">Forgotten it? <a id="s-reset">Email me a reset link</a></div>
-  </div>`);
+  </form>`);
   const go = async () => {
     const email = ($('#s-email').value||'').trim().toLowerCase(), password = $('#s-pass').value||'';
     if(!email || !password){ setErr('#s-err','Enter your email and password.'); return; }
@@ -272,11 +290,11 @@ function viewSignIn(msg){
     // One message for a wrong password and for an address with no account: saying which would
     // turn this box into a way to test whether somebody is a customer.
     if(error){ setErr('#s-err','That email and password do not match.'); return; }
+    await rememberLogin(email, password);
     viewProfile();
   };
-  $('#s-go').onclick = go;
-  $('#s-pass').addEventListener('keydown', e => { if(e.key==='Enter') go(); });
-  $('#s-email').addEventListener('keydown', e => { if(e.key==='Enter') $('#s-pass').focus(); });
+  // Enter in either field submits the form; the page never actually navigates.
+  $('#s-form').addEventListener('submit', e => { e.preventDefault(); go(); });
   $('#s-up').onclick = () => viewPhone();
   $('#s-reset').onclick = async () => {
     const email = ($('#s-email').value||'').trim().toLowerCase();
@@ -361,7 +379,9 @@ function viewCode(msg){
 
 /* ---------- SIGN UP, step 3: the details ---------- */
 function viewSignUp(knownCustomer, name, msg){
-  render(`<div class="card">
+  // A real <form>, with the email as the username and a NEW password: iPhones suggest a strong
+  // password here, and the phone offers to save the login once the account is made.
+  render(`<form class="card" id="n-form" method="post" action="/account" autocomplete="on">
     ${steps(3)}
     <h1>Almost done</h1>
     <div class="sub">Your number is verified. Add an email and password so you can sign in from anywhere.</div>
@@ -373,13 +393,13 @@ function viewSignUp(knownCustomer, name, msg){
     <label class="fld" for="n-career" style="margin-top:14px">Career <span class="opt">(optional)</span></label>
     <input class="input" id="n-career" type="text" autocomplete="organization-title" maxlength="120" placeholder="What you do for work" />
     <label class="fld" for="n-email" style="margin-top:14px">Email</label>
-    <input class="input" id="n-email" type="email" autocomplete="email" placeholder="you@example.com" />
+    <input class="input" id="n-email" name="email" type="email" autocomplete="username" placeholder="you@example.com" />
     <label class="fld" for="n-pass" style="margin-top:14px">Password</label>
-    <input class="input" id="n-pass" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+    <input class="input" id="n-pass" name="new-password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" />
     <div class="err" id="n-err">${esc(msg||'')}</div>
-    <button class="btn btn-primary" id="n-go">Create account</button>
+    <button class="btn btn-primary" id="n-go" type="submit">Create account</button>
     <div class="muted-note">We use your email for booking confirmations and password resets.</div>
-  </div>`);
+  </form>`);
   const go = async () => {
     const nm = ($('#n-name').value||'').trim();
     const email = ($('#n-email').value||'').trim().toLowerCase();
@@ -395,13 +415,16 @@ function viewSignUp(knownCustomer, name, msg){
       setErr('#n-err', r.error || 'Could not create your account.');
       return;
     }
+    // Straight into the new account — nobody should have to type what they just typed. If that
+    // sign-in fails, say so and put them on the sign-in screen rather than back at the start.
     const sb = await supa();
-    if(sb) await sb.auth.signInWithPassword({ email, password });
+    const signedIn = sb ? await sb.auth.signInWithPassword({ email, password }) : { error: true };
     $('#n-go').disabled = false; $('#n-go').textContent = 'Create account';
+    if(signedIn.error){ viewSignIn('Your account is ready — sign in with the email and password you just chose.'); return; }
+    await rememberLogin(email, password, nm);
     viewProfile(r.inherited);
   };
-  $('#n-go').onclick = go;
-  $('#n-pass').addEventListener('keydown', e => { if(e.key==='Enter') go(); });
+  $('#n-form').addEventListener('submit', e => { e.preventDefault(); go(); });
   $('#n-email').focus();
 }
 
