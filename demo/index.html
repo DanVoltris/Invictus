@@ -426,6 +426,10 @@
   .conf .recap .row .k { color: var(--muted); }
 
   footer { border-top: 1px solid var(--border); color: var(--dim); font-size: 12px; padding: 24px 0; text-align: center; }
+  /* Staff get to the manager portal from here; quiet enough that customers are not drawn to it. */
+  footer .staff-link { margin-top: 10px; }
+  footer .staff-link a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+  footer .staff-link a:hover, footer .staff-link a:focus-visible { color: var(--orange); }
   .vb-link { color: var(--muted); font-weight: 600; text-decoration: none; border-bottom: 1px solid var(--border); transition: .15s; }
   .vb-link:hover { color: var(--orange); border-bottom-color: var(--orange); }
 
@@ -473,22 +477,6 @@
 </head>
 <body>
 
-<!-- Staff shortcut between the booking site and the manager portal. -->
-<div class="view-switch" aria-label="Switch view" hidden>
-  <span class="vs-label">View</span>
-  <a href="/" class="vs-btn active">Client</a>
-  <a href="/admin" class="vs-btn">Manager</a>
-</div>
-<style>
-  .view-switch{position:fixed;bottom:18px;right:18px;z-index:9999;display:flex;align-items:center;gap:6px;
-    background:rgba(255,255,255,.94);border:1px solid #E3E6EB;border-radius:999px;padding:6px 8px;
-    backdrop-filter:blur(8px);box-shadow:0 6px 24px rgba(16,24,40,.14);font-family:'Space Grotesk',sans-serif;}
-  .view-switch .vs-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#858C99;padding:0 6px;}
-  .view-switch .vs-btn{font-size:13px;font-weight:700;color:#555C68;text-decoration:none;padding:6px 14px;border-radius:999px;transition:.15s;}
-  .view-switch .vs-btn:hover{color:#14161A;}
-  .view-switch{border-color:#D7DCE3;}
-  .view-switch .vs-btn.active{background:#F0523D;color:#fff;}
-</style>
 
 <header>
   <div class="wrap nav">
@@ -729,6 +717,7 @@
 <footer>
   Invictus Golf · Powered by
   <a class="vb-link" href="https://www.voltrisbooking.com" target="_blank" rel="noopener">Voltris Booking</a>
+  <div class="staff-link"><a href="/admin">Staff login</a></div>
 </footer>
 
 <!-- The week/standings maths a league leans on, shared with My Account and the manager portal. -->
@@ -1163,11 +1152,6 @@ function buildGrid(){
   });
 }
 
-/* The Client/Manager switcher is a development convenience, not a customer feature: it puts a
-   link to the staff portal on the screen of everyone who books. Shown on this machine only. */
-if(['localhost','127.0.0.1','[::1]'].includes(location.hostname)){
-  const vs = document.querySelector('.view-switch'); if(vs) vs.hidden = false;
-}
 
 /* ---------- Checkout bar ---------- */
 function selectionValid(){ return state.date && state.bay && state.startMin!=null && state.endMin!=null; }
