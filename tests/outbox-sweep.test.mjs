@@ -21,6 +21,7 @@ const SECRET = 'test-only-not-a-real-secret';
 // applies (queued, send_after in the past, oldest first), which is the behaviour under test.
 let rows = [];
 let insertImpl = async () => ({ unsupported: true });
+let contactImpl = async () => null;   // swappable: who a phone number belongs to
 
 const db = {
   getSettings: async () => ({
@@ -38,7 +39,7 @@ const db = {
     if (row) Object.assign(row, patch);
     return { ok: true };
   },
-  customerHoursByContact: async () => null,
+  customerHoursByContact: async (...a) => contactImpl(...a),
   // Swappable per test: the gift-card test needs real rows back from the queue.
   insertNotification: async (r) => insertImpl(r),
   // Nobody is signed in during these tests: the secret is the only door.
@@ -56,7 +57,7 @@ const db = {
 mock.module(url('lib', 'db.js'), { namedExports: db });
 
 const { default: handler } = await import(url('api', 'waitlist.js'));
-const { notifyGiftCard } = await import(url('lib', 'notify.js'));
+const { notifyGiftCard, notifyBookingConfirmed } = await import(url('lib', 'notify.js'));
 
 // ----- harness -----------------------------------------------------------------------------
 let fetched = [];
@@ -72,8 +73,10 @@ const call = async (headers = {}, body = {}) => {
 };
 
 const iso = (minutesFromNow) => new Date(Date.now() + minutesFromNow * 60000).toISOString();
+// Texts only (lib/notify.js EMAIL_ENABLED is false), so the queue holds SMS rows.
+const PHONE = { due: '+12045550101', later: '+12045550102' };
 const row = (id, sendAfter) => ({
-  id, channel: 'email', recipient: `${id}@invictus.test`, template: 'booking.confirmed',
+  id, channel: 'sms', recipient: PHONE[id] || '+12045550199', template: 'booking.confirmed',
   payload: { dateISO: '2026-09-20', bayId: 'bay-1', bayName: 'Bay 1', startMin: 600, endMin: 660, amountCents: 5000 },
   msg_class: 'transactional', status: 'queued', attempts: 0, send_after: sendAfter,
 });
@@ -84,12 +87,11 @@ beforeEach(() => {
   delete process.env.CRON_SECRET;
   fetched = [];
   process.env.OUTBOX_SWEEP_SECRET = SECRET;
-  process.env.RESEND_API_KEY = 'test-key';
-  process.env.RESEND_FROM = 'Invictus Golf <bookings@invictus.test>';
-  delete process.env.TWILIO_ACCOUNT_SID; delete process.env.TWILIO_AUTH_TOKEN; delete process.env.TWILIO_FROM;
+  process.env.TWILIO_ACCOUNT_SID = 'AC_x'; process.env.TWILIO_AUTH_TOKEN = 't'; process.env.TWILIO_FROM = '+12045550000';
+  // Twilio takes a form, not JSON — capture it as one.
   globalThis.fetch = async (u, init) => {
-    fetched.push({ url: String(u), body: JSON.parse(init.body) });
-    return { ok: true, status: 200, json: async () => ({ id: 'msg_test_1' }) };
+    fetched.push({ url: String(u), form: new URLSearchParams(init.body) });
+    return { ok: true, status: 201, json: async () => ({ sid: 'msg_test_1' }) };
   };
 });
 
@@ -130,8 +132,8 @@ test('authenticated: delivers the due row and reports a tally', async () => {
   assert.deepEqual(res.body.outbox, { picked: 1, sent: 1, skipped: 0, failed: 0, retry: 0 });
 
   assert.equal(fetched.length, 1);
-  assert.match(fetched[0].url, /api\.resend\.com/);
-  assert.deepEqual(fetched[0].body.to, ['due@invictus.test']);
+  assert.match(fetched[0].url, /api\.twilio\.com/);
+  assert.equal(fetched[0].form.get('To'), PHONE.due);
 
   const due = rows.find((r) => r.id === 'due');
   assert.equal(due.status, 'sent');
@@ -167,7 +169,7 @@ test('a row queued for later is untouched', async () => {
   assert.equal(later.status, 'queued');
   assert.equal(later.attempts, 0);
   assert.equal(later.sent_at, undefined);
-  assert.ok(!fetched.some((f) => f.body.to.includes('later@invictus.test')));
+  assert.ok(!fetched.some((f) => f.form.get('To') === PHONE.later));
 });
 
 test('nothing due at all: a clean empty tally, no provider call', async () => {
@@ -200,7 +202,7 @@ test('Vercel Cron: a GET with Bearer CRON_SECRET runs the outbox; a wrong one is
 });
 
 test('a gift card delivered by the daily run has its code taken out of the row, like an instant one', async () => {
-  rows = [{ id: 'gift', channel: 'email', recipient: 'friend@invictus.test', template: 'gift.issued',
+  rows = [{ id: 'gift', channel: 'sms', recipient: '+12045550188', template: 'gift.issued',
     payload: { cardId: 'gc1', code: 'ABCD-EFGH-JKLM', amountCents: 5000, name: 'Sam' },
     msg_class: 'transactional', status: 'queued', attempts: 0, send_after: iso(-1) }];
   const res = await call({ 'x-outbox-secret': SECRET });
@@ -214,27 +216,56 @@ test('a gift card scheduled for later: the CARD waits, but the buyer\'s receipt 
   insertImpl = async (r) => { const made = { id: `n${++n}`, status: 'queued', attempts: 0, ...r }; rows.push(made); return { id: made.id, row: made }; };
   rows = [];
   await notifyGiftCard({ cardId: 'gc2', code: 'WXYZ-1234-5678', amountCents: 5000,
-    purchaserName: 'Pat', purchaserEmail: 'pat@invictus.test', recipientName: 'Sam', recipientEmail: 'sam@invictus.test',
+    purchaserName: 'Pat', purchaserPhone: '+12045550111', recipientName: 'Sam', recipientPhone: '+12045550122',
     deliverAt: iso(60 * 24 * 3) });
   const card = rows.find((r) => r.template === 'gift.issued'), receipt = rows.find((r) => r.template === 'gift.purchased');
+  assert.equal(card.channel, 'sms'); assert.equal(card.recipient, '+12045550122', 'the card goes to Sam\'s phone');
   assert.equal(receipt.status, 'sent', 'the buyer hears straight away');
   assert.equal(card.status, 'queued', 'the card waits for its day');
-  assert.deepEqual(fetched.map((f) => f.body.to[0]), ['pat@invictus.test']);
+  assert.deepEqual(fetched.map((f) => f.form.get('To')), ['+12045550111']);
+});
+
+test('emails are off: one left in the queue from before is marked skipped, never sent', async () => {
+  process.env.RESEND_API_KEY = 'test-key'; process.env.RESEND_FROM = 'Invictus Golf <bookings@invictus.test>';
+  rows = [{ ...row('due', iso(-5)), channel: 'email', recipient: 'old@invictus.test' }];
+  const res = await call({ 'x-outbox-secret': SECRET });
+  assert.deepEqual(res.body.outbox, { picked: 1, sent: 0, skipped: 1, failed: 0, retry: 0 });
+  assert.equal(fetched.length, 0, 'nothing went to Resend (or anywhere)');
+  delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
 });
 
 test('an EXPIRED sign-in code is never texted — not by a retry, not by the daily run', async () => {
-  process.env.TWILIO_ACCOUNT_SID = 'AC_x'; process.env.TWILIO_AUTH_TOKEN = 't'; process.env.TWILIO_FROM = '+12045550000';
   const code = (id, minutesAgo) => ({ id, channel: 'sms', recipient: '+12049906530', template: 'account.code',
     payload: { code: '123456', minutes: 10 }, msg_class: 'transactional', status: 'queued', attempts: 0,
     created_at: iso(-minutesAgo), send_after: iso(-minutesAgo) });
   rows = [code('stale', 11), code('fresh', 2)];
-  // Twilio takes a form, not JSON — capture it as one.
-  globalThis.fetch = async (u, init) => { fetched.push({ url: String(u), form: new URLSearchParams(init.body) });
-    return { ok: true, status: 201, json: async () => ({ sid: 'SM_1' }) }; };
   const res = await call({ 'x-outbox-secret': SECRET });
   assert.deepEqual(res.body.outbox, { picked: 2, sent: 1, skipped: 1, failed: 0, retry: 0 });
   assert.equal(rows.find((r) => r.id === 'stale').status, 'skipped');
   assert.match(rows.find((r) => r.id === 'stale').last_error, /expired/);
   assert.equal(rows.find((r) => r.id === 'fresh').status, 'sent');
   assert.equal(fetched.length, 1, 'only the fresh code reached Twilio');
+});
+
+test('a booking receipt is TEXTED — no marketing tick needed — and never emailed', async () => {
+  let n = 0;
+  insertImpl = async (r) => { const made = { id: `b${++n}`, status: 'queued', attempts: 0, ...r }; rows.push(made); return { id: made.id, row: made }; };
+  rows = [];
+  process.env.RESEND_API_KEY = 'test-key'; process.env.RESEND_FROM = 'Invictus Golf <bookings@invictus.test>';   // even with email set up
+  await notifyBookingConfirmed({ bookingId: 'bk1', dateISO: '2026-10-03', bayId: 'B2', bayName: 'Birchwood Bay #2',
+    startMin: 1410, endMin: 1620, players: 2, amountCents: 5600, name: 'Sam', email: 'sam@invictus.test', phone: '(204) 555-0101' });
+  assert.deepEqual(rows.map((r) => [r.channel, r.template, r.status]), [['sms', 'booking.confirmed', 'sent']]);
+  assert.equal(fetched.length, 1); assert.match(fetched[0].url, /twilio/);
+  assert.match(fetched[0].form.get('Body'), /you're booked — Birchwood Bay #2, Saturday, October 3, 11:30 PM–3:00 AM \(Sun\)\. Paid \$56\.00 CAD\./);
+  delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
+});
+
+test('…but somebody who texted STOP gets no receipt text', async () => {
+  let n = 0;
+  insertImpl = async (r) => { const made = { id: `s${++n}`, status: 'queued', attempts: 0, ...r }; rows.push(made); return { id: made.id, row: made }; };
+  rows = [];
+  contactImpl = async () => ({ id: 'C1', sms_unsub_at: '2026-09-01T00:00:00Z' });
+  await notifyBookingConfirmed({ bookingId: 'bk2', dateISO: '2026-10-03', bayId: 'B2', startMin: 600, endMin: 660, amountCents: 2800, phone: '2045550101' });
+  contactImpl = async () => null;
+  assert.equal(rows.length, 0); assert.equal(fetched.length, 0);
 });

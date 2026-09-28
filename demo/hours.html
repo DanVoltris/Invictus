@@ -168,25 +168,22 @@ function buyView(card){
       <label class="fld" for="h-phone">Phone</label>
       <input class="input" id="h-phone" type="tel" placeholder="(204) 000-0000" autocomplete="tel" />
       <div class="ph-hint" id="h-ph-hint"></div>
-      <label class="fld" for="h-email">Email <span style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">(for your receipt)</span></label>
-      <input class="input" id="h-email" type="email" placeholder="you@email.com" autocomplete="email" />
       <div class="err" id="h-err"></div>
       <button class="btn btn-primary" id="h-go">Continue to secure payment</button>
       <button class="btn btn-ghost" id="h-back">Back to cards</button>
       <div class="fine">You'll finish on Stripe's secure checkout. Your hours link to this phone number — use the same one when you book.</div>
     </div>`);
   $('#h-back').onclick=cardsView;
-  const nameEl=$('#h-name'), emailEl=$('#h-email'), phoneEl=$('#h-phone'), err=$('#h-err'), go=$('#h-go');
-  [nameEl,emailEl,phoneEl].forEach(el=>el.addEventListener('input',()=>el.classList.remove('invalid')));
+  const nameEl=$('#h-name'), phoneEl=$('#h-phone'), err=$('#h-err'), go=$('#h-go');
+  [nameEl,phoneEl].forEach(el=>el.addEventListener('input',()=>el.classList.remove('invalid')));
   wirePhoneHint(phoneEl, $('#h-ph-hint'));
   go.onclick=async()=>{
-    const name=nameEl.value.trim(), email=emailEl.value.trim(), phone=phoneEl.value.trim();
+    const name=nameEl.value.trim(), phone=phoneEl.value.trim();
     if(name.length<2){ err.textContent='Please enter your name.'; nameEl.classList.add('invalid'); nameEl.focus(); return; }
     if(!validPhone(phone)){ err.textContent='Please enter a valid phone number — your hours link to it (international: include your country code, e.g. +44…).'; phoneEl.classList.add('invalid'); phoneEl.focus(); return; }
-    if(!validEmail(email)){ err.textContent='Please enter a valid email for your receipt.'; emailEl.classList.add('invalid'); emailEl.focus(); return; }
     err.textContent=''; go.disabled=true; go.textContent='Redirecting to payment…';
     let r;
-    try{ r = await (await fetch('/api/hour-cards?action=checkout',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ cardId:card.id, name, email, phone }) })).json(); }
+    try{ r = await (await fetch('/api/hour-cards?action=checkout',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ cardId:card.id, name, phone }) })).json(); }
     catch(e){ r={ error:'Network error — please try again.' }; }
     if(r && r.url){ window.location.href = r.url; return; }
     go.disabled=false; go.textContent='Continue to secure payment';

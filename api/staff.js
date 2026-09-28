@@ -1,26 +1,47 @@
 // Staff logins: invite an employee from the portal instead of creating them in Supabase by hand.
 //
-//   POST ?action=invite  { name, email, role, note }  -> creates the login + staff row, emails an invite
-//   POST ?action=resend  { userId }                   -> invite again, or a password reset once accepted
-//   POST ?action=status  {}                           -> { [userId]: { pending, lastSignIn } } for the Staff tab
-//   POST ?action=needs-setup {}                       -> { setup: true } while nobody is an admin
-//   POST ?action=setup   { name, email, password }    -> creates the first admin; refused once one exists
+//   POST ?action=invite  { name, phone, role, note } -> creates the login + staff row, TEXTS a set-up link
+//   POST ?action=resend  { userId }                  -> texts a new link: set-up if unfinished, else new password
+//   POST ?action=status  {}                          -> { [userId]: { pending, lastSignIn, phone } } for the Staff tab
+//   POST ?action=claim   { token, email?, password } -> the texted link's own screen: they type their email
+//                                                       (first time) and a password; no login needed
+//   POST ?action=needs-setup {}                      -> { setup: true } while nobody is an admin
+//   POST ?action=setup   { name, email, password }   -> creates the first admin; refused once one exists
 //
 // invite / resend / status need the caller's Supabase JWT (Authorization: Bearer …) and the
 // staff.manage capability, checked by staffContext — the same rule the database applies to the
-// staff table. needs-setup and setup are the first-run door on the sign-in screen: they need no
-// login, and setup closes for good the moment an active admin exists.
+// staff table. needs-setup, setup and claim need no login: setup closes for good the moment an
+// active admin exists, and claim needs the secret from the text.
 //
-// EMAIL. Supabase's built-in mailer only delivers to addresses on the project's team, two an hour.
-// So each send is tried, and when Supabase cannot deliver, the response carries the link itself
-// for the admin to pass on. Set up custom SMTP in Supabase (Authentication → Emails) and the
-// fallback simply stops being needed. Links land on /admin, which must be listed under
-// Authentication → URL Configuration → Redirect URLs.
+// TEXT, NOT EMAIL (for now, by the owner's choice). The admin gives a name and a mobile number —
+// never an email. The login is created at once under a placeholder address (PENDING_DOMAIN) so the
+// staff row has a user to point at; the texted link opens /admin?staff-invite=<userId>.<secret>,
+// (or ?staff-reset= for a new password later), where the person types THEIR email and a password, and that replaces the placeholder. Supabase
+// sends nothing. Only a SHA-256 of the secret is kept (user_metadata.staff_invite), with an expiry;
+// using it clears it, so a link works once. "Send reset link" makes a fresh one the same way.
+import crypto from 'node:crypto';
 import { admin, staffContext, staffByUserId, upsertStaff } from '../lib/db.js';
+import { notifyStaffInvite } from '../lib/notify.js';
 
 const ROLES = ['admin', 'employee', 'readonly'];
+const ROLE_LABEL = { admin: 'an admin', employee: 'an employee', readonly: 'read-only staff' };
 const json = (res, code, body) => res.status(code).json(body);
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const LINK_DAYS = 7;
+export const PENDING_DOMAIN = 'staff-invite.invalid';   // .invalid can never be a real address
+const isPending = (email) => String(email || '').toLowerCase().endsWith('@' + PENDING_DOMAIN);
+const sha = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
+
+// "204-555-0123" / "(204) 555 0123" / "+1 204…" → "+12045550123". null when there is nothing usable.
+export function mobileE164(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const d = s.replace(/\D/g, '');
+  if (d.length === 10) return `+1${d}`;
+  if (d.length === 11 && d.startsWith('1')) return `+${d}`;
+  if (s.startsWith('+') && d.length >= 8 && d.length <= 15) return `+${d}`;
+  return null;
+}
 
 // Same order as api/waitlist.js: PUBLIC_BASE_URL, then the request's own origin.
 function portalUrl(req) {
@@ -46,6 +67,7 @@ export default async function handler(req, res) {
   try {
     if (action === 'needs-setup') return await needsSetup(res, db);
     if (action === 'setup') return await setup(req, res, db);
+    if (action === 'claim') return await claim(req, res, db);
 
     const ctx = await staffContext(req.headers.authorization, 'staff.manage');
     if (ctx.error === 'unauthorized') return json(res, 401, { error: 'Your session has ended. Sign in again.' });
@@ -102,17 +124,40 @@ async function setup(req, res, db) {
   return json(res, 200, { ok: true });
 }
 
+// ---- the texted link --------------------------------------------------------------------------
+// A new secret for this login, stored only as a hash with its expiry, and the link that carries it.
+async function newLink(req, db, user, kind) {
+  const secret = crypto.randomBytes(24).toString('base64url');
+  const meta = { ...(user.user_metadata || {}), staff_invite: { hash: sha(secret), expires: new Date(Date.now() + LINK_DAYS * 864e5).toISOString() } };
+  const upd = await db.auth.admin.updateUserById(user.id, { user_metadata: meta });
+  if (upd.error) return { error: upd.error.message };
+  const base = portalUrl(req);
+  // ?staff-invite= asks for their email too (first time); ?staff-reset= only for a new password.
+  return { link: `${base || '/admin'}?staff-${kind === 'reset' ? 'reset' : 'invite'}=${encodeURIComponent(`${user.id}.${secret}`)}` };
+}
+
+async function textLink({ req, db, user, role, kind, invitedBy }) {
+  const phone = mobileE164(user.user_metadata && user.user_metadata.phone);
+  const made = await newLink(req, db, user, kind);
+  if (made.error) return { error: made.error };
+  if (!phone) return { texted: false, link: made.link, textError: 'There is no mobile number on file for them.' };
+  const outcome = await notifyStaffInvite({ userId: user.id, phone, link: made.link, kind, invitedBy, roleLabel: ROLE_LABEL[role] });
+  if (outcome === 'sent') return { texted: true, phone };
+  return { texted: false, phone, link: made.link,
+    textError: outcome === 'skipped' ? 'Texting is not set up (Twilio) or the venue details are incomplete.' : 'The text did not go through.' };
+}
+
 // ---- invite ---------------------------------------------------------------------------------
 async function invite(req, res, db, ctx) {
   const b = req.body || {};
-  const email = String(b.email || '').trim().toLowerCase();
   const name = String(b.name || '').trim().slice(0, 120) || null;
   const note = String(b.note || '').trim().slice(0, 200) || null;
   const role = String(b.role || 'employee');
-  if (!EMAIL_RE.test(email)) return json(res, 400, { error: 'Enter a valid email address.' });
+  const phone = mobileE164(b.phone);
+  if (!name) return json(res, 400, { error: 'Enter their name.' });
+  if (!phone) return json(res, 400, { error: 'Enter their mobile number with the area code, e.g. 204-555-0123 — the invite is texted to it.' });
   if (!ROLES.includes(role)) return json(res, 400, { error: 'Choose a role: admin, employee or read-only.' });
   if (role === 'admin' && ctx.role !== 'admin') return json(res, 403, { error: 'Only an admin can add another admin.' });
-  if (email === String(ctx.user.email || '').toLowerCase()) return json(res, 400, { error: 'That is your own login.' });
 
   // First person to add staff on a fresh database: record them as the admin they already are, so
   // the bootstrap closes now rather than also making this new employee an admin.
@@ -121,40 +166,30 @@ async function invite(req, res, db, ctx) {
     if (me.error) return json(res, 500, { error: `Could not record you as the admin first: ${me.error}` });
   }
 
-  const redirectTo = portalUrl(req);
-  const data = name ? { name } : undefined;
-  let userId = null, created = false, emailed = false, link = null, existing = false;
+  // The login exists from now on, under a placeholder address the person replaces with their own.
+  const placeholder = `invite-${crypto.randomBytes(8).toString('hex')}@${PENDING_DOMAIN}`;
+  const made = await db.auth.admin.createUser({
+    email: placeholder, password: crypto.randomBytes(32).toString('base64url'), email_confirm: true,
+    user_metadata: { name, phone, source: 'staff_invite' },
+  });
+  if (made.error) return json(res, 400, { error: `Could not create the login: ${made.error.message}` });
+  const user = made.data.user;
 
-  const sent = await db.auth.admin.inviteUserByEmail(email, { redirectTo, data });
-  if (!sent.error) {
-    userId = sent.data.user.id; created = true; emailed = true;
-  } else if (exists(sent.error)) {
-    // Already has a login (a customer account, or someone who left and is coming back). Give that
-    // login the role, and a link to choose a new password in case they never had one.
-    const r = await db.auth.admin.generateLink({ type: 'recovery', email, options: { redirectTo } });
-    if (r.error) return json(res, 400, { error: `That email already has a login, but it could not be looked up: ${r.error.message}` });
-    userId = r.data.user.id; link = r.data.properties?.action_link || null; existing = true;
-    const already = await staffByUserId(userId);
-    if (already && !already.unsupported) return json(res, 409, { error: 'That person is already on the staff list.' });
-  } else {
-    // Supabase could not send the email. Create the login anyway and hand the link back.
-    console.warn('staff invite: email not sent —', sent.error.message);
-    const r = await db.auth.admin.generateLink({ type: 'invite', email, options: { redirectTo, data } });
-    if (r.error) return json(res, 400, { error: `Could not create the login: ${r.error.message}` });
-    userId = r.data.user.id; created = true; link = r.data.properties?.action_link || null;
-  }
-
-  const saved = await upsertStaff({ userId, email, name, role, note, by: ctx.user.id });
+  const saved = await upsertStaff({ userId: user.id, email: null, name, role, note, by: ctx.user.id });
   if (saved.error || saved.unsupported) {
-    if (created) await db.auth.admin.deleteUser(userId);   // no orphan login without a role
+    await db.auth.admin.deleteUser(user.id);   // no orphan login without a role
     return json(res, 500, { error: saved.unsupported
       ? 'Staff roles are not set up in this database. Run supabase/setup.sql, then try again.'
       : `The login was not kept because the staff record failed: ${saved.error}` });
   }
-  return json(res, 200, { ok: true, userId, emailed, link, existing, redirectTo });
+  const invitedBy = (ctx.user.user_metadata && ctx.user.user_metadata.name) || null;
+  const sent = await textLink({ req, db, user, role, kind: 'invite', invitedBy });
+  if (sent.error) return json(res, 500, { error: `They were added, but the link could not be made: ${sent.error}. Use "Send link" on the staff list.` });
+  return json(res, 200, { ok: true, userId: user.id, ...sent });
 }
 
 // ---- resend ---------------------------------------------------------------------------------
+// Unfinished set-up → a new set-up link. Finished → a link to choose a new password. Always a text.
 async function resend(req, res, db) {
   const userId = String((req.body || {}).userId || '');
   const row = await staffByUserId(userId);
@@ -162,18 +197,46 @@ async function resend(req, res, db) {
   const got = await db.auth.admin.getUserById(userId);
   if (got.error || !got.data?.user) return json(res, 404, { error: 'That login no longer exists in Supabase. Remove them and invite them again.' });
   const u = got.data.user;
-  const redirectTo = portalUrl(req);
-  const pending = !u.email_confirmed_at;
+  const kind = isPending(u.email) ? 'invite' : 'reset';
+  const sent = await textLink({ req, db, user: u, role: row.role, kind });
+  if (sent.error) return json(res, 400, { error: `Could not make a new link: ${sent.error}` });
+  return json(res, 200, { ok: true, kind, ...sent });
+}
 
-  const sent = pending
-    ? await db.auth.admin.inviteUserByEmail(u.email, { redirectTo })
-    : await db.auth.resetPasswordForEmail(u.email, { redirectTo });
-  if (!sent.error) return json(res, 200, { ok: true, emailed: true, kind: pending ? 'invite' : 'reset' });
+// ---- claim: the screen the texted link opens ---------------------------------------------------
+async function claim(req, res, db) {
+  const b = req.body || {};
+  const [userId, secret] = String(b.token || '').split('.');
+  const password = String(b.password || '');
+  if (!userId || !secret) return json(res, 400, { error: 'That link is not complete. Ask whoever added you to send it again.' });
+  if (password.length < 8) return json(res, 400, { error: 'Use a password of at least 8 characters.' });
 
-  console.warn('staff resend: email not sent —', sent.error.message);
-  const r = await db.auth.admin.generateLink({ type: pending ? 'invite' : 'recovery', email: u.email, options: { redirectTo } });
-  if (r.error) return json(res, 400, { error: `Could not make a new link: ${r.error.message}` });
-  return json(res, 200, { ok: true, emailed: false, kind: pending ? 'invite' : 'reset', link: r.data.properties?.action_link || null });
+  const got = await db.auth.admin.getUserById(userId);
+  const u = got && got.data && got.data.user;
+  const inv = u && u.user_metadata && u.user_metadata.staff_invite;
+  const dead = { error: 'That link has expired or has already been used. Ask whoever added you to send a new one.' };
+  if (!u || !inv || !inv.hash) return json(res, 400, dead);
+  const want = Buffer.from(inv.hash, 'hex'), gotHash = Buffer.from(sha(secret), 'hex');
+  if (want.length !== gotHash.length || !crypto.timingSafeEqual(want, gotHash)) return json(res, 400, dead);
+  if (Date.parse(inv.expires) < Date.now()) return json(res, 400, dead);
+  const row = await staffByUserId(userId);
+  if (!row || row.unsupported || row.is_active === false) return json(res, 403, { error: 'This login no longer has staff access. Ask an admin.' });
+
+  // First time: they choose the email they sign in with. Afterwards it is already theirs.
+  const first = isPending(u.email);
+  const email = first ? String(b.email || '').trim().toLowerCase() : u.email;
+  if (first && !EMAIL_RE.test(email)) return json(res, 400, { error: 'Enter the email address you want to sign in with.' });
+  if (first && email.endsWith('@' + PENDING_DOMAIN)) return json(res, 400, { error: 'Enter your own email address.' });
+
+  const { staff_invite: _used, ...meta } = u.user_metadata || {};
+  const upd = await db.auth.admin.updateUserById(userId, { ...(first ? { email, email_confirm: true } : {}), password, user_metadata: meta });
+  if (upd.error) {
+    return exists(upd.error)
+      ? json(res, 409, { error: 'That email already has a login here. Use a different one, or ask an admin.' })
+      : json(res, 400, { error: `Could not finish setting up: ${upd.error.message}` });
+  }
+  if (first) await upsertStaff({ userId, email, name: row.name, role: row.role, isActive: row.is_active !== false, note: row.note });
+  return json(res, 200, { ok: true, email, first });
 }
 
 // ---- status ---------------------------------------------------------------------------------
@@ -184,7 +247,9 @@ async function status(res, db) {
   await Promise.all((rows || []).map(async ({ user_id }) => {
     const { data } = await db.auth.admin.getUserById(user_id);
     const u = data && data.user;
-    out[user_id] = u ? { pending: !u.email_confirmed_at, lastSignIn: u.last_sign_in_at || null } : { missing: true };
+    out[user_id] = u
+      ? { pending: isPending(u.email) || !u.email_confirmed_at, lastSignIn: u.last_sign_in_at || null, phone: (u.user_metadata && u.user_metadata.phone) || null }
+      : { missing: true };
   }));
   return json(res, 200, { ok: true, staff: out });
 }

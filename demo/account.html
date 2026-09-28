@@ -277,7 +277,7 @@ function viewSignIn(msg){
     <div class="err" id="s-err">${esc(msg||'')}</div>
     <button class="btn btn-primary" id="s-go" type="submit">Sign in</button>
     <button class="btn btn-ghost" id="s-up" type="button">Create an account instead</button>
-    <div class="switch">Forgotten it? <a id="s-reset">Email me a reset link</a></div>
+    <div class="switch">Forgotten it? <a id="s-reset">Text me a code</a></div>
   </form>`);
   const go = async () => {
     const email = ($('#s-email').value||'').trim().toLowerCase(), password = $('#s-pass').value||'';
@@ -295,14 +295,9 @@ function viewSignIn(msg){
   };
   // Enter in either field submits the form; the page never actually navigates.
   $('#s-form').addEventListener('submit', e => { e.preventDefault(); go(); });
-  $('#s-up').onclick = () => viewPhone();
-  $('#s-reset').onclick = async () => {
-    const email = ($('#s-email').value||'').trim().toLowerCase();
-    if(!email){ setErr('#s-err','Type your email address first, then tap the reset link.'); return; }
-    const sb = await supa(); if(!sb) return;
-    await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + '/account' });
-    $('#s-err').innerHTML = '<span style="color:var(--ok)">If that address has an account, a reset link is on its way.</span>';
-  };
+  $('#s-up').onclick = () => { FLOW.reset = false; viewPhone(); };
+  // Forgotten password: prove the phone with a texted code, then choose a new one. Emails are off.
+  $('#s-reset').onclick = () => { FLOW.reset = true; viewPhone(); };
   $('#s-email').focus();
 }
 
@@ -310,15 +305,17 @@ function viewSignIn(msg){
 function viewPhone(msg){
   const saved = localStorage.getItem('jhg-contact') || '';
   render(`<div class="card">
-    ${steps(1)}
-    <h1>Create an account</h1>
-    <div class="sub">Enter your mobile number and we'll text you a 6-digit code. If you've booked with us before, your prepaid hours come with you.</div>
+    ${FLOW.reset ? '' : steps(1)}
+    <h1>${FLOW.reset ? 'Reset your password' : 'Create an account'}</h1>
+    <div class="sub">${FLOW.reset
+      ? "Enter the mobile number on your account and we'll text you a 6-digit code."
+      : "Enter your mobile number and we'll text you a 6-digit code. If you've booked with us before, your prepaid hours come with you."}</div>
     <label class="fld" for="p-in">Mobile number</label>
     <input class="input" id="p-in" type="tel" inputmode="tel" autocomplete="tel" placeholder="(204) 000-0000" value="${esc(saved)}" />
     <div class="ph-hint" id="p-hint"></div>
     <div class="err" id="p-err">${esc(msg||'')}</div>
     <button class="btn btn-primary" id="p-go">Text me a code</button>
-    <button class="btn btn-ghost" id="p-in2">I already have an account</button>
+    <button class="btn btn-ghost" id="p-in2">${FLOW.reset ? 'Back to sign in' : 'I already have an account'}</button>
   </div>`);
   wirePhoneHint($('#p-in'), $('#p-hint'));
   const go = async () => {
@@ -341,7 +338,7 @@ function viewPhone(msg){
 /* ---------- SIGN UP, step 2: the code ---------- */
 function viewCode(msg){
   render(`<div class="card">
-    ${steps(2)}
+    ${FLOW.reset ? '' : steps(2)}
     <h1>Enter your code</h1>
     <div class="sub">We sent a 6-digit code to <b>${esc(FLOW.phone)}</b>. It expires in 10 minutes.</div>
     <label class="fld" for="c-in">Code</label>
@@ -359,6 +356,11 @@ function viewCode(msg){
     $('#c-go').disabled = false; $('#c-go').textContent = 'Continue';
     if(!r.ok){ setErr('#c-err', r.error || 'That code did not work.'); return; }
     FLOW.token = r.token; FLOW.name = r.name || '';
+    if(FLOW.reset){
+      FLOW.reset = false;
+      if(r.hasAccount){ viewNewPassword(); return; }
+      viewSignUp(r.knownCustomer, r.name, 'There is no account on that number yet — create one below.'); return;
+    }
     // That number is already claimed — send them to the sign-in door rather than letting them
     // fill in a whole form the server is going to refuse.
     if(r.hasAccount){ viewSignIn(`That number already has an account${r.emailHint ? ' (' + r.emailHint + ')' : ''} — sign in below.`); return; }
@@ -375,6 +377,33 @@ function viewCode(msg){
   };
   $('#c-back').onclick = () => viewPhone();
   $('#c-in').focus();
+}
+
+/* ---------- FORGOTTEN PASSWORD, after the texted code ---------- */
+function viewNewPassword(msg){
+  // A real <form> with a new-password field, so the phone offers to save the new password.
+  render(`<form class="card" id="r-form" method="post" action="/account" autocomplete="on">
+    <h1>Choose a new password</h1>
+    <div class="sub">Your number is verified. Pick a new password and you're signed straight in.</div>
+    <label class="fld" for="r-pass">New password</label>
+    <input class="input" id="r-pass" name="new-password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" />
+    <div class="err" id="r-err">${esc(msg||'')}</div>
+    <button class="btn btn-primary" id="r-go" type="submit">Save and sign in</button>
+  </form>`);
+  const go = async () => {
+    const password = $('#r-pass').value||'';
+    if(password.length < 8){ setErr('#r-err','Use a password of at least 8 characters.'); return; }
+    $('#r-go').disabled = true; $('#r-go').textContent = 'Saving…';
+    const r = await api('reset', { token: FLOW.token, password });
+    if(!r.ok){ $('#r-go').disabled = false; $('#r-go').textContent = 'Save and sign in'; setErr('#r-err', r.error || 'Could not set your new password.'); return; }
+    const sb = await supa();
+    const signedIn = (sb && r.email) ? await sb.auth.signInWithPassword({ email: r.email, password }) : { error: true };
+    if(signedIn.error){ viewSignIn('Your new password is saved — sign in with it below.'); return; }
+    await rememberLogin(r.email, password);
+    viewProfile();
+  };
+  $('#r-form').addEventListener('submit', e => { e.preventDefault(); go(); });
+  $('#r-pass').focus();
 }
 
 /* ---------- SIGN UP, step 3: the details ---------- */
@@ -398,7 +427,7 @@ function viewSignUp(knownCustomer, name, msg){
     <input class="input" id="n-pass" name="new-password" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" />
     <div class="err" id="n-err">${esc(msg||'')}</div>
     <button class="btn btn-primary" id="n-go" type="submit">Create account</button>
-    <div class="muted-note">We use your email for booking confirmations and password resets.</div>
+    <div class="muted-note">Your email is how you sign in. Booking confirmations and password codes come by text.</div>
   </form>`);
   const go = async () => {
     const nm = ($('#n-name').value||'').trim();

@@ -700,6 +700,21 @@
   </div>
 </div>
 
+<!-- Where the TEXTED staff link lands (api/staff.js ?action=claim): they type their own email the
+     first time, and a password; a password-only version for "Send reset link". No login needed. -->
+<div id="app-claim" class="login-wrap hidden">
+  <div class="login">
+    <div class="tag">Invictus Golf</div>
+    <h1 id="cl-title">Set up your staff login</h1>
+    <div class="sub" id="cl-sub">Type the email you want to sign in with and choose a password.</div>
+    <input class="input" id="cl-email" type="email" placeholder="Your email" autocomplete="username" />
+    <input class="input" id="cl-1" type="password" placeholder="Password (at least 8 characters)" autocomplete="new-password" />
+    <input class="input" id="cl-2" type="password" placeholder="Type it again" autocomplete="new-password" />
+    <button class="btn btn-primary" id="cl-btn" style="width:100%">Save and sign in</button>
+    <div class="err" id="cl-err"></div>
+  </div>
+</div>
+
 <div id="app-loading" class="login-wrap"><div class="dim">Loading…</div></div>
 
 <div id="app-main" class="hidden">
@@ -1456,6 +1471,14 @@ async function boot(){
     if(!data.session) return;                 // not logged in here; login screen already handles it
     if(typeof refreshActiveTab==='function') refreshActiveTab();
   });
+  // The texted staff link (api/staff.js): ?staff-invite= first time, ?staff-reset= for a new password.
+  const q = new URLSearchParams(location.search);
+  const staffToken = q.get('staff-invite') || q.get('staff-reset');
+  if(staffToken){
+    history.replaceState(null, '', location.pathname);   // the secret out of the address bar
+    showClaim(staffToken, q.has('staff-reset'));
+    return;
+  }
   let { data:{ session } } = await sb.auth.getSession();
   if(linkType || linkError) history.replaceState(null, '', location.pathname);   // tokens out of the address bar
   if(linkError){ showLogin(); $('#login-err').textContent = linkError+'. Ask an admin to send you a new link.'; return; }
@@ -1501,7 +1524,7 @@ function isAuthError(error){
 }
 
 function showLogin(){
-  ['#app-loading','#app-main','#app-setpw','#app-setup'].forEach(id=>$(id).classList.add('hidden'));
+  ['#app-loading','#app-main','#app-setpw','#app-setup','#app-claim'].forEach(id=>$(id).classList.add('hidden'));
   $('#app-login').classList.remove('hidden');
   offerSetup();
 }
@@ -1528,7 +1551,7 @@ function newPasswordProblem(a, b){
   return null;
 }
 async function showApp(session){
-  ['#app-loading','#app-login','#app-setpw','#app-setup'].forEach(id=>$(id).classList.add('hidden')); $('#app-main').classList.remove('hidden');
+  ['#app-loading','#app-login','#app-setpw','#app-setup','#app-claim'].forEach(id=>$(id).classList.add('hidden')); $('#app-main').classList.remove('hidden');
   $('#who').textContent = session.user?.email || '';
   await loadWhoami();
   if(ME.rbac){
@@ -1593,14 +1616,38 @@ $('#setpw-btn').onclick = async () => {
 };
 $('#setpw-2').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#setpw-btn').click(); });
 
-$('#login-forgot').onclick = async (e) => {
+// Emails are off for now: a new password comes as a text, which an admin sends from the Staff tab.
+$('#login-forgot').onclick = (e) => {
   e.preventDefault();
-  $('#login-err').textContent=''; $('#login-note').textContent='';
-  const email=$('#login-email').value.trim();
-  if(!email){ $('#login-err').textContent='Type your email above first, then press Forgot password.'; return; }
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin+'/admin' });
-  if(error){ $('#login-err').textContent='Could not send a reset email ('+error.message+'). Ask an admin to send you a link from the Staff tab.'; return; }
-  $('#login-note').textContent='If that email has a login, a reset link is on its way. Nothing arrived? Ask an admin to send you one from the Staff tab.';
+  $('#login-err').textContent='';
+  $('#login-note').textContent='Ask an admin to press "Send reset link" next to your name in Staff & Roles — you\'ll get a text with a link to choose a new password.';
+};
+
+let CLAIM_TOKEN = null;
+function showClaim(token, reset){
+  CLAIM_TOKEN = token;
+  ['#app-loading','#app-main','#app-login','#app-setup','#app-setpw'].forEach(id=>$(id).classList.add('hidden'));
+  $('#app-claim').classList.remove('hidden');
+  $('#cl-title').textContent = reset ? 'Choose a new password' : 'Set up your staff login';
+  $('#cl-sub').textContent = reset ? 'Pick a new password and you\'re signed straight in.' : 'Type the email you want to sign in with and choose a password. You\'ll use both to sign in from now on.';
+  $('#cl-email').classList.toggle('hidden', !!reset);
+  (reset ? $('#cl-1') : $('#cl-email')).focus();
+}
+$('#cl-btn').onclick = async () => {
+  const reset = $('#cl-email').classList.contains('hidden');
+  const email = ($('#cl-email').value||'').trim().toLowerCase(), a=$('#cl-1').value, b=$('#cl-2').value;
+  const problem = (!reset && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) ? 'Enter the email address you want to sign in with.' : newPasswordProblem(a,b);
+  $('#cl-err').textContent = problem || '';
+  if(problem) return;
+  const btn=$('#cl-btn'); btn.disabled=true; btn.textContent='Saving…';
+  const r = await apiPost('/api/staff?action=claim', { token:CLAIM_TOKEN, email: reset ? undefined : email, password:a });
+  if(!r.ok){ btn.disabled=false; btn.textContent='Save and sign in'; $('#cl-err').textContent = r.error || 'Could not finish setting up.'; return; }
+  const { data, error } = await sb.auth.signInWithPassword({ email:r.email, password:a });
+  btn.disabled=false; btn.textContent='Save and sign in';
+  CLAIM_TOKEN = null;
+  if(error){ showLogin(); $('#login-email').value=r.email||''; $('#login-note').textContent='All set — sign in with your email and new password.'; return; }
+  toast(r.first ? 'Welcome — your login is ready' : 'Password saved','ok');
+  showApp(data.session);
 };
 $('#cl-2').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#cl-btn').click(); });
 
@@ -6664,18 +6711,18 @@ function showAccessLink({ title, sub, link }){
 function renderStaffTable(){
   const manage=can('staff.manage');
   const admins=STAFF_ROWS.filter(s=>s.role==='admin'&&s.is_active!==false).length;
-  $('#st-table').innerHTML = STAFF_ROWS.length ? `<thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Signing in</th><th></th></tr></thead><tbody>${
+  $('#st-table').innerHTML = STAFF_ROWS.length ? `<thead><tr><th>Name</th><th>Signs in with</th><th>Role</th><th>Signing in</th><th></th></tr></thead><tbody>${
     STAFF_ROWS.map(s=>{ const st=STAFF_STATUS[s.user_id]; return `<tr data-uid="${esc(s.user_id)}">
       <td>${esc(s.name||'—')}${s.user_id===ME.user_id?' <span class="pill manager">You</span>':''}
         ${!st ? '' : st.missing ? '<div><span class="pill blocked">Login deleted</span></div>'
-          : st.pending ? '<div><span class="pill warn">Invite not accepted</span></div>'
+          : st.pending ? '<div><span class="pill warn">Waiting for them to set up</span></div>'
           : `<div class="dim" style="font-size:11px">Last signed in ${st.lastSignIn ? esc(fmtTs(st.lastSignIn)) : 'never'}</div>`}</td>
-      <td class="muted">${esc(s.email||'—')}</td>
+      <td class="muted">${s.email ? esc(s.email) : (st && st.phone ? 'Texted to '+esc(fmtPhone(st.phone)) : '—')}</td>
       <td>${manage?`<select class="input st-role" style="padding:7px 10px;font-size:13px">${STAFF_ROLES.map(([v,l])=>`<option value="${v}" ${s.role===v?'selected':''}>${l}</option>`).join('')}</select>`
         :`<span class="pill ${s.role==='admin'?'confirmed':s.role==='employee'?'info':'cancelled'}">${esc(ROLE_LABEL[s.role]||s.role)}</span>`}</td>
       <td>${manage?`<label class="switch"><input type="checkbox" class="st-active" ${s.is_active!==false?'checked':''} /><span class="track"></span></label>`
         :`<span class="pill ${s.is_active!==false?'confirmed':'cancelled'}">${s.is_active!==false?'Yes':'Suspended'}</span>`}</td>
-      <td style="text-align:right;white-space:nowrap">${manage?`${st && !st.missing ? `<button class="btn btn-ghost btn-sm st-link">${st.pending?'Resend invite':'Send reset link'}</button> ` : ''}<button class="btn btn-ghost btn-sm st-del">Remove</button>`:''}</td>
+      <td style="text-align:right;white-space:nowrap">${manage?`${st && !st.missing ? `<button class="btn btn-ghost btn-sm st-link">${st.pending?'Resend set-up link':'Send reset link'}</button> ` : ''}<button class="btn btn-ghost btn-sm st-del">Remove</button>`:''}</td>
     </tr>`; }).join('')}</tbody>` : emptyRow('No staff rows yet. Anyone who can already sign in keeps full access until this table has a row for them.',5);
 
   if(!manage) return;
@@ -6689,9 +6736,9 @@ function renderStaffTable(){
       lnk.disabled=false;
       if(!r.ok){ toast(r.error||'Could not send a link.','err'); return; }
       const who=esc((row&&(row.name||row.email))||'them');
-      if(r.emailed){ toast(r.kind==='invite'?'Invite emailed again':'Password reset link emailed','ok'); return; }
+      if(r.texted){ toast(`${r.kind==='invite'?'Set-up link':'Password reset link'} texted to ${fmtPhone(r.phone)}`,'ok'); return; }
       showAccessLink({ title: r.kind==='invite' ? 'New invite link' : 'Password reset link',
-        sub:`Supabase could not email ${who}, so send them this link by text or chat. It lets them ${r.kind==='invite'?'choose a password':'choose a new password'} and sign in.`,
+        sub:`The text to ${who} did not go out (${esc(r.textError||'')}), so send them this link yourself. It lets them ${r.kind==='invite'?'choose a password':'choose a new password'} and sign in.`,
         link:r.link });
     };
     // The last active admin is the one row that must never be demoted, suspended or deleted.
@@ -6787,10 +6834,10 @@ $('#st-add').onclick=()=>{
   sheet.innerHTML=`
     <button class="sheet-close" id="x">✕</button>
     <h3>Add a staff member</h3>
-    <div class="sub">They get an email with a link to choose their password, then sign in here with their email.</div>
+    <div class="sub">They get a text with a link. It lets them type their own email and choose a password, and they sign in here with those.</div>
     <div class="grid2" style="margin-top:14px">
-      <div class="field"><label>Name</label><input class="input" id="sa-name" placeholder="Their name" /></div>
-      <div class="field"><label>Email</label><input class="input" id="sa-email" type="email" placeholder="The address they sign in with" /></div>
+      <div class="field"><label>Name</label><input class="input" id="sa-name" placeholder="Their name" autocomplete="off" /></div>
+      <div class="field"><label>Mobile number</label><input class="input" id="sa-phone" type="tel" inputmode="tel" autocomplete="off" placeholder="204-555-0123" /></div>
     </div>
     <div class="field"><label>Role</label><select class="input" id="sa-role">
       <option value="employee" selected>Employee — books and cancels play, keeps customer records</option>
@@ -6802,21 +6849,19 @@ $('#st-add').onclick=()=>{
   $('#x').onclick=closeSheet;
   enhanceSelects(sheet);
   $('#sa-save').onclick=async()=>{
-    const email=($('#sa-email').value||'').trim().toLowerCase();
-    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ toast('Enter the email address they will sign in with.','err'); return; }
+    const name=($('#sa-name').value||'').trim(), phone=($('#sa-phone').value||'').trim();
+    if(!name){ toast('Enter their name.','err'); return; }
+    if(phone.replace(/\D/g,'').length<10){ toast('Enter their mobile number with the area code — the invite is texted to it.','err'); return; }
     if(DEMO_MODE){ toast('Demo data — no invite is sent. Sign in to invite real staff.','err'); return; }
     const btn=$('#sa-save'); btn.disabled=true; btn.textContent='Sending invite…';
-    const r=await apiPost('/api/staff?action=invite',{ email, name:($('#sa-name').value||'').trim(),
+    const r=await apiPost('/api/staff?action=invite',{ phone, name,
       role:$('#sa-role').value, note:($('#sa-note').value||'').trim() });
     btn.disabled=false; btn.textContent='Send invite';
     if(!r.ok){ toast(r.error||'Could not invite them.','err'); return; }
     loadStaffTab();
-    if(r.emailed){ closeSheet(); toast('Invite emailed to '+email,'ok'); return; }
-    showAccessLink({
-      title: r.existing ? 'Added to staff' : 'Invite link ready',
-      sub: r.existing
-        ? `${esc(email)} already had a login, so it now has this role. They can sign in with their current password, or use this link to choose a new one.`
-        : `Supabase could not email ${esc(email)} — its built-in mailer only delivers to your Supabase team. Send them this link by text or chat. It lets them choose a password and sign in, so only give it to them.`,
+    if(r.texted){ closeSheet(); toast(`Invite texted to ${fmtPhone(r.phone)}`,'ok'); return; }
+    showAccessLink({ title:'Invite link ready',
+      sub:`${esc(name)} is added, but the text did not go out — ${esc(r.textError||'')} Send them this link yourself. It lets them set up their login, so only give it to them.`,
       link: r.link });
   };
 };

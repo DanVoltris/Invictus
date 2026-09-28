@@ -31,7 +31,8 @@ async function checkout(req, res) {
   const { cardId, name, email, phone } = req.body || {};
   if (!cardId) return res.status(400).json({ error: 'Please choose a card.' });
   if (!validPhone(phone)) return res.status(400).json({ error: 'A valid phone number is required — your hours link to it.' });
-  if (!validEmail(email)) return res.status(400).json({ error: 'A valid email is required for your receipt.' });
+  // No email asked for (texts only, for now): Stripe's own checkout page collects one if it wants it.
+  if (email && !validEmail(email)) return res.status(400).json({ error: 'That email address doesn’t look right.' });
 
   const db = admin();
   if (!db) return res.status(503).json({ error: 'Hour cards aren’t available for purchase yet — please call the shop.' });

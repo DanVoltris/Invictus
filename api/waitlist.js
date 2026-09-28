@@ -7,7 +7,7 @@ import {
   runWaitlistSweep, pendingWaitlistOffers, markWaitlistOfferNotified,
   staffContext, leaguePlayerForRequest
 } from '../lib/db.js';
-import { notifyWaitlistOffer, notifyWaitlistJoined, sendDue, venueIdentity } from '../lib/notify.js';
+import { notifyWaitlistOffer, notifyWaitlistJoined, sendDue, venueIdentity, EMAIL_ENABLED } from '../lib/notify.js';
 
 // The waiting list. Dispatch on ?action= —
 //
@@ -154,14 +154,18 @@ async function join(req, res) {
   const phone = String(b.phone || '').trim() || null;
   if (email && !validEmail(email)) return res.status(400).json({ ok: false, error: 'That email address doesn’t look right.' });
   if (phone && !validPhone(phone)) return res.status(400).json({ ok: false, error: 'That phone number doesn’t look right.' });
-  if (!email && !phone) return res.status(400).json({ ok: false, error: 'We need an email or a mobile number to reach you on.' });
+  // Texts only for now (lib/notify.js EMAIL_ENABLED): an entry reachable only by email would
+  // never hear that a bay opened, so a mobile number and the "text me" box are what it takes.
+  if (!phone && !(EMAIL_ENABLED && email)) return res.status(400).json({ ok: false, error: 'We need your mobile number to text you when a bay opens.' });
 
-  const emailOk = !!b.emailOk && !!email;
+  const emailOk = EMAIL_ENABLED && !!b.emailOk && !!email;
   const smsOk = !!b.smsOk && !!phone;
   if (!emailOk && !smsOk) {
     return res.status(400).json({
       ok: false, code: 'consent_required',
-      error: 'Tick the box for email or text so we can tell you when a bay opens — that is the whole point of the list.',
+      error: EMAIL_ENABLED
+        ? 'Tick the box for email or text so we can tell you when a bay opens — that is the whole point of the list.'
+        : 'Tick "Text me" so we can tell you when a bay opens — that is the whole point of the list.',
     });
   }
 

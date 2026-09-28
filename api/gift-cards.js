@@ -106,9 +106,11 @@ async function checkout(req, res) {
   const amt = validAmount(b.amountCents, cfg);
   if (amt.error) return res.status(400).json({ error: amt.error });
 
-  // The buyer's email is not optional: it is the receipt, and it is the fallback delivery address
-  // when they are buying the card for themselves.
-  if (!validEmail(b.purchaserEmail)) return res.status(400).json({ error: 'A valid email is required for your receipt.' });
+  // The buyer's MOBILE is not optional: messages go by text for now (lib/notify.js EMAIL_ENABLED),
+  // so it carries the receipt, and the card itself when they are buying it for themselves. An email
+  // is still accepted as contact information.
+  if (!validPhone(b.purchaserPhone)) return res.status(400).json({ error: 'A mobile number is required — your receipt is texted to it.' });
+  if (b.purchaserEmail && !validEmail(b.purchaserEmail)) return res.status(400).json({ error: 'That email address doesn’t look right.' });
   const recipientEmail = (b.recipientEmail || '').trim();
   const recipientPhone = (b.recipientPhone || '').trim();
   if (recipientEmail && !validEmail(recipientEmail)) return res.status(400).json({ error: 'That recipient email doesn’t look right.' });

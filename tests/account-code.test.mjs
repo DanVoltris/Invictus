@@ -25,12 +25,14 @@ function builder(table) {
     if (st.op === 'insert') { const row = { id: `${table}-${++S.seq}`, status: 'queued', attempts: 0, ...st.payload }; rows.push(row); return { data: row, error: null }; }
     if (st.op === 'upsert') { const i = rows.findIndex((r) => r.phone === st.payload.phone); if (i >= 0) rows[i] = { ...rows[i], ...st.payload }; else rows.push({ ...st.payload }); return { data: null, error: null }; }
     if (st.op === 'update') { const hit = rows.filter(match); hit.forEach((r) => Object.assign(r, st.payload)); return { data: hit, error: null }; }
+    if (st.op === 'delete') { S.db[table] = rows.filter((r) => !match(r)); return { data: null, error: null }; }
     return { data: rows.filter(match), error: null };
   };
   const q = {
     select() { return q; }, eq(c, v) { st.f.push([c, v]); return q; }, is() { return q; }, not() { return q; },
     like() { return q; }, ilike(c, v) { st.f.push([c, v]); return q; }, limit() { return q; }, order() { return q; }, gte() { return q; },
     insert(p) { st.op = 'insert'; st.payload = p; return q; }, update(p) { st.op = 'update'; st.payload = p; return q; },
+    delete() { st.op = 'delete'; return q; },
     upsert(p) { st.op = 'upsert'; st.payload = p; return q; },
     maybeSingle: async () => { const r = run(); return { data: Array.isArray(r.data) ? r.data[0] || null : r.data, error: r.error }; },
     single: async () => { const r = run(); return { data: Array.isArray(r.data) ? r.data[0] : r.data, error: r.error }; },
@@ -39,7 +41,9 @@ function builder(table) {
   return q;
 }
 mock.module(ROOT + 'node_modules/@supabase/supabase-js/dist/index.mjs', { namedExports: {
-  createClient: () => ({ from: (t) => builder(t), rpc: async () => ({ data: null, error: null }), auth: {} }),
+  createClient: () => ({ from: (t) => builder(t), rpc: async () => ({ data: null, error: null }), auth: { admin: {
+    updateUserById: async (id, o) => { S.pw = { id, ...o }; return { data: { user: { id, email: 'sam@shop.ca' } }, error: null }; },
+  } } }),
 } });
 
 // Twilio, captured.
@@ -59,9 +63,10 @@ function world() {
     phone_codes: [], notifications: [], customers: [],
   };
 }
-async function start(phone) {
+async function start(phone) { return act('start', { phone }); }
+async function act(action, body) {
   let code = 200, out;
-  const req = { method: 'POST', query: { action: 'start' }, body: { phone }, headers: {}, socket: {} };
+  const req = { method: 'POST', query: { action }, body, headers: {}, socket: {} };
   const res = { status(c) { code = c; return this; }, json(b) { out = b; return this; }, setHeader() {}, end() { return this; } };
   await accountApi(req, res);
   return { code, out };
@@ -79,6 +84,22 @@ test('asking for a sign-in code TEXTS it straight away — it does not wait in t
   assert.equal(row.status, 'sent', 'the outbox row records that it went');
 });
 
+test('a new staff member is TEXTED their invite link, and the stored copy loses the link once sent', async () => {
+  world();
+  const { notifyStaffInvite } = await import(ROOT + 'lib/notify.js');
+  const link = 'https://x.supabase.co/auth/v1/verify?token=secret&type=invite';
+  const outcome = await notifyStaffInvite({ userId: 'U1', phone: '+12045550123', link, invitedBy: 'Murad', roleLabel: 'an employee', email: 'sam@shop.ca' });
+  assert.equal(outcome, 'sent');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].body.get('To'), '+12045550123');
+  const body = sent[0].body.get('Body');
+  assert.match(body, /^Invictus Golf: Murad added you to the staff portal as an employee\. Set up your login \(your email \+ a password\): https:\/\/x\.supabase\.co\S+type=invite — works once, within 7 days\./);
+  const row = S.db.notifications[0];
+  assert.equal(row.template, 'staff.invite'); assert.equal(row.status, 'sent');
+  assert.equal(row.payload.link, undefined, 'a delivered sign-in link is not kept in the database');
+  assert.equal(row.payload.linkRedacted, true);
+});
+
 test('a Twilio outage never changes the answer, and the row is left to retry', async () => {
   world();
   twilioStatus = 503;
@@ -87,4 +108,39 @@ test('a Twilio outage never changes the answer, and the row is left to retry', a
   assert.deepEqual(r.out, { ok: true, sent: true, expiresInMinutes: r.out.expiresInMinutes });
   assert.equal(S.db.notifications[0].status, 'queued');
   assert.equal(S.db.notifications[0].attempts, 1, 'tried once, due again later');
+});
+
+// ----- forgotten password, by text (emails are off) --------------------------------------------
+const codeFromText = () => /your code is (\d{6})/.exec(sent.at(-1).body.get('Body'))[1];
+
+test('forgotten password: a texted code, then a new password — and the answer carries the email to sign in with', async () => {
+  world();
+  S.db.customers = [{ id: 'C1', name: 'Sam', phone: '(204) 990-6530', email: 'sam@shop.ca', user_id: 'U1' }];
+  S.db.phone_verifications = []; S.db.phone_attempts = []; S.pw = null;
+  await start('204-990-6530');
+  const v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
+  assert.equal(v.out.hasAccount, true);
+  const r = await act('reset', { token: v.out.token, password: 'a-new-password' });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.email, 'sam@shop.ca');
+  assert.deepEqual(S.pw, { id: 'U1', password: 'a-new-password' }, 'only the password changes');
+  const again = await act('reset', { token: v.out.token, password: 'another-one!' });
+  assert.equal(again.code, 400, 'the proof works once');
+});
+
+test('forgotten password on a number with no account: told to create one, nothing changed', async () => {
+  world();
+  S.db.customers = []; S.db.phone_verifications = []; S.db.phone_attempts = []; S.pw = null;
+  await start('204-990-6530');
+  const v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
+  const r = await act('reset', { token: v.out.token, password: 'a-new-password' });
+  assert.equal(r.code, 404); assert.match(r.out.error, /create one/);
+  assert.equal(S.pw, null);
+});
+
+test('a reset needs the texted proof and a real password', async () => {
+  world();
+  assert.equal((await act('reset', { password: 'a-new-password' })).code, 400);
+  assert.equal((await act('reset', { token: 'made-up', password: 'short' })).code, 400);
+  assert.equal((await act('reset', { token: 'made-up', password: 'a-new-password' })).code, 400);
 });

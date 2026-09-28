@@ -5,6 +5,8 @@
 //   2. POST ?action=verify   { phone, code }               -> { token, hasAccount, email? }
 //   3a. POST ?action=register{ token, email, password }    -> creates the login, links the row
 //   3b. the browser signs in with Supabase Auth directly using email + password
+//   3c. POST ?action=reset   { token, password }           -> forgotten password: the proven phone
+//       sets a new one, and the answer carries the account's email so the page can sign straight in
 //   4. POST ?action=feedback { bookingId, rating, comment, skipped }  (Authorization: Bearer <session>)
 //      -> rates a finished session on My Account (migration 0027)
 //   5. GET/POST ?action=waiver  -> the participant waiver (was api/sign-waiver.js; see the foot of
@@ -65,7 +67,7 @@ function actionOf(req, known) {
 // Vercel only ever passes (req, res), so the ?action= read applies there.
 // 'cards', 'card-setup' and 'card-remove' are gone (saved cards retired): they now fall through
 // to the "Unknown action." 400 below, exactly like any other name this file does not serve.
-const ACTIONS = ['start', 'verify', 'register', 'feedback', 'waiver'];
+const ACTIONS = ['start', 'verify', 'register', 'reset', 'feedback', 'waiver'];
 export default async function handler(req, res, forced) {
   const action = forced || actionOf(req, ACTIONS);
   // The waiver is the one action here that answers a GET (a status check), and it has its own
@@ -81,6 +83,7 @@ export default async function handler(req, res, forced) {
     if (action === 'start')    return await start(req, res, db);
     if (action === 'verify')   return await verify(req, res, db);
     if (action === 'register') return await register(req, res, db);
+    if (action === 'reset')    return await resetPassword(req, res, db);
     if (action === 'feedback') return await feedback(req, res, db);
     return json(res, 400, { error: 'Unknown action.' });
   } catch (err) {
@@ -203,6 +206,38 @@ const maskEmail = (e) => {
   if (!d) return null;
   return `${u.slice(0, 2)}${'•'.repeat(Math.max(1, u.length - 2))}@${d}`;
 };
+
+// ---- 3c. forgotten password, by text ---------------------------------------
+// The phone was proven a moment ago (start → verify), exactly as for signing up. That proof is spent
+// here, once, to set a new password on the account linked to that number. Emails are off for now,
+// so this — not Supabase's emailed reset link — is how a customer gets back in.
+async function resetPassword(req, res, db) {
+  const b = req.body || {};
+  const password = String(b.password || '');
+  const token = String(b.token || '');
+  if (!token) return json(res, 400, { error: 'Verify your phone number first.' });
+  if (password.length < 8) return json(res, 400, { error: 'Use a password of at least 8 characters.' });
+
+  const { data: v } = await db.from('phone_verifications').select('*').eq('token', sha(token)).maybeSingle();
+  if (!v || v.used_at || Date.parse(v.expires_at) < Date.now()) {
+    return json(res, 400, { error: 'That code has expired. Start again with your phone number.' });
+  }
+  const cust = await customerHoursByContact({ phone: v.phone });
+  if (!cust || !cust.user_id) return json(res, 404, { error: 'There is no account on that number yet — create one instead.' });
+
+  const { data: spent } = await db.from('phone_verifications')
+    .update({ used_at: new Date().toISOString() })
+    .eq('token', sha(token)).is('used_at', null).select();
+  if (!spent || !spent.length) return json(res, 400, { error: 'That code has already been used.' });
+
+  const upd = await db.auth.admin.updateUserById(cust.user_id, { password });
+  if (upd.error) {
+    console.error('account reset:', upd.error.message);
+    return json(res, 500, { error: 'Could not set your new password. Please try again.' });
+  }
+  const email = (upd.data && upd.data.user && upd.data.user.email) || cust.email || null;
+  return json(res, 200, { ok: true, email });
+}
 
 // ---- 3. create the login and link the row --------------------------------
 async function register(req, res, db) {

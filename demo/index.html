@@ -668,7 +668,6 @@
 
     <div id="wl-form">
       <input class="input" id="wl-name" placeholder="Full name" />
-      <input class="input" id="wl-email" placeholder="Email" type="email" />
       <input class="input" id="wl-phone" placeholder="Mobile number" type="tel" />
       <div class="ph-hint" id="wl-ph-hint"></div>
 
@@ -687,8 +686,7 @@
       <div class="wl-lbl">Session length</div>
       <div id="wl-dur-host"></div>
 
-      <!-- CASL: two separate, unticked boxes. api/waitlist.js refuses an entry with neither. -->
-      <label class="wl-consent"><input type="checkbox" id="wl-email-ok" /><span>Email me when a bay opens up on this date.</span></label>
+      <!-- CASL: an unticked box. api/waitlist.js refuses an entry without it. Texts only for now. -->
       <label class="wl-consent"><input type="checkbox" id="wl-sms-ok" /><span>Text me when a bay opens up. Standard message rates may apply.</span></label>
 
       <div class="pay-error" id="wl-error"></div>
@@ -1876,7 +1874,6 @@ $('#sc-pay').onclick=async ()=>{
     confirmParams:{
       return_url: location.origin + '/',
       payment_method_data: billing,
-      receipt_email: $('#sc-email').value || undefined,
     },
   });
   paying=false;
@@ -2146,7 +2143,7 @@ function openWaitlist(bayId, startMin){
   });
 
   // Reuse anything already typed at checkout rather than asking for it twice.
-  [['#wl-name','#sc-name'],['#wl-email','#sc-email'],['#wl-phone','#sc-phone']].forEach(([dst,src])=>{
+  [['#wl-name','#sc-name'],['#wl-phone','#sc-phone']].forEach(([dst,src])=>{
     const d=$(dst), s=$(src);
     if(d && s && !d.value) d.value=(s.value||'').trim();
   });
@@ -2157,17 +2154,13 @@ function closeWaitlist(){ $('#wl-overlay').classList.remove('show'); }
 
 async function joinWaitlist(){
   const err=$('#wl-error'); err.textContent='';
-  const email=(($('#wl-email')||{}).value||'').trim();
+  // Texts only for now: the waiting list reaches people by their mobile number.
   const phone=(($('#wl-phone')||{}).value||'').trim();
-  if(!email && !phone){ err.textContent='We need an email or a mobile number to reach you on.'; return; }
-  if(email && !validEmail(email)){ err.textContent='That email address does not look right.'; return; }
-  if(phone && !validPhone(phone)){ err.textContent='That phone number does not look right.'; return; }
-  // CASL: two separate boxes, neither ticked by default. The server refuses an entry with neither,
-  // and refuses email consent without an email; this is only the friendlier first pass.
-  const emailOk=!!($('#wl-email-ok')||{}).checked, smsOk=!!($('#wl-sms-ok')||{}).checked;
-  if(!emailOk && !smsOk){ err.textContent='Tick email or text so we can tell you when a bay opens — that is the whole point of the list.'; return; }
-  if(emailOk && !email){ err.textContent='Add your email address, or untick "email me".'; return; }
-  if(smsOk && !phone){ err.textContent='Add your mobile number, or untick "text me".'; return; }
+  if(!phone){ err.textContent='We need your mobile number to text you when a bay opens.'; return; }
+  if(!validPhone(phone)){ err.textContent='That phone number does not look right.'; return; }
+  // CASL: the box is not ticked by default, and the server refuses an entry without it.
+  const smsOk=!!($('#wl-sms-ok')||{}).checked;
+  if(!smsOk){ err.textContent='Tick "Text me" so we can tell you when a bay opens — that is the whole point of the list.'; return; }
   let from=minOf(($('#wl-from')||{}).value), to=minOf(($('#wl-to')||{}).value);
   if(from==null || to==null){ err.textContent='Give us an earliest and a latest time.'; return; }
   // This page's day starts at 4 AM (0038): a time before 4 is the next morning, and a latest time
@@ -2186,7 +2179,7 @@ async function joinWaitlist(){
     windowStartMin:from-after, windowEndMin:to-after,
     durationMin:Number((($('#wl-dur')||{}).value)||CONFIG.minMins||60),
     name:(($('#wl-name')||{}).value||'').trim(),
-    email, phone, emailOk, smsOk, players:state.party,
+    phone, smsOk, players:state.party,
   });
   btn.disabled=false; btn.textContent='Join the list';
   if(!(r.data && r.data.ok)){
