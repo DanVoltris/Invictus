@@ -5,7 +5,7 @@ import {
   getSettings, getOverridesForDate, getBookingsForDate, admin,
   listHourCards, grantHours, customerHoursByContact, bookWithHours, leaguePlayerForRequest,
   accountCustomerForRequest, recordConsent, clientIp
-} from '../lib/db.js';
+, crossDayProblem } from '../lib/db.js';
 
 // One function for the whole hour-card flow (kept single to stay within the Hobby function limit).
 // Dispatch on ?action= — list | checkout | confirm | balance | book.
@@ -122,6 +122,9 @@ async function book(req, res) {
       weeklyStatusConflicts(settings, overrides, dateISO, bayId, Number(startMin), Number(endMin))) {
     return res.status(409).json({ ok: false, error: 'That time is unavailable — pick another slot.' });
   }
+  // Past midnight (0038): the next day's closures, and last night's late sessions still in the bay.
+  const spill = await crossDayProblem({ settings, dateISO, bayId, startMin, endMin });
+  if (spill) return res.status(409).json({ ok: false, error: spill.error });
   const clash = (await getBookingsForDate(dateISO))
     .some((b) => b.bay_id === bayId && Number(startMin) < b.end_min && Number(endMin) > b.start_min);
   if (clash) return res.status(409).json({ ok: false, error: 'That time was just taken — pick another slot.' });

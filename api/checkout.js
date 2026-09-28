@@ -2,7 +2,7 @@ import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSetti
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
          confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
          releaseHold, deferredHoldsReady, bookingExistsForSetupIntent, stripeCustomerForContact,
-         rememberStripeCustomer } from '../lib/db.js';
+         rememberStripeCustomer, crossDayProblem } from '../lib/db.js';
 import { paymentPatchFor, releaseUnbookedHold, savedCardPatchFor, forgetSavedCard } from '../lib/holds.js';
 
 // One customer checkout, start to finish. Dispatch on ?action=, the same shape as
@@ -82,6 +82,9 @@ export async function createPaymentIntent(req, res) {
         weeklyStatusConflicts(settings, overrides, dateISO, bayId, Number(startMin), Number(endMin))) {
       return res.status(409).json({ error: 'That time is unavailable — pick another slot.' });
     }
+    // Past midnight (0038): the next day's closures, and last night's late sessions still in the bay.
+    const spill = await crossDayProblem({ settings, dateISO, bayId, startMin, endMin });
+    if (spill) return res.status(409).json({ error: spill.error });
 
     // Cart hold: lock the slot for ~5 min while the customer checks out (see lib/db.js createHold).
     let expiresAt = null;

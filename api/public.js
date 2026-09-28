@@ -67,32 +67,48 @@ export async function availability(req, res) {
   let hoursReason = null;   // …or why today's hours are different from usual
   const held = {};      // live cart holds — shown to other users as "Held"
   let dateHours = null; // effective [open,close] for this exact date, or [0,0] when closed by override
+  let nextDateHours = null;   // …and for the next date, whose small hours are on this day's page (0038)
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) {
     await cleanupExpiredHolds();
-    for (const b of await getBookingsForDate(dateISO)) {
-      (booked[b.bay_id] ||= []).push([b.start_min, b.end_min]);
-      if (b.status === 'held') (held[b.bay_id] ||= []).push([b.start_min, b.end_min]);
+    // THE PAGE'S DAY RUNS 4:00 AM → 3:30 AM (0038), and a session can run past midnight or past
+    // 4 AM. So every range below is in minutes from THIS date's midnight: the next date's early
+    // hours are 1440 later, and the previous night's late sessions that are still going show up
+    // as negative-to-positive ranges. The page only has to compare numbers.
+    const shift = (r, off) => [r[0] + off, r[1] + off];
+    const addDays = (iso, n) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    for (const [iso, off] of [[addDays(dateISO, -1), -1440], [dateISO, 0], [addDays(dateISO, 1), 1440]]) {
+      for (const b of await getBookingsForDate(iso)) {
+        if (off < 0 && b.end_min <= 1440) continue;          // the night before: only what runs past midnight
+        (booked[b.bay_id] ||= []).push(shift([b.start_min, b.end_min], off));
+        if (b.status === 'held') (held[b.bay_id] ||= []).push(shift([b.start_min, b.end_min], off));
+      }
     }
-    const overrides = await getOverridesForDate(dateISO);
-    // Overrides: venue-wide hour changes surface as dateHours; per-bay blocks are merged
-    // into the busy ranges so those slots simply read as unavailable (no reason leaked).
-    const fx = overrideEffects(overrides, settings, dateISO);
-    dateHours = fx.dateHours;
-    closedReason = fx.closedReason || null;
-    hoursReason = fx.hoursReason || null;
-    for (const [bayId, ranges] of Object.entries(fx.blocked)) {
-      // Still merged into `booked` so the slot cannot be sold — but also listed as `unavailable`,
-      // because telling a customer the venue's own maintenance block is "Booked" is a lie they act
-      // on ("someone took it, I'll try tomorrow") rather than an omission.
-      for (const r of ranges) { (booked[bayId] ||= []).push(r); (unavailable[bayId] ||= []).push(r); }
-    }
-    for (const [bayId, ranges] of Object.entries(fx.reasons || {})) {
-      for (const r of ranges) (reasons[bayId] ||= []).push(r);
-    }
-    // Recurring weekly "Closed" bands also make time unavailable — merge them into busy
-    // ranges (so they can't be booked) and surface them separately for a clearer label.
-    for (const [bayId, ranges] of Object.entries(weeklyStatusBlocked(settings, overrides, dateISO))) {
-      for (const r of ranges) { (booked[bayId] ||= []).push(r); (closed[bayId] ||= []).push(r); (unavailable[bayId] ||= []).push(r); }
+    for (const [iso, off] of [[dateISO, 0], [addDays(dateISO, 1), 1440]]) {
+      const overrides = await getOverridesForDate(iso);
+      // Overrides: venue-wide hour changes surface as dateHours; per-bay blocks are merged
+      // into the busy ranges so those slots simply read as unavailable (no reason leaked).
+      const fx = overrideEffects(overrides, settings, iso);
+      if (off === 0) {
+        dateHours = fx.dateHours;
+        closedReason = fx.closedReason || null;
+        hoursReason = fx.hoursReason || null;
+      } else {
+        nextDateHours = fx.dateHours;
+      }
+      for (const [bayId, ranges] of Object.entries(fx.blocked)) {
+        // Still merged into `booked` so the slot cannot be sold — but also listed as `unavailable`,
+        // because telling a customer the venue's own maintenance block is "Booked" is a lie they act
+        // on ("someone took it, I'll try tomorrow") rather than an omission.
+        for (const r0 of ranges) { const r = shift(r0, off); (booked[bayId] ||= []).push(r); (unavailable[bayId] ||= []).push(r); }
+      }
+      for (const [bayId, ranges] of Object.entries(fx.reasons || {})) {
+        for (const r0 of ranges) (reasons[bayId] ||= []).push([r0[0] + off, r0[1] + off, r0[2]]);
+      }
+      // Recurring weekly "Closed" bands also make time unavailable — merge them into busy
+      // ranges (so they can't be booked) and surface them separately for a clearer label.
+      for (const [bayId, ranges] of Object.entries(weeklyStatusBlocked(settings, overrides, iso))) {
+        for (const r0 of ranges) { const r = shift(r0, off); (booked[bayId] ||= []).push(r); (closed[bayId] ||= []).push(r); (unavailable[bayId] ||= []).push(r); }
+      }
     }
   }
 
@@ -110,6 +126,8 @@ export async function availability(req, res) {
       taxPct: taxPctOf(settings),     // so the page can show the tax the card will be charged
     },
     dateHours,
+    nextDateHours,   // the next date's hours: its early morning is on this page (0038)
+    dayWindow: [240, 1680],   // the page's day: 4:00 AM → 4:00 AM, in minutes from this date's midnight
     booked,
     closed,
     unavailable,     // venue-closed ranges: the booking page labels these "Closed", never "Booked"

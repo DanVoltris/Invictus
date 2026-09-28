@@ -9,7 +9,7 @@ import {
   getSettings, getOverridesForDate, staffContext,
   createSeries, seriesById, updateSeries, seriesNeedingHorizon, seriesOccurrences, seriesDatesPreview,
   groupConflicts, bookGroup, groupById, recordSeriesException, cancelGroup, moveGroup, recordRefund,
-  customerHoursByContact, heldBookings, bookingForHold, failedHolds, recordSeatCollection,
+  customerHoursByContact, heldBookings, bookingForHold, failedHolds, recordSeatCollection, crossDayProblem,
 } from '../lib/db.js';
 
 // Group + recurring bookings. Dispatch on ?action= —
@@ -148,6 +148,10 @@ function readDefinition(body, settings) {
   if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin <= startMin) {
     return { error: 'Give a start and end time, with the end after the start.' };
   }
+  // A session may run past midnight (0038) — up to midnight the next night — but starts on its own day.
+  if (startMin < 0 || startMin >= 1440 || endMin > 2880) {
+    return { error: 'A session starts on its own day and can run no later than midnight the following night.' };
+  }
   const minMins = Math.max(15, Number(settings.minMins) || 60);
   if (endMin - startMin < minMins) return { error: `Sessions are at least ${minMins} minutes.` };
 
@@ -210,6 +214,15 @@ async function venueBlocks(settings, dateISO, bayIds, startMin, endMin) {
   const blocked = bayIds.filter((bayId) =>
     overrideConflicts(fx, settings, dateISO, bayId, startMin, endMin) ||
     weeklyStatusConflicts(settings, overrides, dateISO, bayId, startMin, endMin));
+  // Past midnight (0038): the part on the next day must be open too. Who else is in the bay is the
+  // exclusion constraint's job, across dates, when book_group/move_group write the rows.
+  if (endMin > 1440) {
+    for (const bayId of bayIds) {
+      if (blocked.includes(bayId)) continue;
+      const p = await crossDayProblem({ settings, dateISO, bayId, startMin, endMin });
+      if (p && p.code === 'closed') blocked.push(bayId);
+    }
+  }
   return { dateHours: fx.dateHours, blocked };
 }
 

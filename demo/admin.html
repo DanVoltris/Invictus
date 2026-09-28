@@ -347,6 +347,8 @@
   .bkgrid th small{display:block;font-family:'Raleway';font-weight:500;font-size:10.5px;color:var(--dim);margin-top:2px}
   .bkgrid th.t{width:62px}
   .bkgrid td.t{font-family:'Space Grotesk';font-weight:700;font-size:12px;color:var(--muted);text-align:right;padding-right:8px;white-space:nowrap;width:62px}
+  .bkgrid td.t .nxt{display:block;font-family:'Raleway';font-weight:600;font-size:10px;color:var(--orange);line-height:1}
+  .bkgrid tr.midnight td.t{box-shadow:inset 0 2px 0 var(--orange)}
   .cell{border:1px solid var(--border);border-radius:9px;background:var(--near-black);text-align:center;padding:8px 4px;cursor:pointer;font-size:12px;line-height:1.15;transition:.12s;vertical-align:middle}
   .cell.open{color:var(--dim)}
   .cell.open:hover{border-color:var(--orange);color:var(--orange)}
@@ -1392,7 +1394,7 @@ let LEAGUE_OWED = { rows:[], at:0 };
 let HOLD_WINDOW = { holdDays:null, chargeAheadDays:null };
 
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const fmtMin = m => { if(m>=1440) return 'Midnight'; let h=Math.floor(m/60),mm=m%60,ap=h<12?'AM':'PM',hh=h%12||12; return hh+':'+String(mm).padStart(2,'0')+' '+ap; };
+const fmtMin = m => { if(m===1440||m===2880) return 'Midnight'; m=((m%1440)+1440)%1440; let h=Math.floor(m/60),mm=m%60,ap=h<12?'AM':'PM',hh=h%12||12; return hh+':'+String(mm).padStart(2,'0')+' '+ap; };
 function toast(msg, kind){ const t=$('#toast'); t.textContent=msg; t.className='toast show '+(kind||''); setTimeout(()=>t.className='toast '+(kind||''),2600); }
 function hourOptions(sel){ let o=''; for(let h=0;h<=24;h++){ const lbl=h===24?'Midnight':h===0?'Midnight':fmtMin(h*60); o+=`<option value="${h}" ${h===sel?'selected':''}>${lbl} (${h})</option>`; } return o; }
 
@@ -1553,12 +1555,14 @@ async function showApp(session){
   await loadSettings();
   await loadVocab();
   fetchCustomers();              // load the customer database so booking autocomplete works on the Tee Sheet
-  $('#bk-date').value = todayISO(); dpSync('#bk-date');
+  $('#bk-date').value = sheetTodayISO(); dpSync('#bk-date');
   await loadSchedule();
   refreshHoldCount();            // the sidebar carries the number of uncharged holds from the start
   if(leagueRoute()) await applyLeagueRoute();    // opened straight at a league's own address
 }
 function todayISO(){ return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Winnipeg',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
+// The tee sheet's day runs 4:00 AM → 4:00 AM, so at 2 AM the sheet still in play is yesterday's.
+function sheetTodayISO(){ return nowMinWpg()<240 ? addDaysISO(todayISO(),-1) : todayISO(); }
 
 $('#login-btn').onclick = async () => {
   $('#login-err').textContent='';
@@ -1612,6 +1616,7 @@ $('#login-forgot').onclick = async (e) => {
   if(error){ $('#login-err').textContent='Could not send a reset email ('+error.message+'). Ask an admin to send you a link from the Staff tab.'; return; }
   $('#login-note').textContent='If that email has a login, a reset link is on its way. Nothing arrived? Ask an admin to send you one from the Staff tab.';
 };
+$('#cl-2').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#cl-btn').click(); });
 
 $('#chpw-btn').onclick = () => {
   sheet.innerHTML=`
@@ -3873,6 +3878,20 @@ const dowOf = iso => new Date(iso+'T00:00:00').getDay();
 const dateLabel = iso => new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
 const toISO = d => new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
 function addDaysISO(iso,n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return toISO(d); }
+// The tee sheet runs 4:00 AM → 3:30 AM the next morning. A "sheet minute" counts from the shown
+// day's midnight, so 1500 is 1:00 AM the next day. A booking is stored under the day it really
+// starts, and one that runs past midnight simply has end_min above 1440 (up to 2880).
+const SHEET_START = 240, SHEET_END = 1680, MAX_SESSION = 720, MAX_END = 2880;
+const daysApart = (a,b) => Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00'))/864e5);
+const sheetStartOf = b => daysApart($('#bk-date').value, b.booking_date)*1440 + b.start_min;
+const onSheet = b => { const s=sheetStartOf(b); return s>=SHEET_START && s<SHEET_END; };
+const realAt = (iso,m) => m>=1440 ? [addDaysISO(iso,1), m-1440] : [iso, m];   // minute past midnight → [next date, minute]
+const nextDow = iso => DOW_S[dowOf(addDaysISO(iso,1))];
+// "11:30 PM – 3:00 AM (Sun)": the day is named whenever the time reaches past midnight.
+function bkTimeText(b){
+  const s=sheetStartOf(b), e=s+(b.end_min-b.start_min);
+  return `${fmtMin(s)} – ${fmtMin(e)}${e>1440 ? ` (${nextDow($('#bk-date').value)})` : ''}`;
+}
 const DOW_S = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MON_S = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const shortDate = iso => { const d=new Date(iso+'T00:00:00'); return DOW_S[d.getDay()]+' '+d.getDate(); };
@@ -4034,7 +4053,7 @@ function paintable(bay,iso,m){
   const bObj=(SETTINGS.bays||[]).find(x=>x.id===bay); if(!bObj||bObj.holding) return false;
   return !findBooking(bay,iso,m) && !findOvBlock(bay,iso,m);
 }
-function paintTdFrom(el){ const td=el&&el.closest&&el.closest('td.cell'); return (td && td.dataset && td.dataset.min!=null && $('#bk-grid').contains(td)) ? td : null; }
+function paintTdFrom(el){ const td=el&&el.closest&&el.closest('td.cell'); return (td && td.dataset && td.dataset.min!=null && (!td.dataset.date || td.dataset.date===$('#bk-date').value) && $('#bk-grid').contains(td)) ? td : null; }
 // The full rectangle of cells between the press point (SEL_ANCHOR) and the current cell (SEL_CUR):
 // every bay from column A→B and every slot from time A→B, inclusive.
 function selectionCells(){
@@ -4123,7 +4142,7 @@ function hoursForDate(iso){
 
 $('#day-prev').onclick = ()=>shiftDay(-1);
 $('#day-next').onclick = ()=>shiftDay(1);
-$('#day-today').onclick = ()=>{ $('#bk-date').value=todayISO(); dpSync('#bk-date'); loadSchedule(); };
+$('#day-today').onclick = ()=>{ $('#bk-date').value=sheetTodayISO(); dpSync('#bk-date'); loadSchedule(); };
 $('#bk-date').addEventListener('change', loadSchedule);
 function shiftDay(n){ const d=new Date($('#bk-date').value+'T00:00:00'); d.setDate(d.getDate()+n); $('#bk-date').value=toISO(d); dpSync('#bk-date'); loadSchedule(); }
 
@@ -4149,13 +4168,20 @@ async function loadOverridesFor(isos){
   OVERRIDES=(data||[]).filter(o=>o.is_active!==false && (o.end_date||o.override_date)>=isos[0]);
 }
 
+// The sheet shows 4:00 AM → 3:30 AM, so it needs the night before (a session still running at 4 AM)
+// and the whole next day (sessions after midnight, and to check a late session's room to run).
+// BK holds all three days; onSheet() picks the ones that belong to this sheet.
+function sheetBookings(date){
+  return sb.from('bookings').select('*').gte('booking_date',addDaysISO(date,-1)).lte('booking_date',addDaysISO(date,1))
+    .neq('status','cancelled').order('start_min');
+}
 async function loadSchedule(){
   const date=$('#bk-date').value; if(!date) return;
   if(MODE==='list'){
     // Same day, same query as the grid — only the presentation differs.
     $('#day-label').textContent = dateLabel(date);
-    await loadOverridesFor([date]);
-    const { data, error } = await sb.from('bookings').select('*').eq('booking_date',date).neq('status','cancelled').order('start_min');
+    await loadOverridesFor([addDaysISO(date,-1), addDaysISO(date,1)]);
+    const { data, error } = await sheetBookings(date);
     if(error){ if(!isAuthError(error)) toast('Load failed: '+error.message,'err'); return; }
     BK=liveBookings(data); await loadGroupsFor(BK); renderOverrideBanner(date); updateStats();
     $('#day-list-card').style.display='none';   // the list supersedes the "At a glance" strip
@@ -4163,9 +4189,9 @@ async function loadSchedule(){
     return;
   }
   $('#day-label').textContent = dateLabel(date);
-  await loadOverridesFor([date]);
+  await loadOverridesFor([addDaysISO(date,-1), addDaysISO(date,1)]);
   const [{ data, error }] = await Promise.all([
-    sb.from('bookings').select('*').eq('booking_date',date).neq('status','cancelled').order('start_min'),
+    sheetBookings(date),
     fetchLeagueOwed(),   // captains who owe league money are flagged on At a glance
   ]);
   if(error){ if(!isAuthError(error)) toast('Load failed: '+error.message,'err'); return; }
@@ -4179,15 +4205,36 @@ function renderOverrideBanner(date){
 }
 
 function updateStats(){
-  const booked=BK.filter(b=>b.status!=='blocked'&&b.status!=='held').length, blocked=BK.filter(b=>b.status==='blocked').length;
-  const rev=BK.reduce((s,b)=>s+(b.source==='online'?(b.amount_cents||0):0),0);
+  const mine=BK.filter(onSheet);
+  const booked=mine.filter(b=>b.status!=='blocked'&&b.status!=='held').length, blocked=mine.filter(b=>b.status==='blocked').length;
+  const rev=mine.reduce((s,b)=>s+(b.source==='online'?(b.amount_cents||0):0),0);
   $('#stat-booked').textContent=booked; $('#stat-blocked').textContent=blocked;
   $('#stat-rev').textContent='$'+(rev/100).toFixed(rev%100?2:0);
 }
 
 // Drop stale cart holds (abandoned checkouts); keep real bookings/blocks + live holds.
 function liveBookings(data){ const now=new Date().toISOString(); return (data||[]).filter(b => b.status!=='held' || (b.expires_at && b.expires_at>now)); }
-const findBooking = (bayId,iso,m) => BK.find(b => b.bay_id===bayId && b.booking_date===iso && m>=b.start_min && m<b.end_min);
+// A booking that runs past midnight is stored under the day it starts, so the early-morning minutes
+// of a date can belong to the night before's booking.
+function findBooking(bayId,iso,m){
+  const prev=addDaysISO(iso,-1);
+  return BK.find(b => b.bay_id===bayId && ((b.booking_date===iso && m>=b.start_min && m<b.end_min)
+    || (b.end_min>1440 && b.booking_date===prev && m+1440>=b.start_min && m+1440<b.end_min)));
+}
+// How far a session starting at `start` (minutes on `iso`, may run past 1440) can run from `from`:
+// until closing time, another booking, a block — or a Closed status when stopAtClosed.
+function runEnd(bayId, iso, from, ignoreId, stopAtClosed){
+  const step=SETTINGS.slot_step||30; let m=from;
+  while(m<MAX_END){
+    const [d,mm]=realAt(iso,m), [o,c]=hoursForDate(d);
+    if(mm<o*60 || mm>=c*60) break;
+    const hit=findBooking(bayId,d,mm); if(hit && hit.id!==ignoreId) break;
+    if(findOvBlock(bayId,d,mm)) break;
+    if(stopAtClosed && cellStatus(bayId,d,mm).kind==='closed') break;
+    m+=step;
+  }
+  return m;
+}
 // Is this booking a team's weekly league round? (migration 0031 — false everywhere without it)
 const isLeagueRound = b => !!(LG31.rounds && b && b.league_team_id);
 const statusColor = label => (STATUSES.find(s=>s.label===label)||{}).color || '#4ec06a';
@@ -4221,35 +4268,44 @@ function cellMeta(b, maxTags){
 
 function renderGrid(){
   const date=$('#bk-date').value;
-  const [open,close]=hoursForDate(date);
   const step=SETTINGS.slot_step||30;
-  if(!(close>open)){ $('#bk-grid').innerHTML='<div class="closed-note">Closed on this day'+(venueOverride(date)?' (schedule override)':' — set hours in Schedule Templates')+'.</div>'; return; }
+  // Sheet minutes the venue is open: this day's hours until midnight, then the next day's.
+  const rows=[];
+  for(let s=SHEET_START; s<SHEET_END; s+=step){ const [iso,m]=realAt(date,s), [o,c]=hoursForDate(iso); if(m>=o*60 && m<c*60) rows.push(s); }
+  if(!rows.length){ $('#bk-grid').innerHTML='<div class="closed-note">Closed on this day'+(venueOverride(date)?' (schedule override)':' — set hours in Schedule Templates')+'.</div>'; return; }
   let h='<table class="bkgrid"><thead><tr><th class="t"></th>';
   SETTINGS.bays.forEach(b=> h+=`<th class="${b.holding?'hold-col':''}"${b.holding?'':` data-bay="${b.id}"`} title="${esc(b.description||'')}">${esc(b.name)}<small>${b.holding?'':esc(b.sim||'')}</small></th>`);
   h+='</tr></thead><tbody>';
-  for(let m=open*60; m<close*60; m+=step){
-    h+=`<tr><td class="t" data-min="${m}">${fmtMin(m)}</td>`;
+  const started=new Set(), nxt=nextDow(date);
+  let crossed=false;
+  rows.forEach(s=>{
+    const [iso,m]=realAt(date,s), after=s>=1440;
+    const first=after && !crossed; if(after) crossed=true;
+    // After midnight the rows belong to the next date; their time cells carry no data-min so a
+    // paint-by-row never lands on this day's own early-morning minutes.
+    h+=`<tr${first?' class="midnight"':''}><td class="t"${after?'':` data-min="${m}"`}>${fmtMin(m)}${after?`<span class="nxt">${nxt}</span>`:''}</td>`;
     SETTINGS.bays.forEach(b=>{
       const hc=b.holding?' holdcell':'';
-      const bk=findBooking(b.id,date,m);
+      const bk=findBooking(b.id,iso,m);
       if(bk){
-        const visStart=Math.max(bk.start_min, open*60);    // clamp to the day's effective open (special-hours override)
-        if(m!==visStart) return;                            // covered by the rowspan from its first visible row
-        const span=Math.max(1, Math.round((Math.min(bk.end_min, close*60)-visStart)/step));
+        if(started.has(b.id+':'+bk.id)) return;             // covered by the rowspan from its first visible row
+        started.add(b.id+':'+bk.id);
+        const end=sheetStartOf(bk)+(bk.end_min-bk.start_min);
+        const span=Math.max(1, rows.filter(r=>r>=s && r<end).length);
         if(bk.status==='held'){   // a customer is mid-checkout — locked, not a real booking yet
           h+=`<td class="cell held${hc}" rowspan="${span}"><span class="nm">Held</span><span class="bnote">customer checking out</span></td>`;
           return;
         }
         const cls=(bk.status==='blocked'?'bl':'bk')+(isGroupBooking(bk)?' grp':'')+(isLeagueRound(bk)?' is-league':'');
-        h+=`<td class="cell ${cls}${hc}" rowspan="${span}" data-bid="${bk.id}" data-bay="${b.id}" data-min="${visStart}"${bk.status==='blocked'?'':statusCellStyle(bk)}><span class="nm">${bk.status==='blocked'?'Blocked':esc(bk.customer_name||'Booked')}</span>${cellMeta(bk)}</td>`;
+        h+=`<td class="cell ${cls}${hc}" rowspan="${span}" data-bid="${bk.id}" data-bay="${b.id}" data-min="${m}" data-date="${iso}"${bk.status==='blocked'?'':statusCellStyle(bk)}><span class="nm">${bk.status==='blocked'?'Blocked':esc(bk.customer_name||'Booked')}</span>${cellMeta(bk)}</td>`;
         return;
       }
-      h+=openCellTD(b, date, m);
+      h+=openCellTD(b, iso, m);
     });
     h+='</tr>';
-  }
+  });
   $('#bk-grid').innerHTML=h+'</tbody></table>';
-  $('#bk-grid').querySelectorAll('.cell.open').forEach(c=>c.onclick=()=>{ if(ACTIVE_BRUSH || !can('booking.write')) return; openAdd(c.dataset.bay,+c.dataset.min,date); });
+  $('#bk-grid').querySelectorAll('.cell.open').forEach(c=>c.onclick=()=>{ if(ACTIVE_BRUSH || !can('booking.write')) return; openAdd(c.dataset.bay,+c.dataset.min,c.dataset.date||date); });
   $('#bk-grid').querySelectorAll('.cell[data-bid]').forEach(c=>c.onclick=()=>{ if(ACTIVE_BRUSH) return; openBooking(c.dataset.bid); });
   $('#bk-grid').querySelectorAll('.cell.ovr').forEach(c=>c.onclick=()=>{ if(ACTIVE_BRUSH) return; openOverrideSheet(c.dataset.ovid); });
   wireGridDnD();
@@ -4282,18 +4338,14 @@ function gridDrop(id, bayId, dateISO, newStart){
   const dur=b.end_min-b.start_min, newEnd=newStart+dur;
   const targetBay=(SETTINGS.bays||[]).find(x=>x.id===bayId);
   const holding=targetBay&&targetBay.holding;
-  if(!holding){
-    const [open,close]=hoursForDate(dateISO);
-    if(newStart<open*60 || newEnd>close*60){ toast('That would fall outside opening hours','err'); return; }
-  }
-  const clash=BK.some(x=>x.id!==id && x.bay_id===bayId && x.booking_date===dateISO && newStart<x.end_min && newEnd>x.start_min);
-  if(clash){ toast('That overlaps another booking','err'); return; }
-  if(!holding){
-    const step=SETTINGS.slot_step||30;
-    for(let m=newStart;m<newEnd;m+=step){
-      const ov=findOvBlock(bayId,dateISO,m);
-      if(ov){ toast(`That time is blocked — ${ov.note||'schedule override'}`,'err'); return; }
-    }
+  if(newEnd>MAX_END){ toast('A booking can run no later than midnight the following night','err'); return; }
+  const step=SETTINGS.slot_step||30;
+  for(let m=newStart;m<newEnd;m+=step){   // past midnight, each minute is checked on the next date
+    const [d,mm]=realAt(dateISO,m);
+    if(!holding){ const [o,c]=hoursForDate(d); if(mm<o*60 || mm>=c*60){ toast('That would fall outside opening hours','err'); return; } }
+    const x=findBooking(bayId,d,mm); if(x && x.id!==id){ toast('That overlaps another booking','err'); return; }
+    const ov=holding?null:findOvBlock(bayId,d,mm);
+    if(ov){ toast(`That time is blocked — ${ov.note||'schedule override'}`,'err'); return; }
   }
   const who = b.status==='blocked' ? 'Blocked time' : (b.customer_name || 'Booking');
   const sameBay = bayId===b.bay_id;
@@ -4301,7 +4353,7 @@ function gridDrop(id, bayId, dateISO, newStart){
     title: holding?'Park this booking?':'Move this booking?',
     body: `<div style="font-weight:700;color:var(--white);font-size:15px;margin-bottom:10px">${esc(who)}</div>
       <div class="kv"><span class="k">Bay</span><span>${esc(targetBay?targetBay.name:bayId)}${sameBay?'':' <span class="dim">(was '+esc(bayName(b.bay_id))+')</span>'}</span></div>
-      <div class="kv"><span class="k">Time</span><span>${fmtMin(newStart)} – ${fmtMin(newEnd)}</span></div>
+      <div class="kv"><span class="k">Time</span><span>${fmtMin(newStart)} – ${fmtMin(newEnd)}${newEnd>1440?` (${nextDow(dateISO)})`:''}</span></div>
       <div class="kv" style="border:none"><span class="k">Date</span><span>${dateLabel(dateISO)}</span></div>`,
     okLabel: holding?'Park booking':'Move booking',
     onOk: async ()=>{
@@ -4341,9 +4393,9 @@ function glanceDone(b){
   return rows.length ? rows.every(isDone) : isDone(b);
 }
 function renderDayList(){
-  const booked=BK.filter(b=>b.status!=='held');
-  const items=booked.filter(b=>!glanceDone(b)).sort((a,b)=>a.start_min-b.start_min);
-  if(!items.length){ $('#day-list').innerHTML=`<div class="empty">${booked.length?'Everyone booked today has checked in.':'Nothing booked yet.'}</div>`; return; }
+  const booked=BK.filter(b=>b.status!=='held' && onSheet(b));
+  const items=booked.filter(b=>!glanceDone(b)).sort((a,b)=>sheetStartOf(a)-sheetStartOf(b));
+  if(!items.length){ $('#day-list').innerHTML=`<div class="empty">${booked.length?'Nobody left to come in — everyone has checked in or been marked a no-show.':'Nothing booked yet.'}</div>`; return; }
   // A party across four bays is one line in the day's list, not four. Everything else is
   // unchanged, so a normal booking still gets exactly the card it always had.
   const seen=new Set();
@@ -4354,7 +4406,7 @@ function renderDayList(){
       seen.add(b.group_id);
       const rows=(GROUP_MEMBERS[b.group_id]||[]).slice().sort((x,y)=>String(x.bay_id).localeCompare(String(y.bay_id)));
       return `<div class="gcard grp" data-group="${b.group_id}">
-        <div class="g-t"><span class="dot bk"></span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}</div>
+        <div class="g-t"><span class="dot bk"></span>${bkTimeText(b)}</div>
         <div class="g-s">${rows.length} bays · ${esc(b.customer_name||'Booked')}</div>
         ${cellMeta(b,2)}
         <div class="baylist">${rows.map(r=>`<span>${esc(bayName(r.bay_id))}</span>`).join('')}</div>
@@ -4362,7 +4414,7 @@ function renderDayList(){
       </div>`;
     }
     return `<div class="gcard ${bl?'bl':''}${isLeagueRound(b)?' is-league':''}" data-id="${b.id}">
-      <div class="g-t"><span class="dot ${bl?'bl':'bk'}"></span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}</div>
+      <div class="g-t"><span class="dot ${bl?'bl':'bk'}"></span>${bkTimeText(b)}</div>
       <div class="g-s">${esc(bayName(b.bay_id))} · ${bl?'Blocked':esc(b.customer_name||'Booked')}</div>
       ${cellMeta(b,3)}
       ${bl?'':oweFlagHTML(b)}
@@ -4376,8 +4428,8 @@ function renderDayList(){
 // draws, same click targets — a party spanning four bays is one line here, as in "At a glance".
 function renderBookingList(){
   const host=$('#bk-list');
-  const items=BK.filter(b=>b.status!=='held')
-                .sort((a,b)=>a.start_min-b.start_min || String(a.bay_id).localeCompare(String(b.bay_id)));
+  const items=BK.filter(b=>b.status!=='held' && onSheet(b))
+                .sort((a,b)=>sheetStartOf(a)-sheetStartOf(b) || String(a.bay_id).localeCompare(String(b.bay_id)));
   if(!items.length){ host.innerHTML='<tbody><tr><td class="empty">Nothing booked on this day.</td></tr></tbody>'; return; }
   const seen=new Set(); let rows='';
   items.forEach(b=>{
@@ -4388,7 +4440,7 @@ function renderBookingList(){
     const who=b.status==='blocked' ? '<span class="muted">Blocked</span>' : esc(b.customer_name||'Booked');
     const cents=b.source==='online' ? (b.amount_cents||0) : 0;
     rows+=`<tr class="lrow" ${grp?`data-group="${b.group_id}"`:`data-id="${b.id}"`}>
-      <td style="white-space:nowrap;font-family:'Space Grotesk';font-weight:700">${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}</td>
+      <td style="white-space:nowrap;font-family:'Space Grotesk';font-weight:700">${bkTimeText(b)}</td>
       <td>${where}</td>
       <td>${who}${cellMeta(b,3)}</td>
       <td class="muted" style="white-space:nowrap">${b.customer_phone?esc(fmtPhone(b.customer_phone)):'—'}</td>
@@ -4442,8 +4494,7 @@ function quickAddCustomer(prefill, onSaved){
 }
 
 function endChoices(bayId,startMin,dateISO){
-  const [,close]=hoursForDate(dateISO); const step=SETTINGS.slot_step||30;
-  let next=startMin; while(next<close*60 && !findBooking(bayId,dateISO,next) && !findOvBlock(bayId,dateISO,next)) next+=step;
+  const step=SETTINGS.slot_step||30, next=runEnd(bayId,dateISO,startMin,null,false);
   const opts=[]; for(let e=startMin+step; e<=next; e+=step) opts.push(e);
   return opts;
 }
@@ -4491,7 +4542,7 @@ function openAdd(bayId,startMin,dateISO){
     <div class="time-row">
       <div class="field" style="margin:0"><label>Starts</label><div class="static-val">${fmtMin(startMin)}</div></div>
       <div class="field" style="margin:0"><label>Ends</label>
-        <select class="input" id="s-end">${ends.map(e=>`<option value="${e}" ${e===def?'selected':''}>${fmtMin(e)}</option>`).join('')}</select>
+        <select class="input" id="s-end">${ends.map(e=>`<option value="${e}" ${e===def?'selected':''}>${fmtMin(e)}${e>1440?` (${nextDow(dateISO)})`:''}</option>`).join('')}</select>
       </div>
     </div>
     <div id="cust">
@@ -4577,7 +4628,7 @@ function rateForBay(bayId, weekday, hour){
 }
 function bookingPriceCents(b){
   const wd=new Date(b.booking_date+'T00:00:00').getDay(); const step=SETTINGS.slot_step||30; let c=0;
-  for(let m=b.start_min;m<b.end_min;m+=step) c+=Math.round((rateForBay(b.bay_id,wd,Math.floor(m/60))||0)*100/(60/step));
+  for(let m=b.start_min;m<b.end_min;m+=step) c+=Math.round((rateForBay(b.bay_id,m<1440?wd:(wd+1)%7,Math.floor((m%1440)/60))||0)*100/(60/step));
   return c;
 }
 function matchCustomer(b){
@@ -4629,7 +4680,7 @@ function openManage(id){
       <div class="sub">Manager block</div>
       <div class="kv"><span class="k">Bay</span><span>${esc(bayName(b.bay_id))}</span></div>
       <div class="kv"><span class="k">Date</span><span>${dateLabel(b.booking_date)}</span></div>
-      <div class="kv" style="border:none"><span class="k">Time</span><span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}</span></div>
+      <div class="kv" style="border:none"><span class="k">Time</span><span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}${b.end_min>1440?` (${nextDow(b.booking_date)})`:''}</span></div>
       ${b.note?`<div class="kv" style="border:none"><span class="k">Note</span><span style="text-align:right;max-width:220px">${esc(b.note)}</span></div>`:''}
       ${!can('booking.write') ? ''
         : `<button class="btn btn-danger" id="s-cancel" style="width:100%;margin-top:18px">Remove block</button>`}`;

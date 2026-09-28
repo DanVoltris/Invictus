@@ -42,12 +42,13 @@ const isUuid = (s) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 // and the notification outbox under it), tries to run the sweep or the outbox by hand.
 const NEEDS_BOOKINGS = 'This needs a staff login with the Bookings permission (booking.write). Ask an admin to turn it on under Staff.';
 
-// "19:30" or 1170 — the browser may send either; both end up as minutes from midnight.
+// "19:30" or 1170 — the browser may send either; both end up as minutes from midnight. A window
+// may run past midnight (0038): 1560 is 2:00 AM the next morning, up to 2880.
 function parseMin(v) {
   if (v == null || v === '') return null;
   if (typeof v === 'number' || /^\d+$/.test(String(v))) {
     const n = Math.round(Number(v));
-    return Number.isFinite(n) && n >= 0 && n <= 1440 ? n : null;
+    return Number.isFinite(n) && n >= 0 && n <= 2880 ? n : null;
   }
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(v).trim());
   if (!m) return null;
@@ -131,7 +132,7 @@ async function join(req, res) {
 
   const startMin = parseMin(b.windowStartMin ?? b.windowStart ?? 0);
   const endMin = parseMin(b.windowEndMin ?? b.windowEnd ?? 1440);
-  if (startMin == null || endMin == null || endMin <= startMin) {
+  if (startMin == null || endMin == null || endMin <= startMin || startMin >= 1440) {
     return res.status(400).json({ ok: false, error: 'Give us a time window — an earliest and a latest time.' });
   }
   const floor = Math.max(15, Number(settings.minMins) || 60);

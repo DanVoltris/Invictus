@@ -10,7 +10,7 @@ import {
   markGiftCardDelivered, recordGiftCardAttempt, giftCardAttemptsBlocked,
   bookWithGiftCard, customerHoursByContact, upsertCustomer,
   reservePromo, releasePromo, redeemPromo, customerKeyFor, isLeaguePlayer, leaguePlayerForRequest
-} from '../lib/db.js';
+, crossDayProblem } from '../lib/db.js';
 import { notifyGiftCard } from '../lib/notify.js';
 import { retrieveCheckoutIntent } from '../lib/holds.js';
 
@@ -273,6 +273,9 @@ async function priceSlot({ dateISO, bayId, startMin, endMin }) {
       weeklyStatusConflicts(settings, overrides, dateISO, bayId, Number(startMin), Number(endMin))) {
     throw Object.assign(new Error('That time is unavailable — pick another slot.'), { code: 409 });
   }
+  // Past midnight (0038): the next day's closures, and last night's late sessions still in the bay.
+  const spill = await crossDayProblem({ settings, dateISO, bayId, startMin, endMin });
+  if (spill) throw Object.assign(new Error(spill.error), { code: 409 });
   return { row, settings, amount };
 }
 

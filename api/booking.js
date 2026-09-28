@@ -1,5 +1,5 @@
 import { admin, getSettings, getBookingsForDate, getOverridesForDate, accountCustomerForRequest,
-         teamMembershipFor, teamRoundForWeek, insertLeagueRound } from '../lib/db.js';
+         teamMembershipFor, teamRoundForWeek, insertLeagueRound, crossDayProblem } from '../lib/db.js';
 import { normalizeSettings, bayName, fmtMin, hoursUntilBooking, winnipegTodayISO,
          bookingWindowError, overrideEffects, overrideConflicts, weeklyStatusConflicts,
          stripeStatus, stripeClient } from '../lib/booking.js';
@@ -290,6 +290,9 @@ async function leagueRound(req, res) {
       weeklyStatusConflicts(settings, overrides, dateISO, bayId, startMin, endMin)) {
     return res.status(409).json({ ok: false, code: 'slot_taken', error: 'That time is unavailable — pick another slot.' });
   }
+  // Past midnight (0038): the next day's closures, and last night's late sessions still in the bay.
+  const spill = await crossDayProblem({ settings, dateISO, bayId, startMin, endMin });
+  if (spill) return res.status(409).json({ ok: false, code: 'slot_taken', error: spill.error });
 
   // 5. One round per team per week. Checked here so the answer can name the round they already
   // have, and enforced by the database's partial unique index so two members booking at the same

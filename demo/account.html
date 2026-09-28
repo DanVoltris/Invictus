@@ -505,6 +505,11 @@ function venueNow(){
 
 // The one finished session still waiting for feedback: the most recent in the last 30 days that
 // went ahead and has no answer. A party across several bays counts once.
+// Over once its end has passed. A late session's end_min runs past 1440 into the next morning.
+function sessionOver(b, now){
+  const days = Math.round((Date.parse(now.date) - Date.parse(b.booking_date)) / 864e5);
+  return days*1440 + now.min >= b.end_min;
+}
 function pendingFeedback(bks, answered){
   const now = venueNow(), done = new Set(answered||[]);
   const cutoff = new Date(Date.now() - 30*864e5).toISOString().slice(0,10);
@@ -512,7 +517,7 @@ function pendingFeedback(bks, answered){
   return (bks||[])
     .filter(b => b.id && !['cancelled','held','blocked'].includes(b.status) && !done.has(b.id)
       && !(b.group_id && doneGroups.has(b.group_id)) && b.booking_date >= cutoff
-      && (b.booking_date < now.date || (b.booking_date === now.date && b.end_min <= now.min)))
+      && sessionOver(b, now))
     .sort((a,b) => b.booking_date.localeCompare(a.booking_date) || b.end_min - a.end_min)[0] || null;
 }
 
@@ -539,7 +544,7 @@ function drawProfile(c, bks, justInherited, opts){
   const list = (bks||[]).filter(b => b.status !== 'held');
   const upcoming = list.filter(b => b.booking_date >= today && b.status !== 'cancelled');
   const past = list.filter(b => b.booking_date < today || b.status === 'cancelled');
-  const hhmm = m => { const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
+  const hhmm = m => { if(m===1440) return 'Midnight'; m%=1440; const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
   const bkRow = b => `<div class="bk">
       <div class="b-main"><b>${esc(fmtDate(b.booking_date))}</b><div class="b-sub">${hhmm(b.start_min)}–${hhmm(b.end_min)} · ${esc(bayName(b.bay_id))}${b.status==='cancelled'?' · cancelled':''}</div></div>
       <div>${b.amount_cents ? '$'+(b.amount_cents/100).toFixed(2) : ''}</div>
@@ -606,7 +611,7 @@ function teamCard(t, idx, opts){
   const money = c => '$' + (c/100).toFixed(c % 100 ? 2 : 0);
   const bayMap = { ...((opts && opts.bays) || {}), ...(t.bays || {}) };
   const bayName = id => bayMap[id] || id || 'a bay';
-  const hhmm = m => { if(m==null) return ''; const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
+  const hhmm = m => { if(m==null) return ''; if(m===1440) return 'Midnight'; m%=1440; const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
   const shortDay = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ weekday:'short', month:'short', day:'numeric' }); } catch(e){ return iso; } };
   const shortDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ month:'short', day:'numeric' }); } catch(e){ return iso; } };
 

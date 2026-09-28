@@ -155,6 +155,10 @@
   .grid th .bmeta.promo { color: #A8321F; font-weight: 600; margin-top: 5px; white-space: normal; line-height: 1.25; }
   .grid th .bmeta.desc { color: var(--muted); font-weight: 600; margin-top: 4px; white-space: normal; line-height: 1.25; }
   .grid th.timehead { width: 70px; }
+  /* Past midnight (0038): one line where the date changes, and the day named on each late row. */
+  .grid tr.midnight td { padding: 10px 8px 6px; text-align: left; font-family: 'Space Grotesk'; font-weight: 700;
+    font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--orange); border-top: 2px solid var(--orange); }
+  .grid td.time .nxt { font-size: 10.5px; color: var(--orange); letter-spacing: .04em; }
   .grid td.time { font-family: 'Space Grotesk'; font-weight: 700; font-size: 12.5px; color: var(--muted); text-align: right;
     padding-right: 10px; white-space: nowrap; width: 70px; }
   .cell {
@@ -775,6 +779,7 @@ let bookedRanges = {};   // { bayId: [[startMin,endMin], …] } for the selected
 let closedRanges = {};   // { bayId: [[startMin,endMin], …] } closed by the recurring weekly status pattern
 let heldRanges = {};     // { bayId: [[startMin,endMin], …] } another customer has in their cart right now
 let dateHoursOverride = null;  // [open,close] from a schedule override for state.date, or null
+let nextDateHoursOverride = null;   // …and for the day after, whose small hours are on this page (0038)
 let unavailableRanges = {};  // { bayId: [[startMin,endMin], …] } the VENUE closed (override or weekly band) — never "Booked"
 let closedReasons = {};      // { bayId: [[startMin,endMin,reason], …] } only reasons staff marked public (0032)
 let closedDayReason = null;  // why the whole day is shut, when staff chose to say; else null
@@ -800,6 +805,8 @@ function bandsOf(r){
           {start:peak,wd:(r&&r.weekdayPeak)??32,we:(r&&r.weekendPeak)??36}].sort((a,b)=>a.start-b.start);
 }
 function rateFor(date, hour, bayId){
+  // Past midnight on this page (0038) is the next day, at the next day's rate.
+  if(hour >= 24){ date = new Date(date.getFullYear(), date.getMonth(), date.getDate()+1); hour -= 24; }
   const weekend = [0,5,6].includes(date.getDay());   // Fri–Sun price as "weekend" (see lib/booking.js rateFor)
   const r = (bayId && CONFIG.bayRates && CONFIG.bayRates[bayId]) || CONFIG.rates;
   const bands=bandsOf(r); let band=bands[0];
@@ -815,10 +822,42 @@ const $ = s => document.querySelector(s);
 const escHtml = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = n => '$' + (Number.isInteger(n) ? n : n.toFixed(2));
 const pad = n => String(n).padStart(2,'0');
-const fmtMin = m => { let h = Math.floor(m/60), mm = m%60; const ap = h<12?'AM':'PM'; let hh = h%12; if(hh===0) hh=12; return hh + (mm? ':'+pad(mm):'') + ' ' + ap; };
-const fmtFull = m => { let h = Math.floor(m/60), mm = m%60; const ap = h<12?'AM':'PM'; let hh = h%12; if(hh===0) hh=12; return hh + ':' + pad(mm) + ' ' + ap; };
+// Minutes past 1440 are the next morning (0038): 1500 is 1:00 AM.
+const fmtMin = m => { m=((m%1440)+1440)%1440; let h = Math.floor(m/60), mm = m%60; const ap = h<12?'AM':'PM'; let hh = h%12; if(hh===0) hh=12; return hh + (mm? ':'+pad(mm):'') + ' ' + ap; };
+const fmtFull = m => { m=((m%1440)+1440)%1440; let h = Math.floor(m/60), mm = m%60; const ap = h<12?'AM':'PM'; let hh = h%12; if(hh===0) hh=12; return hh + ':' + pad(mm) + ' ' + ap; };
 const fmtDur = mins => { const h=Math.floor(mins/60), mm=mins%60; return [h?h+' hr':'', mm?mm+' min':''].filter(Boolean).join(' '); };
 const dayHours = date => (dateHoursOverride && state.date && isoDate(date)===isoDate(state.date)) ? dateHoursOverride : CONFIG.hours[date.getDay()];
+
+/* ---------- The page's day: 4:00 AM → 3:30 AM (migration 0038) ----------
+   A day on this page starts at 4:00 AM and runs through midnight to its last row at 3:30 AM, and a
+   session can run past midnight or past 4 AM. Everything on the page — rows, free/taken ranges,
+   prices, end times — is in minutes from the chosen date's midnight, so 1:00 AM the next morning
+   is 1500. Only when a booking is SENT is it turned back into its real date (realSlot below): a
+   session that starts after midnight is stored under the next date. */
+const DAY_START = 240, DAY_END = 1680, MAX_SESSION = 12*60, MAX_END = 2880;
+const DOW_SHORT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const nextDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()+1);
+// Is page-minute m inside the venue's hours? Before midnight: this day's hours; after: the next day's.
+function pageOpen(date, m){
+  if(m < 1440){ const [o,c]=dayHours(date); return m >= o*60 && m < c*60; }
+  const [o,c]=nextDateHoursOverride || CONFIG.hours[nextDay(date).getDay()];
+  return m-1440 >= o*60 && m-1440 < c*60;
+}
+// "3:00 AM (Sun)" for a time past midnight; the plain time otherwise.
+const pageTime = (date, m) => fmtFull(m) + (m >= 1440 ? ` (${DOW_SHORT[nextDay(date).getDay()]})` : '');
+// The session as the server stores it: the date it really starts on, and its minutes on that date.
+function realSlot(){
+  const after = state.startMin >= 1440 ? 1440 : 0;
+  const d = after ? nextDay(state.date) : state.date;
+  return { dateISO: isoDate(d), bayId: state.bay, startMin: state.startMin - after, endMin: state.endMin - after };
+}
+// "Today" on this page is the 4 AM–4 AM day: at 2:00 AM Sunday it is still Saturday.
+function venueDayNow(){
+  const w = winnipegNow();
+  const early = w.min < DAY_START;
+  const d = new Date(w.y, w.mo-1, w.d - (early ? 1 : 0));
+  return { rank: dayRank(d.getFullYear(), d.getMonth(), d.getDate()), min: w.min + (early ? 1440 : 0) };
+}
 const DOW_FULL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MON_FULL=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const monthStart = d => new Date(d.getFullYear(), d.getMonth(), 1);
@@ -903,12 +942,13 @@ function isSlotHeld(bayId, m){
   return ranges.some(([s,e]) => m < e && (m + CONFIG.slotStep) > s);
 }
 
-// first booked half-hour at or after `from`, else the day's close
+// first booked or closed half-hour at or after `from` — past midnight too (0038) — capped at a
+// 12-hour session and at midnight the next night
 function firstBlock(date, bayId, from){
-  const [, close] = dayHours(date);
+  const limit = Math.min(MAX_END, from + MAX_SESSION);
   let m = from;
-  while (m < close*60 && !isSlotBooked(date, bayId, m)) m += CONFIG.slotStep;
-  return m; // a booked slot's start, or close
+  while (m < limit && pageOpen(date, m) && !isSlotBooked(date, bayId, m)) m += CONFIG.slotStep;
+  return m; // a booked/closed slot's start, or the limit
 }
 
 // valid end times: every free slot up to (and ending exactly at) the next booking is usable
@@ -942,6 +982,7 @@ async function loadAvailability(){
     if(!r.ok) return;
     const d = await r.json();
     if(d.dbEnabled){ applySettings(d.settings); bookedRanges = d.booked || {}; closedRanges = d.closed || {}; heldRanges = d.held || {}; dateHoursOverride = d.dateHours || null;
+      nextDateHoursOverride = d.nextDateHours || null;
       unavailableRanges = d.unavailable || {}; closedReasons = d.reasons || {}; closedDayReason = d.closedReason || null;
       shortDayReason = d.hoursReason || null; }
   }catch(e){}
@@ -960,7 +1001,7 @@ function priceRange(date, startMin, endMin, bayId){
 /* ---------- Calendar ---------- */
 function buildCalendar(){
   const grid = $('#cal-grid'); grid.innerHTML='';
-  const todayRank = winnipegToday().rank;   // "today" per America/Winnipeg
+  const todayRank = venueDayNow().rank;   // "today" is the 4 AM–4 AM venue day (0038)
   const view = state.calMonth;
   $('#cal-title').textContent = MON_FULL[view.getMonth()] + ' ' + view.getFullYear();
 
@@ -1034,20 +1075,27 @@ function buildGrid(){
   const [open, close]=dayHours(state.date);
   const dateKey=state.date.toDateString();
 
-  // If the chosen day is today (Winnipeg), hide start times that have already passed.
-  const tw = winnipegToday();
+  // If the chosen day is today (the 4 AM–4 AM venue day), hide start times that have already passed.
+  const tw = venueDayNow();
   const isToday = dayRank(state.date.getFullYear(), state.date.getMonth(), state.date.getDate()) === tw.rank;
-  const minStart = isToday ? tw.w.min : -1;
+  const minStart = isToday ? tw.min : -1;
+  const nd = nextDay(state.date);
 
   // Shorter hours than usual, with a reason staff chose to share: the missing morning is
   // explained rather than left as a gap the customer has to interpret.
   const shortNote = (shortDayReason && close > open)
     ? `<div class="short-day">${escHtml(shortDayReason)} — open ${fmtFull(open*60)} to ${fmtFull(close*60)} today.</div>` : '';
 
-  let bodyRows='';
-  for(let m=open*60; m + CONFIG.minMins <= close*60; m += CONFIG.slotStep){
+  let bodyRows='', midnightShown=false;
+  for(let m=DAY_START; m < DAY_END; m += CONFIG.slotStep){
     if(m < minStart) continue;                 // skip slots earlier than "now"
-    bodyRows+=`<tr><td class="time">${fmtFull(m)}</td>`;
+    if(!pageOpen(state.date, m)) continue;     // outside the venue's hours that night
+    // One line where the date changes, so "1:00 AM" is never read as the wrong morning.
+    if(m >= 1440 && !midnightShown){
+      midnightShown=true;
+      bodyRows+=`<tr class="midnight"><td colspan="${CONFIG.bays.length+1}">After midnight — ${DOW_FULL[nd.getDay()]}, ${MON_FULL[nd.getMonth()]} ${nd.getDate()}</td></tr>`;
+    }
+    bodyRows+=`<tr><td class="time">${m>=1440?`<span class="nxt">${DOW_SHORT[nd.getDay()]}</span> `:''}${fmtFull(m)}</td>`;
     CONFIG.bays.forEach(b=>{
       const realBooked = isSlotBooked(state.date, b.id, m);
       const ok = !realBooked && endOptions(state.date, b.id, m).length>0;   // bookable start
@@ -1081,7 +1129,7 @@ function buildGrid(){
 
   if(!bodyRows){
     // Nothing to show: either the venue is shut for the whole day, or today's remaining times have passed.
-    const shutAllDay = close <= open;
+    const shutAllDay = close <= open && !pageOpen(state.date, 1440);
     const msg = shutAllDay
       ? (closedDayReason
           ? `Closed for ${escHtml(closedDayReason)} — please pick another date above.`
@@ -1178,12 +1226,12 @@ function renderCheckbar(){
   const opts=endOptions(state.date, state.bay, state.startMin);
   const price=priceRange(state.date, state.startMin, state.endMin);
 
-  const endOpts = opts.map(e => ({ val: e, label: fmtFull(e) }));
+  const endOpts = opts.map(e => ({ val: e, label: pageTime(state.date, e) }));
   const partyOpts = Array.from({length:CONFIG.maxParty},(_,i)=>i+1).map(n => ({ val: n, label: `${n} ${n>1?'players':'player'}` }));
 
   $('#cb-info').innerHTML=`
     <div class="cb-item"><div class="k">Bay</div><div class="v">${bay.name}<br><small>${bay.sim} · ${dateStr}</small></div></div>
-    <div class="cb-item"><div class="k">Start</div><div class="v">${fmtFull(state.startMin)}</div></div>
+    <div class="cb-item"><div class="k">Start</div><div class="v">${pageTime(state.date, state.startMin)}</div></div>
     <div class="cb-item"><div class="k">End time</div>${cbSelectHTML('end', state.endMin, endOpts)}</div>
     <div class="cb-item"><div class="k">Group size</div>${cbSelectHTML('party', state.party, partyOpts)}</div>
     <div class="cb-item cb-total"><div class="k">Total${CONFIG.taxPct ? ' incl. tax' : ''}</div><div class="v">${money(price + taxOn(price))}</div></div>`;
@@ -1220,7 +1268,7 @@ function recapHTML(){
   return `
     <div class="row"><span class="k">Bay</span><span class="v">${bay.name}</span></div>
     <div class="row"><span class="k">Date</span><span class="v">${dateStr}</span></div>
-    <div class="row"><span class="k">Time</span><span class="v">${fmtFull(state.startMin)} – ${fmtFull(state.endMin)} · ${durLabel}</span></div>
+    <div class="row"><span class="k">Time</span><span class="v">${pageTime(state.date, state.startMin)} – ${pageTime(state.date, state.endMin)} · ${durLabel}</span></div>
     <div class="row"><span class="k">Group</span><span class="v">${state.party} ${state.party>1?'players':'player'}</span></div>
     ${LG.armed
       ? `<div class="row"><span class="k">League round</span><span class="v">${escHtml(LG.armed.teamName)} · week ${LG.armed.week.number} of ${LG.armed.weeksTotal}</span></div>
@@ -1297,7 +1345,7 @@ let GIFT_CODE=null, GIFT_RESERVED=false, GIFT_LAST4=null;
 
 // Every input that changes the price is in the key, so a repriced booking can never reuse a
 // PaymentIntent built for the old total.
-const bookingKey = () => [isoDate(state.date), state.bay, state.startMin, state.endMin,
+const bookingKey = () => [realSlot().dateISO, state.bay, state.startMin, state.endMin,
                           PROMO_CODE||'', GIFT_CODE||''].join('|');
 // A PaymentIntent's id is the part of its client secret before "_secret".
 const piIdOf = cs => String(cs||'').split('_secret')[0] || null;
@@ -1345,7 +1393,7 @@ async function post(url, body){
   return { ok:r.ok, status:r.status, data:d||{} };
 }
 const contactBody = () => ({ email:($('#sc-email')?.value||'').trim(), phone:($('#sc-phone')?.value||'').trim() || BOOK_WINDOW.devPhone || '' });
-const slotBody = () => ({ dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin, ...contactBody() });
+const slotBody = () => ({ ...realSlot(), ...contactBody() });
 
 /* Hand back anything held against the PaymentIntent we are about to replace or abandon. Stored
    value must never stay reserved against a payment nobody is going to complete. Best-effort — the
@@ -1362,7 +1410,7 @@ async function releaseCredits(){
 async function createPI(){
   await releaseCredits();   // never abandon a PaymentIntent that still holds a card or a promo use
   const key=bookingKey();
-  const slot={ dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin };
+  const slot=realSlot();
   const sameSlot = !!HELD && HELD.dateISO===slot.dateISO && HELD.bayId===slot.bayId
                    && HELD.startMin===slot.startMin && HELD.endMin===slot.endMin;
   // Moved to a different slot mid-checkout: give the old one back before taking the new one.
@@ -1914,7 +1962,7 @@ async function payWithHours(){
   const btn=$('#pay-hours'); paying=true; btn.disabled=true; btn.textContent='Booking…'; $('#pay-error').textContent='';
   let r;
   try{ r=await (await fetch('/api/hour-cards?action=book',{ method:'POST', headers:{'Content-Type':'application/json', ...authHeaders()}, body:JSON.stringify({
-    dateISO:isoDate(state.date), bayId:state.bay, startMin:state.startMin, endMin:state.endMin,
+    ...realSlot(),
     name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim(),
     note:($('#sc-note')?.value||'').trim(), smsConsent:smsConsentGiven() }) })).json(); }
   catch(e){ r={ ok:false, error:'Network error — please try again.' }; }
@@ -2043,7 +2091,7 @@ function showConfirmation(name, paidCents, mode){
     <div class="row"><span class="k">Name</span><span>${name}</span></div>
     <div class="row"><span class="k">Bay</span><span>${bay.name}</span></div>
     <div class="row"><span class="k">Date</span><span>${dateStr}</span></div>
-    <div class="row"><span class="k">Time</span><span>${fmtFull(state.startMin)} – ${fmtFull(state.endMin)}</span></div>
+    <div class="row"><span class="k">Time</span><span>${pageTime(state.date, state.startMin)} – ${pageTime(state.date, state.endMin)}</span></div>
     <div class="row"><span class="k">Group</span><span>${state.party} ${state.party>1?'players':'player'}</span></div>
     ${moneyLine(mode, price)}`;
   fillWaiverCTA($('#sc-email')?.value, ($('#sc-phone')?.value||'').trim(), name);
@@ -2101,10 +2149,9 @@ function openWaitlist(bayId, startMin){
 
   // Prefill a sensible window around the slot they actually wanted, clamped to the day's hours.
   const dur=Math.max(15, CONFIG.minMins||60);
-  const [open, close]=dayHours(state.date);
-  const anchor = startMin!=null ? startMin : open*60;
-  $('#wl-from').value=hhmm(Math.max(open*60, anchor-60));
-  $('#wl-to').value=hhmm(Math.min(close*60, anchor+dur+60));
+  const anchor = startMin!=null ? startMin : DAY_START;
+  $('#wl-from').value=hhmm(Math.max(DAY_START, anchor-60) % 1440);
+  $('#wl-to').value=hhmm(Math.min(MAX_END, anchor+dur+60) % 1440);
   // The page's own dropdown, never the browser's: a native menu renders in the OS's colours and
   // ignores this page's styling entirely. #wl-dur stays an input so the value is read the same way.
   $('#wl-dur-host').innerHTML = cbSelectHTML('wl-dur', dur, wlDurations().map(d=>({ val:d, label:escHtml(fmtDur(d)) })))
@@ -2137,14 +2184,22 @@ async function joinWaitlist(){
   if(!emailOk && !smsOk){ err.textContent='Tick email or text so we can tell you when a bay opens — that is the whole point of the list.'; return; }
   if(emailOk && !email){ err.textContent='Add your email address, or untick "email me".'; return; }
   if(smsOk && !phone){ err.textContent='Add your mobile number, or untick "text me".'; return; }
-  const from=minOf(($('#wl-from')||{}).value), to=minOf(($('#wl-to')||{}).value);
-  if(from==null || to==null || to<=from){ err.textContent='Give us an earliest and a latest time.'; return; }
+  let from=minOf(($('#wl-from')||{}).value), to=minOf(($('#wl-to')||{}).value);
+  if(from==null || to==null){ err.textContent='Give us an earliest and a latest time.'; return; }
+  // This page's day starts at 4 AM (0038): a time before 4 is the next morning, and a latest time
+  // earlier than the earliest runs past midnight ("10 PM to 2 AM").
+  if(from < DAY_START) from += 1440;
+  if(to <= from) to += 1440;
+  if(to <= from || to - from > MAX_SESSION*2){ err.textContent='Give us an earliest and a latest time.'; return; }
+  // Stored under the date the window really starts on.
+  const after = from >= 1440 ? 1440 : 0;
+  const wlDate = after ? nextDay(state.date) : state.date;
 
   const btn=$('#wl-join'); btn.disabled=true; btn.textContent='Joining…';
   const r=await post('/api/waitlist?action=join',{
-    dateISO:isoDate(state.date),
+    dateISO:isoDate(wlDate),
     bayIds:[...WL_BAYS],
-    windowStartMin:from, windowEndMin:to,
+    windowStartMin:from-after, windowEndMin:to-after,
     durationMin:Number((($('#wl-dur')||{}).value)||CONFIG.minMins||60),
     name:(($('#wl-name')||{}).value||'').trim(),
     email, phone, emailOk, smsOk, players:state.party,
@@ -2260,7 +2315,8 @@ function leagueChoices(){
   const LEA = window.InvictusLeagues;
   const out = { open: [], taken: [] };
   if(!LEA || !LG.teams.length || !state.date) return out;
-  const wk = LEA.weekOf(isoDate(state.date));
+  // The week the session really falls in: a 1 AM Monday start is next week's round (0038).
+  const wk = LEA.weekOf(state.startMin!=null ? realSlot().dateISO : isoDate(state.date));
   for(const t of LG.teams){
     const w = (t.weeks || []).find(x => x.start === wk);
     if(!w) continue;
@@ -2283,7 +2339,7 @@ function renderLeaguePanel(){
       <ul class="lg-facts">
         <li><span class="k">Team</span><span class="v">${escHtml(a.teamName)} · ${escHtml(a.leagueName)}</span></li>
         <li><span class="k">Counts as</span><span class="v">Week ${a.week.number} of ${a.weeksTotal} · ${escHtml(weekLabel(a.week))}</span></li>
-        <li><span class="k">When</span><span class="v">${escHtml(longDate(isoDate(state.date)))} · ${escHtml(fmtFull(state.startMin))}–${escHtml(fmtFull(state.endMin))}</span></li>
+        <li><span class="k">When</span><span class="v">${escHtml(longDate(isoDate(state.date)))} · ${escHtml(pageTime(state.date, state.startMin))}–${escHtml(pageTime(state.date, state.endMin))}</span></li>
         <li><span class="k">Bay</span><span class="v">${escHtml(bayLabel(state.bay))}</span></li>
         <li><span class="k">You pay</span><span class="v" style="color:#067647">Nothing — the season is paid</span></li>
       </ul>
@@ -2355,8 +2411,7 @@ async function confirmLeagueRound(){
   // live booking row, and a hold this checkout is holding would clash with itself.
   await releaseHeldSlot();
   await releaseCredits();
-  const r = await post('/api/booking?action=league-round', { teamId:a.teamId, dateISO:isoDate(state.date),
-    bayId:state.bay, startMin:state.startMin, endMin:state.endMin });
+  const r = await post('/api/booking?action=league-round', { teamId:a.teamId, ...realSlot() });
   paying = false;
   if(r.data && r.data.ok){
     $('#pay-overlay').classList.remove('show');
@@ -2389,7 +2444,7 @@ function showLeagueConfirmation(a, bookingId){
     <div class="row"><span class="k">League week</span><span>Week ${a.week.number} of ${a.weeksTotal} · ${escHtml(weekLabel(a.week))}</span></div>
     <div class="row"><span class="k">Bay</span><span>${escHtml(bayLabel(state.bay))}</span></div>
     <div class="row"><span class="k">Date</span><span>${escHtml(longDate(isoDate(state.date)))}</span></div>
-    <div class="row"><span class="k">Time</span><span>${escHtml(fmtFull(state.startMin))} – ${escHtml(fmtFull(state.endMin))}</span></div>
+    <div class="row"><span class="k">Time</span><span>${escHtml(pageTime(state.date, state.startMin))} – ${escHtml(pageTime(state.date, state.endMin))}</span></div>
     <div class="row"><span class="k">Paid</span><span>Free — the season is paid for</span></div>`;
   $('#conf-waiver').innerHTML = '';
   $('#conf-overlay').classList.add('show');
