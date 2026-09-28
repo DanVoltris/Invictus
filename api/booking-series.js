@@ -922,8 +922,9 @@ async function move(req, res) {
   const g = await groupById(groupId);
   if (!g) return res.status(404).json({ ok: false, error: 'No such booking.' });
 
+  // A past date is allowed: this is staff-only (booking.write), and staff correct the record after
+  // the fact — the group played somewhere or somewhen else. Customers never reach this action.
   const dateISO = isDate(b.dateISO) ? b.dateISO : g.booking_date;
-  if (dateISO < winnipegTodayISO()) return res.status(400).json({ ok: false, error: 'That date has already passed.' });
   const startMin = b.startMin == null ? g.start_min : Math.round(Number(b.startMin));
   const endMin = b.endMin == null ? g.end_min : Math.round(Number(b.endMin));
   if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin <= startMin) {
@@ -958,7 +959,7 @@ async function move(req, res) {
   // not a decision to take without asking. The response says what the new list price would be so
   // the portal can offer the choice.
   const q = quoteGroup({
-    settings, dateISO, bayIds: bays, startMin, endMin,
+    settings, dateISO, bayIds: bays, startMin, endMin, allowPast: true,   // staff may move into the past
     plan: null, todayISO: winnipegTodayISO(),
   });
   res.status(200).json({

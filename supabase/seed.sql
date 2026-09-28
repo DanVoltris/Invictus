@@ -14,7 +14,8 @@ values (
     {"id":"B3","name":"Manitopia Realty Bay #3","sim":"Golfzon TwoVision","max_players":4,"sort":3},
     {"id":"B4","name":"Public Bay #4","sim":"Golfzon TwoVision","description":"Right hand only","max_players":4,"sort":4},
     {"id":"B5","name":"McNaught Private Room #1","sim":"Golfzon TwoVision","description":"Private room","max_players":4,"sort":5},
-    {"id":"B6","name":"Private Room #2","sim":"Golfzon TwoVision","description":"Private room","max_players":4,"sort":6}]'::jsonb,
+    {"id":"B6","name":"Private Room #2","sim":"Golfzon TwoVision","description":"Private room","max_players":4,"sort":6},
+    {"id":"HOLD","name":"Holding Bay","holding":true,"sort":99}]'::jsonb,
   '{"0":[0,24],"1":[0,24],"2":[0,24],"3":[0,24],"4":[0,24],"5":[0,24],"6":[0,24]}'::jsonb,
   '{"weekdayOffPeak":20,"weekdayPeak":20,"weekendOffPeak":25,"weekendPeak":25,"peakStartHour":17}'::jsonb,
   60, 4, 30

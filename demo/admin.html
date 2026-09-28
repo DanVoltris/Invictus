@@ -377,7 +377,9 @@
   .li .bnote{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;font-style:italic}
   .closed-note{color:var(--dim);text-align:center;padding:26px 0;font-size:14px}
   .cell.closed{opacity:.16;cursor:default;background:transparent;border-style:dashed}
-  .cell.pastcell{opacity:.38;filter:grayscale(.65);cursor:default;pointer-events:none}
+  /* Past time stays faded — it reads as history — but staff can still add, move and edit there. */
+  .cell.pastcell{opacity:.38;filter:grayscale(.65);cursor:pointer}
+  .cell.pastcell:hover{opacity:.7}
   .cell.closed:hover{border-color:var(--border)}
   .cell[draggable="true"]{cursor:grab}
   .cell[draggable="true"]:active{cursor:grabbing}
@@ -3946,16 +3948,16 @@ function nowMinWpg(){ const p=new Intl.DateTimeFormat('en-CA',{timeZone:'America
 function pastSlot(iso, m){ const t=todayISO(); if(iso<t) return true; if(iso>t) return false; return m+(SETTINGS.slot_step||30)<=nowMinWpg(); }
 
 // The <td> for a non-booked cell. Open + Closed status cells carry data-bay/data-min so they're
-// paintable. Elapsed slots keep their normal look but render faded + inert (no data attributes,
-// no pointer events) — readable history, clearly not editable.
+// clickable, droppable and paintable. Elapsed slots render faded (.pastcell) but stay clickable and
+// droppable, so staff can correct the record after the fact; paintable() keeps paint off them.
 function openCellTD(b, iso, m){
   const blk=findOvBlock(b.id, iso, m);   // manual block/closure — not paintable, managed in the Overrides tab
   if(blk) return `<td class="cell ovr" data-ovid="${blk.id}"><span class="nm">${esc(blk.note||'Closed')}</span></td>`;
   const past=pastSlot(iso, m);
   const p=past?' pastcell':'';
-  const act=past?'':` data-bay="${b.id}" data-min="${m}"`+(iso?` data-date="${iso}"`:'');
+  const act=` data-bay="${b.id}" data-min="${m}"`+(iso?` data-date="${iso}"`:'');
   const st=cellStatus(b.id, iso, m);
-  if(st.holding) return `<td class="cell open holdcell${p}"${act}>${past?'':'+'}</td>`;
+  if(st.holding) return `<td class="cell open holdcell${p}"${act}>+</td>`;
   const col=norm6(st.color||STATUS_GREEN);
   // Closed + painted statuses wear their exact colour (full-strength border, like the palette swatch);
   // an unpainted "Open" slot stays a quiet green so painted statuses stand out against it.
@@ -4024,6 +4026,7 @@ function setBrush(b, btn){
 function brushBand(){ return ACTIVE_BRUSH==='erase' ? null : { open:ACTIVE_BRUSH.open, color:ACTIVE_BRUSH.color, label:ACTIVE_BRUSH.label }; }
 function paintKey(bay,m){ if(ACTIVE_BRUSH==='erase') delete DAYPAINT[bay+':'+m]; else DAYPAINT[bay+':'+m]=brushBand(); }
 function paintable(bay,iso,m){
+  if(pastSlot(iso,m)) return false;   // schedule statuses are for time still to come
   const bObj=(SETTINGS.bays||[]).find(x=>x.id===bay); if(!bObj||bObj.holding) return false;
   return !findBooking(bay,iso,m) && !findOvBlock(bay,iso,m);
 }
@@ -4272,7 +4275,6 @@ function wireGridDnD(){
 function gridDrop(id, bayId, dateISO, newStart){
   const b=BK.find(x=>x.id===id); if(!b) return;
   if(b.bay_id===bayId && b.booking_date===dateISO && b.start_min===newStart) return;   // dropped where it already is
-  if(pastSlot(dateISO,newStart)){ toast('Can’t move a booking into the past.','err'); return; }
   const dur=b.end_min-b.start_min, newEnd=newStart+dur;
   const targetBay=(SETTINGS.bays||[]).find(x=>x.id===bayId);
   const holding=targetBay&&targetBay.holding;
@@ -4467,7 +4469,6 @@ function openOverrideSheet(id){
 }
 
 function openAdd(bayId,startMin,dateISO){
-  if(pastSlot(dateISO,startMin)){ toast('That time has passed — pick a current or future slot.','err'); return; }
   const ends=endChoices(bayId,startMin,dateISO);
   if(!ends.length){ toast('No free time right after this slot','err'); return; }
   const def = ends.includes(startMin+60)?startMin+60:ends[ends.length-1];
@@ -4627,8 +4628,6 @@ function openManage(id){
       <div class="kv" style="border:none"><span class="k">Time</span><span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}</span></div>
       ${b.note?`<div class="kv" style="border:none"><span class="k">Note</span><span style="text-align:right;max-width:220px">${esc(b.note)}</span></div>`:''}
       ${!can('booking.write') ? ''
-        : pastSlot(b.booking_date, b.end_min-(SETTINGS.slot_step||30))
-        ? `<div class="dim" style="font-size:12px;text-align:center;margin-top:18px">This block is in the past — nothing to remove.</div>`
         : `<button class="btn btn-danger" id="s-cancel" style="width:100%;margin-top:18px">Remove block</button>`}`;
     overlay.classList.add('show'); $('#x').onclick=closeSheet;
     if($('#s-cancel')) $('#s-cancel').onclick=async()=>{
@@ -4738,8 +4737,6 @@ function openManage(id){
       <div class="row" style="flex-wrap:nowrap;gap:8px"><input class="input" id="m-link" readonly value="${location.origin}/manage?b=${b.id}" style="font-size:12.5px" /><button class="btn btn-ghost btn-sm" id="m-copy" style="white-space:nowrap">Copy</button></div></div>`:''}
     ${can('booking.write')?`<button class="btn btn-primary" id="m-save" style="width:100%;margin-top:14px">Save changes</button>`:'<div class="ro-note">You can look at this booking but not change it.</div>'}
     ${!can('booking.write') ? ''
-      : pastSlot(b.booking_date, b.end_min-(SETTINGS.slot_step||30))
-      ? `<div class="dim" style="font-size:12px;text-align:center;margin-top:12px">This booking is in the past — it can no longer be cancelled.</div>`
       : `<button class="btn btn-danger" id="s-cancel" style="width:100%;margin-top:12px">Cancel booking</button>`}
      </div>
     </div>`;
@@ -6766,7 +6763,7 @@ function openGroup(gid, fromBookingId){
   const fmt=c=>cur+' $'+((c||0)/100).toFixed(2);
   const charged=g.amount_cents!=null ? g.amount_cents : rows.reduce((t,b)=>t+(b.amount_cents||0),0);
   const list=g.list_price_cents||0;
-  const editable=can('booking.write') && !pastSlot(first.booking_date, first.end_min-(SETTINGS.slot_step||30));
+  const editable=can('booking.write');   // past groups too — staff correct the record after the fact
 
   sheet.innerHTML=`
     <button class="sheet-close" id="x">✕</button>
@@ -6794,7 +6791,7 @@ function openGroup(gid, fromBookingId){
 
     ${s?`<button class="btn btn-ghost" id="g-series" style="width:100%;margin-top:16px">See the whole series</button>`:''}
     ${editable?`<button class="btn btn-danger" id="g-cancel" style="width:100%;margin-top:${s?'8':'16'}px">Cancel all ${rows.length} bays</button>`
-      :`<div class="ro-note">${can('booking.write')?'This booking is in the past — it can no longer be cancelled.':'You do not have permission to cancel bookings.'}</div>`}`;
+      :`<div class="ro-note">You do not have permission to cancel bookings.</div>`}`;
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
   sheet.querySelectorAll('.g-one').forEach(btn=>btn.onclick=()=>{ closeSheet(); openManage(btn.dataset.id); });

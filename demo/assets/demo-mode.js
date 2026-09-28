@@ -638,7 +638,9 @@
   /* ---------- everything the manager tabs read ---------- */
   const DB = {
     settings: [{
-      id: 1, bays: BAYS,
+      // The staff-only Holding Bay (pinned last on the tee sheet, hidden from customers) is added
+      // here, not to BAYS — BAYS is also what the sample-booking generator fills.
+      id: 1, bays: [...BAYS, { id: 'HOLD', name: 'Holding Bay', holding: true, sort: 99 }],
       hours: { 0: [0, 24], 1: [0, 24], 2: [0, 24], 3: [0, 24], 4: [0, 24], 5: [0, 24], 6: [0, 24] },
       rates: FLAT, bay_rates: {}, min_mins: 60, max_party: 4, slot_step: 30,
       weekly_status: {}, online_status_label: 'Booked',

@@ -284,3 +284,34 @@ test('(d) no secret configured: sweep/outbox/extend still refuse with 503 and sa
   assert.equal((await call(series, { action: 'extend' })).code, 503);
   assert.deepEqual(writes(), []);
 });
+
+// ----- past bookings are editable by staff ---------------------------------------------------
+// Staff correct the record after the fact — a group played in another bay, or at another time,
+// last week. Moving a group to a PAST date must work like any other move (customers still cannot
+// touch past bookings; that is a different door).
+test('staff can move a group booking to a date that has already passed', async () => {
+  const yesterday = new Date(Date.now() - 86400000 * 2).toISOString().slice(0, 10);
+  const saved = { ...returns };
+  Object.assign(returns, {
+    groupById: async () => ({ id: GID, booking_date: yesterday, start_min: 600, end_min: 660, amount_cents: 5000,
+      bookings: [{ id: 'b-1', bay_id: 'B1', status: 'confirmed' }] }),
+    groupConflicts: async () => [],
+    getOverridesForDate: async () => [],
+    moveGroup: async () => ({ ok: true, moved: 1 }),
+  });
+  try {
+    const r = await call(series, { action: 'move', token: 'tok-admin', body: { groupId: GID, dateISO: yesterday, startMin: 720, endMin: 780 } });
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    assert.ok(calls.includes('moveGroup'), 'the move was written');
+  } finally {
+    Object.keys(returns).forEach((k) => { if (!(k in saved)) delete returns[k]; });
+    Object.assign(returns, saved);
+  }
+});
+
+test('…but a customer can still never price (so never book) a past date', async () => {
+  const { priceForBooking } = await import(url('lib', 'booking.js'));
+  const past = new Date(Date.now() - 86400000 * 2).toISOString().slice(0, 10);
+  assert.throws(() => priceForBooking({ dateISO: past, bayId: 'B1', startMin: 600, endMin: 660 }), /Date in the past/);
+  assert.ok(priceForBooking({ dateISO: past, bayId: 'B1', startMin: 600, endMin: 660, allowPast: true }) > 0, 'only the staff path opts in');
+});
