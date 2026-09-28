@@ -4322,12 +4322,14 @@ function confirmSheet({title, body, okLabel, onOk}){
 
 
 // "At a glance" is who is still to come. Once staff mark a booking Checked-in (or Completed, the
-// step after it) it drops off the strip — it stays on the grid and in the list. The one exception:
-// a captain who still owes league money stays, flag and all, until it is collected.
-const DONE_LABEL = /^(checked[\s-]?in|completed)$/i;
+// step after it) or No-show, it drops off the strip — it stays on the grid and in the list. The one
+// exception: a captain who still owes league money and HAS come in stays, flag and all, until it is
+// collected. A no-show captain is not there to collect from; Holds to Charge still lists the money.
+const DONE_LABEL = /^(checked[\s-]?in|completed|no[\s-]?show)$/i;
+const NO_SHOW_LABEL = /^no[\s-]?show$/i;
 const isDone = b => DONE_LABEL.test(String(b.status_label||'').trim());
 function glanceDone(b){
-  if(leagueOwedFor(b).length) return false;
+  if(leagueOwedFor(b).length && !NO_SHOW_LABEL.test(String(b.status_label||'').trim())) return false;
   if(!isGroupBooking(b)) return isDone(b);
   const rows=GROUP_MEMBERS[b.group_id]||[];
   return rows.length ? rows.every(isDone) : isDone(b);
