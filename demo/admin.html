@@ -1251,6 +1251,10 @@
         <div class="toolbar">
           <div><h2>Gift Cards</h2><div class="day-label">Every card sold online or over the counter, what is left on it, and every movement of money against it.</div></div>
           <div class="day-nav">
+            <div class="seg seg-sm" id="gc-cat" role="tablist" aria-label="Which cards to show">
+              <button type="button" role="tab" data-v="all" class="on" aria-selected="true">All</button>
+              <button type="button" role="tab" data-v="gift_card" aria-selected="false">Gift cards</button>
+              <button type="button" role="tab" data-v="social" aria-selected="false">Social</button></div>
             <input class="input" id="gc-search" placeholder="Search name, email or last 4" style="min-width:220px" />
             <button class="btn btn-primary cap-money" id="gc-issue">+ Issue card</button>
           </div>
@@ -5902,25 +5906,52 @@ function giftKindPill(k){
   return `<span class="pill ${cls}">${esc(label)}</span>`;
 }
 
+// Gift card or Social (migration 0037). Every online purchase is a gift card; staff pick one of the
+// two when they issue a card. A database without 0037 has no column, and everything reads as a gift card.
+const GC_CAT_LABEL = { gift_card:'Gift card', social:'Social' };
+const gcCat = c => (c && c.category==='social') ? 'social' : 'gift_card';
+const gcCatPill = c => `<span class="pill ${gcCat(c)==='social'?'manager':'info'}">${GC_CAT_LABEL[gcCat(c)]}</span>`;
+let GC_CAT = 'all';
+// A two-option choice built as buttons (a radio group): arrows move, Space/Enter picks.
+function catChoiceHTML(id, selected){
+  return `<div class="seg seg-sm" id="${id}" role="radiogroup" aria-label="Card type">${
+    Object.entries(GC_CAT_LABEL).map(([v,l],i)=>`<button type="button" role="radio" data-v="${v}" aria-checked="${selected===v}"
+      class="${selected===v?'on':''}" tabindex="${selected===v||(!selected&&i===0)?0:-1}">${l}</button>`).join('')}</div>`;
+}
+function wireCatChoice(host, onPick){
+  const btns=[...host.querySelectorAll('button')];
+  const pick=(b,focus)=>{ btns.forEach(x=>{ const on=x===b; x.classList.toggle('on',on); x.setAttribute('aria-checked',String(on)); x.tabIndex=on?0:-1; }); if(focus) b.focus(); onPick(b.dataset.v); };
+  btns.forEach((b,i)=>{ b.onclick=()=>pick(b); b.onkeydown=e=>{
+    const to = ['ArrowRight','ArrowDown'].includes(e.key) ? (i+1)%btns.length : ['ArrowLeft','ArrowUp'].includes(e.key) ? (i-1+btns.length)%btns.length : null;
+    if(to!=null){ e.preventDefault(); pick(btns[to], true); } }; });
+}
+
 function renderGiftCards(){
   const q=($('#gc-search').value||'').trim().toLowerCase();
-  const rows = !q ? GIFT_CARDS : GIFT_CARDS.filter(c=>[c.recipient_name,c.recipient_email,c.purchaser_name,c.purchaser_email,c.code_hint,c.note]
+  const rows = GIFT_CARDS.filter(c=>GC_CAT==='all' || gcCat(c)===GC_CAT)
+    .filter(c=>!q || [c.recipient_name,c.recipient_email,c.purchaser_name,c.purchaser_email,c.code_hint,c.note]
     .some(v=>String(v||'').toLowerCase().includes(q)));
-  $('#gc-table').innerHTML = rows.length ? `<thead><tr><th>Card</th><th>For</th><th>From</th><th style="text-align:right">Balance</th><th>Status</th><th>Issued</th></tr></thead><tbody>${
+  $('#gc-table').innerHTML = rows.length ? `<thead><tr><th>Card</th><th>Type</th><th>For</th><th>From</th><th style="text-align:right">Balance</th><th>Status</th><th>Issued</th></tr></thead><tbody>${
     rows.slice(0,150).map(c=>`<tr data-id="${c.id}" style="cursor:pointer">
       <td class="code">••••${esc(c.code_hint||'????')}</td>
+      <td>${gcCatPill(c)}</td>
       <td>${esc(c.recipient_name||c.recipient_email||'—')}</td>
       <td class="muted">${esc(c.purchaser_name||c.purchaser_email||'—')}</td>
       <td style="text-align:right;font-family:'Space Grotesk';font-weight:700">${cash(c.balance_cents)}<span class="dim" style="font-weight:400"> / ${cash(c.initial_cents)}</span></td>
       <td><span class="pill ${GC_STATUS_PILL[c.status]||'manager'}">${esc(c.status||'')}</span>${c.expires_at?` <span class="dim" style="font-size:11px">exp ${shortDate2(String(c.expires_at).slice(0,10))}</span>`:''}</td>
       <td class="muted" style="white-space:nowrap">${esc(c.issued_by==='staff'?'Counter':'Online')} · ${fmtTs(c.created_at)}</td>
     </tr>`).join('')}</tbody>`
-    : emptyRow(q?'No card matches that search.':'No gift cards yet.',6);
+    : emptyRow(q||GC_CAT!=='all'?'No card matches that filter.':'No gift cards yet.',7);
   $('#gc-table').querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>{
     const c=GIFT_CARDS.find(x=>x.id===tr.dataset.id); if(c) openGiftCard(c);
   });
 }
 $('#gc-search').addEventListener('input', debounce(()=>{ if(GIFT_CARDS.length||$('#gc-search').value) renderGiftCards(); },150));
+$('#gc-cat').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  GC_CAT=b.dataset.v;
+  $('#gc-cat').querySelectorAll('button').forEach(x=>{ const on=x===b; x.classList.toggle('on',on); x.setAttribute('aria-selected',String(on)); });
+  renderGiftCards();
+});
 
 function openGiftCard(c){
   const money = can('money.write');
@@ -5931,6 +5962,8 @@ function openGiftCard(c){
     <div class="kv"><span class="k">Balance</span><span style="font-weight:700">${cash(c.balance_cents)}</span></div>
     <div class="kv"><span class="k">Originally</span><span>${cash(c.initial_cents)}</span></div>
     <div class="kv"><span class="k">Issued</span><span>${esc(c.issued_by==='staff'?'At the counter':'Bought online')} · ${fmtTs(c.created_at)}</span></div>
+    <div class="kv"><span class="k">Type</span><span>${c.issued_by==='staff' && money && 'category' in c
+      ? catChoiceHTML('gc-type', gcCat(c)) : `${gcCatPill(c)}${c.issued_by==='staff'?'':' <span class="dim">· bought online</span>'}`}</span></div>
     <div class="kv"><span class="k">Expires</span><span>${c.expires_at?fmtTs(c.expires_at):'<span class="dim">Never</span>'}</span></div>
     ${(c.recipient_name||c.recipient_email)?`<div class="kv"><span class="k">For</span><span>${esc(c.recipient_name||'')}${(c.recipient_name&&c.recipient_email)?' · ':''}${esc(c.recipient_email||'')}</span></div>`:''}
     ${(c.purchaser_name||c.purchaser_email)?`<div class="kv"><span class="k">From</span><span>${esc(c.purchaser_name||'')}${(c.purchaser_name&&c.purchaser_email)?' · ':''}${esc(c.purchaser_email||'')}</span></div>`:''}
@@ -5956,6 +5989,12 @@ function openGiftCard(c){
     : `<div class="ro-note">You do not have permission to move money on a gift card.</div>`}`;
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
+  if($('#gc-type')) wireCatChoice($('#gc-type'), async v=>{
+    if(v===gcCat(c)) return;
+    const { error } = await sb.from('gift_cards').update({ category:v }).eq('id',c.id);
+    if(error){ if(!isAuthError(error)) toast('Could not change the type: '+error.message,'err'); return; }
+    c.category=v; toast(`Marked as ${GC_CAT_LABEL[v].toLowerCase()}`,'ok'); renderGiftCards();
+  });
 
   (async()=>{
     const { data, error } = await sb.from('gift_card_transactions').select('*').eq('gift_card_id',c.id).order('created_at',{ascending:false}).limit(50);
@@ -6008,8 +6047,11 @@ $('#gc-issue').onclick=()=>{
   sheet.innerHTML=`
     <button class="sheet-close" id="x">✕</button>
     <h3>Issue a gift card</h3>
-    <div class="sub">For a card sold at the counter. The code is shown once, on the next screen — it is never stored, so write it on the card before closing.</div>
-    <div class="field" style="margin-top:14px"><label>Amount</label>
+    <div class="sub">For a card sold at the counter, or given away. The code is shown once, on the next screen — it is never stored, so write it on the card before closing.</div>
+    <div class="field" style="margin-top:14px"><label id="gi-type-l">Type</label>
+      ${catChoiceHTML('gi-type', null)}
+      <div class="dim" style="font-size:12px;margin-top:6px">Gift card: somebody paid for it. Social: given away — a contest, a promotion, a goodwill gesture.</div></div>
+    <div class="field"><label>Amount</label>
       <div class="chips" id="gi-presets">${presets.map(c=>`<span class="chip" data-c="${c}">${cash(c)}</span>`).join('')}</div></div>
     <div class="field"><label>Amount ($)</label><input class="input" id="gi-amt" type="number" min="1" step="1" placeholder="50" /></div>
     <div class="grid2">
@@ -6025,11 +6067,14 @@ $('#gc-issue').onclick=()=>{
     <button class="btn btn-primary" id="gi-save" style="width:100%;margin-top:16px">Issue card</button>`;
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
+  let giType=null;
+  wireCatChoice($('#gi-type'), v=>{ giType=v; });
   sheet.querySelectorAll('#gi-presets .chip').forEach(el=>el.onclick=()=>{
     sheet.querySelectorAll('#gi-presets .chip').forEach(x=>x.classList.remove('on'));
     el.classList.add('on'); $('#gi-amt').value=(+el.dataset.c/100);
   });
   $('#gi-save').onclick=async()=>{
+    if(!giType){ toast('Pick the type first — Gift card or Social.','err'); $('#gi-type button').focus(); return; }
     const dollars=Number($('#gi-amt').value);
     if(!isFinite(dollars) || dollars<1){ toast('Enter the amount the card is worth.','err'); return; }
     if(Math.round(dollars*100)%100!==0){ toast('Gift cards are sold in whole dollars.','err'); return; }
@@ -6049,8 +6094,15 @@ $('#gc-issue').onclick=()=>{
       message:($('#gi-msg').value||'').trim()||null,
       note:($('#gi-note').value||'').trim()||null,
       issued_by:'staff',
+      category:giType,
     };
-    const ins=await sb.from('gift_cards').insert(row).select('*').maybeSingle();
+    let ins=await sb.from('gift_cards').insert(row).select('*').maybeSingle();
+    // Before migration 0037 there is no category column: issue the card anyway, without it.
+    if(ins.error && /category/.test(ins.error.message||'')){
+      const { category, ...rest } = row;
+      ins=await sb.from('gift_cards').insert(rest).select('*').maybeSingle();
+      if(!ins.error) toast('Card issued — run migration 0037 to record Gift card / Social.','ok');
+    }
     if(ins.error){
       btn.disabled=false; btn.textContent='Issue card';
       if(isAuthError(ins.error)) return;

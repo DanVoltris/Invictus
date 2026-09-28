@@ -342,6 +342,8 @@
     recipient_name: rname, recipient_email: remail, recipient_phone: null,
     message, deliver_at: null, delivered_at: issued === 'online' ? hoursAgo(ago * 24 - 1) : null,
     issued_by: issued, stripe_session_id: null, stripe_payment_intent: null,
+    // Gift card or Social (0037): the counter card for Devon was a contest prize.
+    category: id === 'gc-2' ? 'social' : 'gift_card',
     note: id === 'gc-5' ? 'Customer says the card was lost.' : null,
     created_at: hoursAgo(ago * 24),
   }));
