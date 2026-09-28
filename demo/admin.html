@@ -4631,6 +4631,40 @@ function bookingPriceCents(b){
   for(let m=b.start_min;m<b.end_min;m+=step) c+=Math.round((rateForBay(b.bay_id,m<1440?wd:(wd+1)%7,Math.floor((m%1440)/60))||0)*100/(60/step));
   return c;
 }
+// How far a booking can be extended in its own bay: up to the next booking or cart hold, a block,
+// a closed status, or closing time — whichever comes first. In minutes.
+function extendRoom(b){
+  return runEnd(b.bay_id,b.booking_date,b.end_min,b.id,true)-b.end_min;
+}
+const EXTEND_STEPS=[[30,'+30 min'],[60,'+1 hr'],[90,'+1½ hr']];
+// Staff lengthen a customer's session. The extra time is priced at the bay's rate and collected at
+// the counter — nothing is charged to a card from here (a card hold cannot be raised after the fact).
+function extendBookingFlow(b, mins){
+  const newEnd=b.end_min+mins;
+  const extra=isLeagueRound(b) ? 0 : bookingPriceCents({ ...b, start_min:b.end_min, end_min:newEnd });
+  const pay=(SETTINGS.pay)||{}, taxPct=Number(pay.taxPct)||0, cur=pay.currency||'CAD';
+  const withTax=Math.round(extra*(1+taxPct/100));
+  const card = b.payment_state==='held'
+    ? '<br /><br />This booking is a card hold. The hold stays at the original amount — take the extra separately at the counter.'
+    : (b.amount_cents||0)>0 ? '<br /><br />The customer paid online for the original time; take the extra at the counter.' : '';
+  confirmSheet({
+    title:`Extend by ${mins<60?mins+' minutes':mins===60?'1 hour':'1½ hours'}?`,
+    body:`${esc(b.customer_name||'This booking')} · ${esc(bayName(b.bay_id))}<br />
+      <b>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}${b.end_min>1440?` (${nextDow(b.booking_date)})`:''}</b> becomes <b>${fmtMin(b.start_min)} – ${fmtMin(newEnd)}${newEnd>1440?` (${nextDow(b.booking_date)})`:''}</b>.<br /><br />
+      ${isLeagueRound(b) ? 'League round — the extra time is not priced.'
+        : `Extra time: <b>${cur} $${(withTax/100).toFixed(2)}</b>${taxPct?` (incl. ${taxPct}% tax)`:''} at this bay's rate.`}${card}`,
+    okLabel:'Extend booking',
+    onOk: async ()=>{
+      const { error } = await sb.from('bookings').update({ end_min:newEnd }).eq('id',b.id);
+      if(error){
+        if(isAuthError(error)) return;
+        toast(/overlap|exclusion|23P01/i.test((error.message||'')+(error.code||'')) ? 'Somebody has just booked that time — the booking was not extended.' : 'Could not extend: '+error.message,'err');
+        return;
+      }
+      closeSheet(); toast(`Extended to ${fmtMin(newEnd)}`,'ok'); loadSchedule();
+    },
+  });
+}
 function matchCustomer(b){
   const email=(b.customer_email||'').trim().toLowerCase(), phone=(b.customer_phone||'').trim(), name=(b.customer_name||'').trim().toLowerCase();
   return CUSTOMERS.find(c=> (email&&c.email&&c.email.trim().toLowerCase()===email) || (phone&&c.phone&&c.phone.trim()===phone) || (name&&c.name&&c.name.trim().toLowerCase()===name) );
@@ -4734,7 +4768,10 @@ function openManage(id){
       <select class="input" id="m-status">${statusOpts}</select></div>
 
     <div class="kv"><span class="k">Date</span><span>${dateLabel(b.booking_date)}</span></div>
-    <div class="kv"><span class="k">Time</span><span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}</span></div>
+    <div class="kv"><span class="k">Time</span><span>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}${b.end_min>1440?` (${nextDow(b.booking_date)})`:''}</span></div>
+    ${can('booking.write') && !isBlock && !isGroupBooking(b) ? (()=>{ const room=extendRoom(b);
+      const btns=EXTEND_STEPS.filter(([m])=>m<=room).map(([m,l])=>`<button type="button" class="btn btn-ghost btn-sm m-extend" data-m="${m}">${l}</button>`).join('');
+      return `<div class="kv"><span class="k">Extend</span><span class="row" style="gap:6px;justify-content:flex-end">${btns||'<span class="dim">The next slot in this bay is taken</span>'}</span></div>`; })() : ''}
     <div class="kv" style="border:none"><span class="k">Bay</span><span>${esc(bayName(b.bay_id))}${baySim?` <span class="dim">· ${esc(baySim)}</span>`:''}</span></div>
     ${leagueRoundFieldHTML('m-team', b.league_team_id)}
     ${seriesBlockHTML(b)}
@@ -4806,6 +4843,7 @@ function openManage(id){
   {
     const settled=()=>{ closeSheet(); fetchHolds().then(()=>{ if(ACTIVE_TAB==='holds') renderHoldsTab(); }); loadSchedule(); };
     if($('#m-charge'))  $('#m-charge').onclick =()=>chargeHoldFlow(b, settled);
+    sheet.querySelectorAll('.m-extend').forEach(btn=>btn.onclick=()=>extendBookingFlow(b, +btn.dataset.m));
     sheet.querySelectorAll('.owe-collect').forEach(btn=>btn.onclick=()=>
       leagueCollectFlow(LEAGUE_OWED.rows.find(r=>r.team.id===btn.dataset.team), ()=>{ closeSheet(); loadSchedule(); }));
     if($('#m-release')) $('#m-release').onclick=()=>releaseHoldFlow(b, settled);
