@@ -642,7 +642,7 @@
       // here, not to BAYS — BAYS is also what the sample-booking generator fills.
       id: 1, bays: [...BAYS, { id: 'HOLD', name: 'Holding Bay', holding: true, sort: 99 }],
       hours: { 0: [0, 24], 1: [0, 24], 2: [0, 24], 3: [0, 24], 4: [0, 24], 5: [0, 24], 6: [0, 24] },
-      rates: FLAT, bay_rates: {}, min_mins: 60, max_party: 4, slot_step: 30,
+      rates: FLAT, bay_rates: {}, min_mins: 60, max_party: 6, slot_step: 30,
       weekly_status: {}, online_status_label: 'Booked',
       // The hold rules lib/booking.js holdSettings() reads. cutoffDays/authWindowDays/leadDays
       // mirror HOLD_DEFAULTS there: a session more than 5 days out has its card saved instead,

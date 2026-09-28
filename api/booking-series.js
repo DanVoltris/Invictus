@@ -174,7 +174,7 @@ function readDefinition(body, settings) {
   }
 
   const players = b.players == null || b.players === '' ? null
-    : Math.min(Math.max(Math.round(Number(b.players)) || 1, 1), Math.max(1, Number(settings.maxParty) || 4) * bayIds.length);
+    : Math.min(Math.max(Math.round(Number(b.players)) || 1, 1), Math.max(1, Number(settings.maxParty) || 6) * bayIds.length);
 
   return {
     def: {

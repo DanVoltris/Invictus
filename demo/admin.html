@@ -1783,7 +1783,7 @@ function renderBays(){
       <td><input class="input bay-name" value="${esc(b.name)}" placeholder="Bay name" /></td>
       <td><select class="input bay-sim">${cats.map(c=>`<option ${b.sim===c?'selected':''}>${esc(c)}</option>`).join('')}${cats.includes(b.sim)?'':`<option selected>${esc(b.sim||'')}</option>`}</select></td>
       <td><input class="input bay-desc" value="${esc(b.description||'')}" placeholder="Shown to customers" /></td>
-      <td><input class="input bay-max" type="number" min="1" max="12" value="${b.max_players??(SETTINGS.max_party??4)}" /></td>
+      <td><input class="input bay-max" type="number" min="1" max="12" value="${b.max_players??(SETTINGS.max_party??6)}" /></td>
       <td><input class="input bay-sort" type="number" min="1" value="${b.sort??1}" /></td>
       <td style="text-align:right"><button class="icon-btn bay-del" title="Remove">✕</button></td>
     </tr>`).join('')}</tbody></table>
@@ -1795,7 +1795,7 @@ function renderBays(){
 $('#add-bay-row').onclick=()=>{
   const ids=SETTINGS.bays.map(b=>b.id);
   let n=1; while(ids.includes('B'+n)) n++;
-  SETTINGS.bays.push({id:'B'+n,name:'New Bay',sim:categoryNames()[0],description:null,max_players:SETTINGS.max_party??4,sort:realBays().length+1}); renderBays();
+  SETTINGS.bays.push({id:'B'+n,name:'New Bay',sim:categoryNames()[0],description:null,max_players:SETTINGS.max_party??6,sort:realBays().length+1}); renderBays();
 };
 $('#save-bays').onclick = async () => {
   const rows=[...document.querySelectorAll('#bays-list .bay-row')];
@@ -1855,7 +1855,7 @@ function renderRates(){
   renderBandRows();
   $('#r-note').value=((SETTINGS&&SETTINGS.rates)||{}).note||'';
   $('#r-min').value=String(SETTINGS.min_mins??60);
-  $('#r-party').value=SETTINGS.max_party??4;
+  $('#r-party').value=SETTINGS.max_party??6;
   syncSelects($('#tab-prices'));
 }
 $('#save-prices').onclick = async () => {
