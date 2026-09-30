@@ -5,6 +5,8 @@
 //   POST ?action=status  {}                          -> { [userId]: { pending, lastSignIn, phone } } for the Staff tab
 //   POST ?action=claim   { token, email?, password } -> the texted link's own screen: they type their email
 //                                                       (first time) and a password; no login needed
+//   POST ?action=forgot  { phone }                   -> the login page's "Forgot password?": texts a reset
+//                                                       link to that mobile if it is an active staff login's
 //   POST ?action=needs-setup {}                      -> { setup: true } while nobody is an admin
 //   POST ?action=setup   { name, email, password }   -> creates the first admin; refused once one exists
 //
@@ -68,6 +70,7 @@ export default async function handler(req, res) {
     if (action === 'needs-setup') return await needsSetup(res, db);
     if (action === 'setup') return await setup(req, res, db);
     if (action === 'claim') return await claim(req, res, db);
+    if (action === 'forgot') return await forgot(req, res, db);
 
     const ctx = await staffContext(req.headers.authorization, 'staff.manage');
     if (ctx.error === 'unauthorized') return json(res, 401, { error: 'Your session has ended. Sign in again.' });
@@ -128,7 +131,7 @@ async function setup(req, res, db) {
 // A new secret for this login, stored only as a hash with its expiry, and the link that carries it.
 async function newLink(req, db, user, kind) {
   const secret = crypto.randomBytes(24).toString('base64url');
-  const meta = { ...(user.user_metadata || {}), staff_invite: { hash: sha(secret), expires: new Date(Date.now() + LINK_DAYS * 864e5).toISOString() } };
+  const meta = { ...(user.user_metadata || {}), staff_invite: { hash: sha(secret), expires: new Date(Date.now() + LINK_DAYS * 864e5).toISOString(), sentAt: new Date().toISOString() } };
   const upd = await db.auth.admin.updateUserById(user.id, { user_metadata: meta });
   if (upd.error) return { error: upd.error.message };
   const base = portalUrl(req);
@@ -203,6 +206,31 @@ async function resend(req, res, db) {
   return json(res, 200, { ok: true, kind, ...sent });
 }
 
+// ---- forgot: "Forgot password?" on the staff login ---------------------------------------------
+// No login needed — that is the point. The same answer whatever the number, so the page cannot be
+// used to find out who works here, and at most one text a minute per login, so it cannot be used
+// to flood someone's phone. The link is the one "Send reset link" makes: it works once, for 7 days.
+const FORGOT_GAP_MS = 60 * 1000;
+async function forgot(req, res, db) {
+  const phone = mobileE164((req.body || {}).phone);
+  if (!phone) return json(res, 400, { error: 'Enter your mobile number with the area code, e.g. 204-555-0123.' });
+  const same = { ok: true, message: 'If that number belongs to a staff login, a text with a link to choose a new password is on its way. The link works once, for 7 days.' };
+  const { data: rows, error } = await db.from('staff').select('user_id,role,is_active');
+  if (error) { console.error('staff forgot:', error.message); return json(res, 200, same); }
+  for (const row of rows || []) {
+    if (row.is_active === false) continue;
+    const got = await db.auth.admin.getUserById(row.user_id);
+    const u = got && got.data && got.data.user;
+    if (!u || mobileE164(u.user_metadata && u.user_metadata.phone) !== phone) continue;
+    const last = u.user_metadata.staff_invite && Date.parse(u.user_metadata.staff_invite.sentAt);
+    if (last && Date.now() - last < FORGOT_GAP_MS) break;
+    const sent = await textLink({ req, db, user: u, role: row.role, kind: isPending(u.email) ? 'invite' : 'reset' });
+    if (!sent.texted) console.warn(`staff forgot: no text for ${u.id} — ${sent.error || sent.textError}`);
+    break;
+  }
+  return json(res, 200, same);
+}
+
 // ---- claim: the screen the texted link opens ---------------------------------------------------
 async function claim(req, res, db) {
   const b = req.body || {};
@@ -231,9 +259,15 @@ async function claim(req, res, db) {
   const { staff_invite: _used, ...meta } = u.user_metadata || {};
   const upd = await db.auth.admin.updateUserById(userId, { ...(first ? { email, email_confirm: true } : {}), password, user_metadata: meta });
   if (upd.error) {
-    return exists(upd.error)
-      ? json(res, 409, { error: 'That email already has a login here. Use a different one, or ask an admin.' })
-      : json(res, 400, { error: `Could not finish setting up: ${upd.error.message}` });
+    if (exists(upd.error)) {
+      // Staff and customer logins stay separate (My Account refuses staff logins), so a customer's
+      // own email cannot become their staff login too.
+      const { data: cust } = await db.from('customers').select('id').ilike('email', email).not('user_id', 'is', null).limit(1);
+      return json(res, 409, { error: cust && cust.length
+        ? 'That email is already your My Account login. Use a different email for your staff login — the two stay separate.'
+        : 'That email already has a login here. Use a different one, or ask an admin.' });
+    }
+    return json(res, 400, { error: `Could not finish setting up: ${upd.error.message}` });
   }
   if (first) await upsertStaff({ userId, email, name: row.name, role: row.role, isActive: row.is_active !== false, note: row.note });
   return json(res, 200, { ok: true, email, first });

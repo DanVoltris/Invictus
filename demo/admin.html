@@ -684,6 +684,12 @@
     <div class="err" id="login-err"></div>
     <div class="note" id="login-note"></div>
     <a href="#" class="forgot" id="login-forgot">Forgot password?</a>
+    <div id="forgot-box" class="hidden" style="margin-top:14px">
+      <div class="sub" style="margin-bottom:8px">Enter the mobile number on your staff login and we will text you a link to choose a new password.</div>
+      <input class="input" id="forgot-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="Mobile, e.g. 204-555-0123" />
+      <button class="btn btn-ghost" id="forgot-btn" style="width:100%;margin-top:10px">Text me a reset link</button>
+      <div class="err" id="forgot-err"></div>
+    </div>
   </div>
 </div>
 
@@ -1688,8 +1694,24 @@ $('#setpw-2').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#setpw-btn
 $('#login-forgot').onclick = (e) => {
   e.preventDefault();
   $('#login-err').textContent='';
-  $('#login-note').textContent='Ask an admin to press "Send reset link" next to your name in Staff & Roles — you\'ll get a text with a link to choose a new password.';
+  $('#login-note').textContent='';
+  $('#forgot-box').classList.remove('hidden');
+  $('#forgot-phone').focus();
 };
+$('#forgot-btn').onclick = async () => {
+  const phone=($('#forgot-phone').value||'').trim(), btn=$('#forgot-btn');
+  $('#forgot-err').textContent='';
+  if(phone.replace(/\D/g,'').length<10){ $('#forgot-err').textContent='Enter your mobile number with the area code.'; return; }
+  btn.disabled=true; btn.textContent='Sending…';
+  let r;
+  try{ r=await (await fetch('/api/staff?action=forgot',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ phone }) })).json(); }
+  catch(e){ r={ error:'Could not reach the server — check the connection and try again.' }; }
+  btn.disabled=false; btn.textContent='Text me a reset link';
+  if(!r || !r.ok){ $('#forgot-err').textContent=(r&&r.error)||'That did not work — try again.'; return; }
+  $('#forgot-box').classList.add('hidden');
+  $('#login-note').textContent=r.message+' No text? Your number may not be on your login — ask an admin to press "Send reset link" next to your name in Staff & Roles.';
+};
+$('#forgot-phone').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#forgot-btn').click(); });
 
 let CLAIM_TOKEN = null;
 function showClaim(token, reset){
@@ -1727,8 +1749,25 @@ $('#chpw-btn').onclick = () => {
     <div class="field" style="margin-top:14px"><label>New password</label><input class="input" id="cp-1" type="password" autocomplete="new-password" placeholder="At least 8 characters" /></div>
     <div class="field" style="margin-bottom:0"><label>Type it again</label><input class="input" id="cp-2" type="password" autocomplete="new-password" /></div>
     <div class="err" id="cp-err"></div>
-    <button class="btn btn-primary" id="cp-save" style="width:100%;margin-top:14px">Save password</button>`;
+    <button class="btn btn-primary" id="cp-save" style="width:100%;margin-top:14px">Save password</button>
+    <div class="sec-h" style="margin-top:22px">Mobile for password resets</div>
+    <div class="sub" style="margin-bottom:8px">"Forgot password?" on the sign-in page texts a reset link here.</div>
+    <input class="input" id="cp-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="Mobile, e.g. 204-555-0123" />
+    <div class="err" id="cp-phone-err"></div>
+    <button class="btn btn-ghost" id="cp-phone-save" style="width:100%;margin-top:10px">Save mobile</button>`;
   overlay.classList.add('show');
+  sb.auth.getUser().then(({ data })=>{ const p=data&&data.user&&data.user.user_metadata&&data.user.user_metadata.phone; if(p && $('#cp-phone')) $('#cp-phone').value=p; });
+  $('#cp-phone-save').onclick=async()=>{
+    const raw=($('#cp-phone').value||'').trim(), d=raw.replace(/\D/g,'');
+    const phone = d.length===10 ? '+1'+d : (d.length===11 && d[0]==='1') ? '+'+d : (raw.startsWith('+') && d.length>=8 && d.length<=15) ? '+'+d : null;
+    $('#cp-phone-err').textContent = phone ? '' : 'Enter your mobile number with the area code, e.g. 204-555-0123.';
+    if(!phone) return;
+    const btn=$('#cp-phone-save'); btn.disabled=true; btn.textContent='Saving…';
+    const { error } = await sb.auth.updateUser({ data:{ phone } });
+    btn.disabled=false; btn.textContent='Save mobile';
+    if(error){ if(!isAuthError(error)) $('#cp-phone-err').textContent=error.message; return; }
+    toast('Mobile saved — reset links will be texted to '+phone,'ok');
+  };
   $('#x').onclick=closeSheet;
   $('#cp-1').focus();
   $('#cp-save').onclick=async()=>{

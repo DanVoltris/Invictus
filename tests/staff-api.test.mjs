@@ -38,9 +38,11 @@ function fakeDb() {
       resetPasswordForEmail: async (email) => { call('reset', email); return {}; },
     },
     // select() alone = the status list; .eq(...).eq(...).limit() = "is there an active admin?"
-    from: () => ({ select: () => {
-      const q = { eq: () => { q.filtered = true; return q; }, limit: () => q,
-        then: (ok, bad) => Promise.resolve(q.filtered ? { data: S.admins, error: S.staffErr } : { data: S.staffRows, error: null }).then(ok, bad) };
+    // customers + ilike/not = "is this email somebody's My Account login?" (claim's 409 wording)
+    from: (table) => ({ select: () => {
+      const q = { eq: () => { q.filtered = true; return q; }, ilike: () => q, not: () => q, limit: () => q,
+        then: (ok, bad) => Promise.resolve(table === 'customers' ? { data: S.customerLogins || [], error: null }
+          : q.filtered ? { data: S.admins, error: S.staffErr } : { data: S.staffRows, error: null }).then(ok, bad) };
       return q; } }),
   };
 }
@@ -195,6 +197,17 @@ test('claim: an email somebody else already signs in with -> 409, and the link s
   assert.equal((await run('claim', { token, email: 'justin@shop.ca', password: 'longenough' })).code, 200);
 });
 
+test('claim: a customer\'s own My Account email is refused with the reason, not a vague "taken"', async () => {
+  const token = await invited();
+  S.updErr = { code: 'email_exists', message: 'A user with this email address has already been registered' };
+  S.customerLogins = [{ id: 'c-1' }];
+  try {
+    const r = await run('claim', { token, email: 'golfer@home.ca', password: 'longenough' });
+    assert.equal(r.code, 409);
+    assert.match(r.out.error, /already your My Account login/);
+  } finally { S.updErr = null; S.customerLogins = null; }
+});
+
 test('claim: a suspended staff member cannot use an old link', async () => {
   const token = await invited();
   S.staffById.NEW.is_active = false;
@@ -277,4 +290,49 @@ test('setup: email already has a login -> 409; staff row fails -> login deleted'
   reset({ upsert: () => ({ error: 'boom' }), create: { data: { user: { id: 'FIRST' } } } });
   assert.equal((await run('setup', { email: 'a@b.co', password: 'longenough' })).code, 500);
   assert.deepEqual(S.calls.find((x) => x[0] === 'deleteUser'), ['deleteUser', 'FIRST']);
+});
+
+// ---- "Forgot password?" on the staff login: no login needed, texted, never tells who is staff ----
+function staffWithPhone(id, phone, over = {}) {
+  S.users[id] = { id, email: `${id.toLowerCase()}@shop.ca`, user_metadata: { name: id, phone } };
+  const row = { user_id: id, name: id, role: 'employee', is_active: true, ...over };
+  S.staffRows.push(row);
+  S.staffById[id] = row;
+}
+
+test('forgot: a staff mobile gets a texted reset link that then works, with no login', async () => {
+  reset();
+  staffWithPhone('ANA', '+12045550111');
+  const r = await run('forgot', { phone: '(204) 555-0111' });
+  assert.equal(r.code, 200);
+  assert.match(r.out.message, /If that number belongs to a staff login/);
+  const link = lastText().link;
+  assert.match(link, /staff-reset=/, 'a finished login gets a password-only link');
+  const claimed = await run('claim', { token: tokenFrom(link), password: 'a-new-password' });
+  assert.equal(claimed.code, 200, JSON.stringify(claimed.out));
+  assert.equal(S.users.ANA.password, 'a-new-password');
+  neverEmailed();
+});
+
+test('forgot: an unknown or suspended number gets the SAME answer and no text', async () => {
+  reset();
+  staffWithPhone('ANA', '+12045550111');
+  staffWithPhone('GONE', '+12045550222', { is_active: false });
+  const known = await run('forgot', { phone: '204-555-0111' });
+  S.calls = [];
+  const stranger = await run('forgot', { phone: '204-555-0999' });
+  const suspended = await run('forgot', { phone: '204-555-0222' });
+  assert.deepEqual(stranger.out, known.out, 'nobody can use the page to find out who works here');
+  assert.deepEqual(suspended.out, known.out);
+  assert.ok(!names().includes('text'), 'no text to a stranger or a suspended login');
+});
+
+test('forgot: at most one text a minute per login, and a bad number is asked for again', async () => {
+  reset();
+  staffWithPhone('ANA', '+12045550111');
+  await run('forgot', { phone: '204-555-0111' });
+  await run('forgot', { phone: '204-555-0111' });
+  assert.equal(S.calls.filter((c) => c[0] === 'text').length, 1);
+  const bad = await run('forgot', { phone: '555' });
+  assert.equal(bad.code, 400);
 });
