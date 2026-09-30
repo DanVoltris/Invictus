@@ -197,6 +197,9 @@ async function verify(req, res, db) {
     // Enough to prefill the sign-in box; never the whole address for an account they cannot open.
     emailHint: hasAccount && cust.email ? maskEmail(cust.email) : null,
     knownCustomer: !!cust,       // a shop record exists, but nobody has claimed it yet
+    // The email on that unclaimed record, so sign-up can fill it in and lock it. Only ever sent to
+    // somebody who has just proven they hold the phone on the record.
+    knownEmail: !hasAccount && cust && cust.email ? cust.email : null,
     name: cust ? cust.name : null,
   });
 }
@@ -253,6 +256,13 @@ async function register(req, res, db) {
   if (!v || v.used_at || Date.parse(v.expires_at) < Date.now()) {
     return json(res, 400, { error: 'That verification has expired. Start again with your phone number.' });
   }
+  // Staff keep a separate login for the manager portal. Their staff email cannot also be a customer
+  // login, so say which email to use — before the text code is spent, so they can just retype it.
+  const { data: staffHit } = await db.from('staff').select('user_id').ilike('email', email).limit(1);
+  if (staffHit && staffHit.length) {
+    return json(res, 409, { code: 'staff_email',
+      error: 'That email is your staff login for the manager portal. Use a personal email for My Account — the two stay separate.' });
+  }
   // Spend the proof before doing anything else, so a replay cannot create a second account.
   const { data: spent } = await db.from('phone_verifications')
     .update({ used_at: new Date().toISOString() })
@@ -282,7 +292,9 @@ async function register(req, res, db) {
   let customerId = existing ? existing.id : null;
   if (existing) {
     const { error } = await db.from('customers')
-      .update({ user_id: userId, email: existing.email || email, account_created_at: new Date().toISOString() })
+      // The record takes the email they sign in with — normally the one already on it (sign-up fills
+      // it in), and if they chose another, the record follows so the two never disagree.
+      .update({ user_id: userId, email, account_created_at: new Date().toISOString() })
       .eq('id', existing.id);
     if (error) {
       await db.auth.admin.deleteUser(userId);   // do not leave an orphan login behind

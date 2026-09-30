@@ -43,6 +43,10 @@ function builder(table) {
 mock.module(ROOT + 'node_modules/@supabase/supabase-js/dist/index.mjs', { namedExports: {
   createClient: () => ({ from: (t) => builder(t), rpc: async () => ({ data: null, error: null }), auth: { admin: {
     updateUserById: async (id, o) => { S.pw = { id, ...o }; return { data: { user: { id, email: 'sam@shop.ca' } }, error: null }; },
+    createUser: async (o) => (S.takenEmails || []).includes(o.email)
+      ? { data: null, error: { message: 'A user with this email address has already been registered' } }
+      : { data: { user: { id: 'NEWUSER', email: o.email } }, error: null },
+    deleteUser: async () => ({}),
   } } }),
 } });
 
@@ -136,6 +140,65 @@ test('forgotten password on a number with no account: told to create one, nothin
   const r = await act('reset', { token: v.out.token, password: 'a-new-password' });
   assert.equal(r.code, 404); assert.match(r.out.error, /create one/);
   assert.equal(S.pw, null);
+});
+
+// The live bug: imported history has an unlinked copy of the same customer (same phone), and it
+// came back first — so a real account holder was told "no account on that number".
+test('forgotten password with a duplicate imported record: the one with the login wins', async () => {
+  world();
+  S.db.customers = [
+    { id: 'OLD', name: 'Murad', phone: '204-990-6530', email: 'old@import.ca', user_id: null },
+    { id: 'MINE', name: 'Murad', phone: '(204) 990-6530', email: 'murad@home.ca', user_id: 'U9' },
+  ];
+  S.db.phone_verifications = []; S.db.phone_attempts = []; S.pw = null;
+  await start('204-990-6530');
+  const v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
+  assert.equal(v.out.hasAccount, true, 'the linked record is found, not the imported copy');
+  const r = await act('reset', { token: v.out.token, password: 'a-new-password' });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(S.pw.id, 'U9');
+});
+
+test('signing up for My Account with a staff email: told to use a personal one, text code not spent', async () => {
+  world();
+  S.db.customers = []; S.db.phone_verifications = []; S.db.phone_attempts = [];
+  S.db.staff = [{ user_id: 'S1', email: 'coach@invictus.ca', role: 'employee' }];
+  await start('204-990-6530');
+  const v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
+  const r = await act('register', { token: v.out.token, email: 'coach@invictus.ca', password: 'longenough' });
+  assert.equal(r.code, 409);
+  assert.equal(r.out.code, 'staff_email');
+  assert.match(r.out.error, /staff login .* personal email/);
+  assert.ok(S.db.phone_verifications.every((x) => !x.used_at), 'they can retype a different email without a new code');
+});
+
+test('sign-up fills in the email on file for an unclaimed record — and never reveals a claimed one', async () => {
+  world();
+  S.db.phone_verifications = []; S.db.phone_attempts = [];
+  S.db.customers = [{ id: 'C1', name: 'Murad', phone: '204-990-6530', email: 'murad@home.ca', user_id: null }];
+  await start('204-990-6530');
+  let v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
+  assert.equal(v.out.knownEmail, 'murad@home.ca');
+
+  world();
+  S.db.phone_verifications = []; S.db.phone_attempts = [];
+  S.db.customers = [{ id: 'C1', name: 'Murad', phone: '204-990-6530', email: 'murad@home.ca', user_id: 'U1' }];
+  await start('204-990-6530');
+  v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
+  assert.equal(v.out.knownEmail, null, 'a claimed account only ever gets the masked hint');
+  assert.match(v.out.emailHint, /•/);
+});
+
+test('sign-up with a different email than the one on file: the record follows the login', async () => {
+  world();
+  S.db.phone_verifications = []; S.db.phone_attempts = []; S.takenEmails = [];
+  S.db.customers = [{ id: 'C1', name: 'Murad', phone: '204-990-6530', email: 'old@import.ca', user_id: null }];
+  await start('204-990-6530');
+  const v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
+  const r = await act('register', { token: v.out.token, email: 'murad@home.ca', password: 'longenough', name: 'Murad' });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(S.db.customers[0].user_id, 'NEWUSER');
+  assert.equal(S.db.customers[0].email, 'murad@home.ca');
 });
 
 test('a reset needs the texted proof and a real password', async () => {
