@@ -62,6 +62,7 @@ mock.module(url('lib', 'db.js'), { namedExports: {
   bookingByPaymentIntent: async () => null,
   // Saved-card holds (migration 0035) — owned by tests/holds.test.mjs, not exercised here.
   dueDeferredHolds: async () => ({ rows: [] }),
+  openHoldsUpTo: async () => ({ rows: [] }),
   bookingExistsForSetupIntent: async () => false,
   rememberStripeCustomer: async () => {},
 } });

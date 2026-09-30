@@ -170,6 +170,26 @@ test('checkout: neither a typed phone nor a real session attaches a Stripe Custo
   assert.equal(S.db.customers[0].stripe_customer_id, 'cus_murad', 'the retired column is left exactly as it was');
 });
 
+// HOLD_AMOUNT_CHANGES=on (the owner's switch, lib/booking.js holdChangesEnabled): a hold keeps the
+// card it was placed on — the contact's existing Customer when there is one — so staff can change
+// its amount, and the customer is told so before they confirm. Still no Customer Session.
+test('switch on: a hold keeps the card on the linked Customer and says so; still no Customer Session', async () => {
+  process.env.HOLD_AMOUNT_CHANGES = 'on';
+  try {
+    world();
+    const r = await run(createPI, { body: { ...slot(), phone: '(204) 990-6530', email: 'murad@voltrisai.com' } });
+    assert.equal(r.code, 200, JSON.stringify(r.out));
+    const pi = S.stripe.find((c) => c[0] === 'paymentIntents.create')[1];
+    assert.equal(pi.customer, 'cus_murad');
+    assert.equal(pi.setup_future_usage, 'off_session');
+    assert.match(r.out.payment.message, /kept on file for this booking only/);
+    assert.ok(!names().includes('customerSessions.create'));
+    assert.ok(!names().includes('customers.create'), 'no second Stripe Customer for a regular');
+  } finally {
+    delete process.env.HOLD_AMOUNT_CHANGES;
+  }
+});
+
 // Apple Pay and Google Pay come from automatic_payment_methods on the PaymentIntent. They never
 // depended on the Customer Session, so removing it must not change this line.
 test('wallets survive: automatic_payment_methods on, no payment_method_types, signed in or out', async () => {

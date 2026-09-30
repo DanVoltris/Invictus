@@ -1,10 +1,10 @@
 import {
   normalizeSettings, bayName, fmtMin, winnipegTodayISO, quoteGroup, SERIES_FREQS,
   overrideEffects, overrideConflicts, weeklyStatusConflicts, stripeStatus, stripeClient,
-  hoursUntilBooking,
+  hoursUntilBooking, holdChangesEnabled,
 } from '../lib/booking.js';
 import { issueRefund } from '../lib/refunds.js';
-import { captureHold, releaseHold as releaseAuthorisation, holdView, placeDueHolds } from '../lib/holds.js';
+import { captureHold, releaseHold as releaseAuthorisation, holdView, placeDueHolds, adjustHold, releaseOverdueHolds, AUTO_RELEASE_HOURS } from '../lib/holds.js';
 import {
   getSettings, getOverridesForDate, staffContext,
   createSeries, seriesById, updateSeries, seriesNeedingHorizon, seriesOccurrences, seriesDatesPreview,
@@ -22,6 +22,8 @@ import {
 //   end       POST   stop a recurrence: cancel what is still ahead, leave the past alone
 //   move      POST   put one occurrence somewhere else without breaking the recurrence
 //   refund    POST   actually send money back through Stripe, for ONE booking (see below)
+//   adjust-hold      POST  raise or lower a card hold (money.write)
+//   release-overdue  POST  let go of holds nobody dealt with, 5h after the session (any staff login)
 //
 // WHY `refund` LIVES HERE AND NOT IN A FILE OF ITS OWN. Two reasons, and the second is the real
 // one. Vercel's Hobby plan allows 12 Serverless Functions and api/ holds exactly 12 — a thirteenth
@@ -77,6 +79,8 @@ export default async function handler(req, res) {
   if (action === 'refund') return refund(req, res);
   if (action === 'capture') return capture(req, res);
   if (action === 'release') return release(req, res);
+  if (action === 'adjust-hold') return adjustHoldAction(req, res);
+  if (action === 'release-overdue') return releaseOverdue(req, res);
   if (action === 'place-holds') return placeHolds(req, res);
   if (action === 'league-collect') return leagueCollect(req, res);
   return res.status(400).json({ ok: false, error: 'Unknown action' });
@@ -777,6 +781,51 @@ async function release(req, res) {
   });
 }
 
+// Raise or lower a hold. money.write: it asks the customer's card for a different amount.
+async function adjustHoldAction(req, res) {
+  const who = await staff(req, res, 'money.write');
+  if (!who) return;
+  const b = req.body || {};
+  const bookingId = String(b.bookingId || b.id || '');
+  if (!isUuid(bookingId)) return res.status(400).json({ ok: false, error: 'Which booking? Send a bookingId.' });
+  const amountCents = Math.round(Number(b.amountCents));
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    return res.status(400).json({ ok: false, error: 'Enter the new hold amount, greater than zero.' });
+  }
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) {
+    return res.status(503).json({ ok: false, code: 'stripe_off',
+      error: 'Stripe is not configured on this deployment, so no hold can be changed. Set STRIPE_SECRET_KEY and try again.' });
+  }
+  const out = await adjustHold({
+    stripe: stripeClient(process.env), bookingId, amountCents,
+    ref: b.ref ? String(b.ref) : null,
+    allowRehold: holdChangesEnabled(process.env),
+    reason: b.reason ? String(b.reason).slice(0, 120) : null,
+    by: (who.user && who.user.email) || (who.staff && who.staff.email) || 'manager',
+  });
+  if (!out.ok) {
+    return res.status(out.code || 400).json({ ok: false, code: out.reason, error: out.error,
+      paymentState: out.paymentState, authorizedCents: out.authorizedCents });
+  }
+  return res.status(200).json({ ok: true, already: !!out.already, paymentState: out.paymentState,
+    authorizedCents: out.authorizedCents, previousCents: out.previousCents, holdExpiresAt: out.holdExpiresAt,
+    message: out.message });
+}
+
+// Let go of every hold still open AUTO_RELEASE_HOURS after its session ended. Any staff login may
+// ask — it takes no input, and the rule it applies is the owner's, decided here on the server. The
+// portal's 2-minute refresh calls it; the daily cron below runs it too.
+async function releaseOverdue(req, res) {
+  if (!(await staff(req, res))) return;
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) return res.status(200).json({ ok: true, released: 0, skipped: 'stripe_off' });
+  const out = await releaseOverdueHolds({ stripe: stripeClient(process.env) });
+  if (out.error) return res.status(500).json({ ok: false, error: out.error });
+  if (out.released || out.failed) console.log(`release-overdue: ${out.released} released · ${out.failed} failed`);
+  return res.status(200).json({ ok: true, hours: AUTO_RELEASE_HOURS, ...out });
+}
+
 // ⚠ THE LIST THAT STOPS HOLDS FROM QUIETLY EXPIRING.
 //
 // Staff chose MANUAL capture, so nothing captures a hold unless a person does. A hold nobody
@@ -860,7 +909,10 @@ async function placeHolds(req, res) {
   }
   if (out.error) return res.status(500).json({ ok: false, error: out.error });
   console.log(`place-holds: ${out.busy ? 'already running' : `${out.due} due · ${out.held} held · ${out.declined} declined · ${out.retry} to retry`}`);
-  return res.status(200).json({ ok: true, ...out });
+  // The same daily run is the backstop for auto-release, for days no staff screen was open.
+  const overdue = await releaseOverdueHolds({ stripe: stripeClient(process.env) });
+  if (overdue.released || overdue.failed) console.log(`place-holds: auto-released ${overdue.released} · ${overdue.failed} failed`);
+  return res.status(200).json({ ok: true, ...out, autoReleased: overdue.released || 0 });
 }
 
 // ----- league-collect: staff took a captain's money for unpaid seats (migration 0036) ---------

@@ -224,7 +224,7 @@ const { createPaymentIntent: createPI, confirmBooking } = await import(url('api'
 const { default: seriesApi } = await import(url('api', 'booking-series.js'));
 const { default: bookingApi } = await import(url('api', 'booking.js'));
 const { default: webhookApi } = await import(url('api', 'webhook.js'));
-const { placeDueHolds, retrieveCheckoutIntent } = await import(url('lib', 'holds.js'));
+const { placeDueHolds, retrieveCheckoutIntent, releaseOverdueHolds, paymentPatchFor } = await import(url('lib', 'holds.js'));
 
 // ---------------------------------------------------------------------------------------------
 // World
@@ -304,6 +304,9 @@ const fire = (event) => {
 };
 
 beforeEach(() => world());
+// Changing a hold's amount ships switched off (lib/booking.js holdChangesEnabled); tests turn it on.
+beforeEach(() => { delete process.env.HOLD_AMOUNT_CHANGES; });
+const changesOn = () => { process.env.HOLD_AMOUNT_CHANGES = 'on'; };
 
 // =============================================================================================
 // 1. The decision: hold or charge
@@ -1162,4 +1165,207 @@ test('gift cards and promos can read a saved-card checkout: its amount comes fro
   assert.equal(i.metadata.bayId, 'B1');
   // …and a PaymentIntent id still goes where it always went.
   assert.equal((await retrieveCheckoutIntent(new FakeStripe(), 'pi_held')).id, 'pi_held');
+});
+
+// =============================================================================================
+// 10. Changing a hold's amount, and letting go of holds nobody dealt with
+// =============================================================================================
+//
+// A bank will not edit an authorisation. Raising or lowering one means a NEW hold on the card kept
+// for the booking, and only once the bank says yes is the old one let go. And a hold still open 5
+// hours after its session ended is released — the owner's rule — so nothing lingers.
+
+const keepCard = () => Object.assign(booking(HELD), { stripe_customer: 'cus_h', stripe_payment_method: 'pm_h' });
+
+test('a checkout hold that kept the card records it on the booking; one that did not, does not', () => {
+  const kept = paymentPatchFor({ pi: { status: 'requires_capture', amount: 2500, amount_capturable: 2500,
+    setup_future_usage: 'off_session', customer: 'cus_k', payment_method: { id: 'pm_k' }, metadata: {} } });
+  assert.equal(kept.stripe_customer, 'cus_k');
+  assert.equal(kept.stripe_payment_method, 'pm_k');
+  const plain = paymentPatchFor({ pi: { status: 'requires_capture', amount: 2500, amount_capturable: 2500, metadata: {} } });
+  assert.equal('stripe_customer' in plain, false, 'no card columns written for a hold that kept no card');
+});
+
+test('raising a hold: a new hold on the kept card first, then the old one is let go', async () => {
+  changesOn();
+  keepCard();
+  const r = await staffPost('tok-admin', 'adjust-hold', { bookingId: HELD, amountCents: 3500, ref: 'press-1' });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.authorizedCents, 3500);
+  assert.equal(r.out.previousCents, 2500);
+  const [, p, opts] = calls('paymentIntents.create')[0];
+  assert.equal(p.amount, 3500);
+  assert.equal(p.capture_method, 'manual');
+  assert.equal(p.off_session, true);
+  assert.equal(p.confirm, true);
+  assert.equal(p.customer, 'cus_h');
+  assert.equal(p.payment_method, 'pm_h');
+  assert.equal(p.metadata.deferredBookingId, HELD, 'the webhook must update this booking, never write a new one');
+  assert.equal(p.metadata.dateISO, undefined);
+  assert.match(opts.idempotencyKey, /press-1$/);
+  const row = booking(HELD);
+  assert.notEqual(row.stripe_payment_intent, 'pi_held');
+  assert.equal(row.authorized_cents, 3500);
+  assert.equal(row.payment_state, 'held');
+  assert.deepEqual(calls('paymentIntents.cancel').map((c) => c[1]), ['pi_held'], 'only the old hold is let go');
+});
+
+test('lowering a hold works the same way, and the new hold is what gets charged and released', async () => {
+  changesOn();
+  keepCard();
+  const r = await staffPost('tok-admin', 'adjust-hold', { bookingId: HELD, amountCents: 1500, ref: 'press-2' });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  const newPI = booking(HELD).stripe_payment_intent;
+  assert.equal(booking(HELD).authorized_cents, 1500);
+
+  const c = await staffPost('tok-admin', 'capture', { bookingId: HELD });
+  assert.equal(c.code, 200, JSON.stringify(c.out));
+  const [, id, params, opts] = calls('paymentIntents.capture')[0];
+  assert.equal(id, newPI);
+  assert.equal(params.amount_to_capture, 1500);
+  assert.ok(opts.idempotencyKey.includes(newPI), 'the capture key names the PaymentIntent, so it cannot collide with the old one');
+  assert.deepEqual(calls('paymentMethods.detach').map((x) => x[1]), ['pm_h'], 'the kept card is removed once charged');
+});
+
+test('a declined raise keeps the original hold exactly as it was', async () => {
+  changesOn();
+  keepCard();
+  S.createThrows = declined();
+  const r = await staffPost('tok-admin', 'adjust-hold', { bookingId: HELD, amountCents: 9000, ref: 'press-3' });
+  assert.equal(r.code, 402);
+  assert.match(r.out.error, /original \$25\.00 hold is still in place/);
+  assert.equal(booking(HELD).stripe_payment_intent, 'pi_held');
+  assert.equal(booking(HELD).authorized_cents, 2500);
+  assert.ok(!calls('paymentIntents.cancel').some((c) => c[1] === 'pi_held'), 'the old hold is not touched');
+});
+
+test('a hold placed before cards were kept: lowering says what to charge, raising says what to take at the counter', async () => {
+  changesOn();
+  const lower = await staffPost('tok-admin', 'adjust-hold', { bookingId: HELD, amountCents: 1500, ref: 'a' });
+  assert.equal(lower.code, 409);
+  assert.equal(lower.out.code, 'no_saved_card');
+  assert.match(lower.out.error, /enter \$15\.00 instead of the full \$25\.00/);
+  const raise = await staffPost('tok-admin', 'adjust-hold', { bookingId: HELD, amountCents: 3000, ref: 'b' });
+  assert.match(raise.out.error, /take the extra \$5\.00 at the counter/);
+  assert.equal(S.stripe.length, 0, 'nothing reached Stripe');
+});
+
+test('if the hold is charged by someone else mid-change, the new hold is let go and nothing changes', async () => {
+  changesOn();
+  keepCard();
+  // Another computer captures the old hold while the bank is answering this one.
+  S.beforeCreate = async () => { Object.assign(booking(HELD), { payment_state: 'paid', amount_cents: 2500 }); };
+  const r = await staffPost('tok-admin', 'adjust-hold', { bookingId: HELD, amountCents: 3500, ref: 'race' });
+  assert.equal(r.code, 409);
+  assert.equal(r.out.code, 'changed');
+  const placed = calls('paymentIntents.create')[0];
+  assert.ok(placed, 'a new hold was placed…');
+  assert.ok(calls('paymentIntents.cancel').length === 1 && calls('paymentIntents.cancel')[0][1] !== 'pi_held',
+    '…and it, not the charged one, was let go');
+  assert.equal(booking(HELD).stripe_payment_intent, 'pi_held');
+});
+
+test('switched off: a hold on a card is not changed and nothing reaches Stripe', async () => {
+  keepCard();
+  const r = await staffPost('tok-admin', 'adjust-hold', { bookingId: HELD, amountCents: 1500, ref: 'off' });
+  assert.equal(r.code, 409);
+  assert.equal(r.out.code, 'off');
+  assert.match(r.out.error, /enter the lower amount when you charge it/);
+  assert.equal(S.stripe.length, 0);
+  assert.equal(booking(HELD).authorized_cents, 2500);
+});
+
+test('switched off: config tells the portal, and a checkout hold keeps no card', async () => {
+  const { config } = await import(url('api', 'public.js'));
+  const off = await call(config, { method: 'GET' });
+  assert.equal(off.out.holdChanges, false);
+  const r = await call(createPI, { body: { dateISO: dayAhead(2), bayId: 'B1', startMin: 900, endMin: 960, party: 1 } });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.paymentMode, 'hold');
+  const [, pi] = calls('paymentIntents.create')[0];
+  assert.equal(pi.customer, undefined);
+  assert.equal(pi.setup_future_usage, undefined);
+  assert.doesNotMatch(r.out.payment.message, /kept on file/);
+  changesOn();
+  assert.equal((await call(config, { method: 'GET' })).out.holdChanges, true);
+});
+
+test('a saved card with no hold yet only changes the amount the hold will be placed for (even switched off)', async () => {
+  savedBooking();
+  const r = await staffPost('tok-admin', 'adjust-hold', { bookingId: SAVED, amountCents: 2000, ref: 'c' });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(booking(SAVED).deferred_cents, 2000);
+  assert.equal(booking(SAVED).payment_state, 'card_saved');
+  assert.equal(S.stripe.length, 0);
+});
+
+test('changing a hold needs Money, and a paid booking has no hold to change', async () => {
+  keepCard();
+  const emp = await staffPost('tok-emp', 'adjust-hold', { bookingId: HELD, amountCents: 3000 });
+  assert.equal(emp.code, 403);
+  const paid = await staffPost('tok-admin', 'adjust-hold', { bookingId: PAID, amountCents: 3000 });
+  assert.equal(paid.code, 409);
+  assert.match(paid.out.error, /Refund the difference/);
+  assert.equal(S.stripe.length, 0);
+});
+
+// Winnipeg is UTC-5 in July. 15:00 local on 15 July 2026.
+const JULY_3PM = new Date('2026-07-15T20:00:00Z');
+function sweepBooking(id, over) {
+  const row = { id, bay_id: 'B1', status: 'confirmed', amount_cents: 0, refunded_cents: 0, authorized_cents: 2000,
+    payment_state: 'held', hold_expires_at: '2026-07-20T00:00:00Z', stripe_payment_intent: `pi_${id}`, group_id: null, ...over };
+  S.db.bookings.push(row);
+  S.pis[`pi_${id}`] = { id: `pi_${id}`, status: 'requires_capture', amount: 2000, amount_capturable: 2000, metadata: {} };
+  return row;
+}
+
+test('auto-release: a hold still open 5 hours after its session ended is released; a younger one is not', async () => {
+  sweepBooking('ended-6h', { booking_date: '2026-07-15', start_min: 480, end_min: 540 });            // ended 9:00 AM
+  sweepBooking('ended-4h', { booking_date: '2026-07-15', start_min: 600, end_min: 660 });            // ended 11:00 AM
+  // Past midnight: booked under the 14th, ended 2:00 AM on the 15th — 13 hours ago.
+  sweepBooking('late-night', { booking_date: '2026-07-14', start_min: 1380, end_min: 1560 });
+  sweepBooking('saved', { booking_date: '2026-07-15', start_min: 420, end_min: 480, payment_state: 'card_saved',
+    stripe_payment_intent: null, stripe_payment_method: 'pm_sv', stripe_customer: 'cus_sv' });
+  sweepBooking('charged', { booking_date: '2026-07-15', start_min: 420, end_min: 480, payment_state: 'paid', amount_cents: 2000 });
+
+  const t = await releaseOverdueHolds({ stripe: new FakeStripe(), now: JULY_3PM });
+  assert.equal(t.released, 3, JSON.stringify(t));
+  assert.equal(booking('ended-6h').payment_state, 'released');
+  assert.equal(booking('late-night').payment_state, 'released');
+  assert.equal(booking('saved').payment_state, 'released');
+  assert.equal(booking('ended-4h').payment_state, 'held', 'only 4 hours since it ended');
+  assert.equal(booking('charged').payment_state, 'paid', 'a charged booking is never touched');
+  assert.deepEqual(calls('paymentIntents.cancel').map((c) => c[1]).sort(), ['pi_ended-6h', 'pi_late-night']);
+  assert.ok(calls('paymentMethods.detach').some((c) => c[1] === 'pm_sv'), 'the saved card is forgotten');
+});
+
+test('auto-release reads past-midnight sessions on the right day', async () => {
+  // 7:00 AM on the 16th. Booked under the 15th, 11 PM to 4:00 AM on the 16th: ended 3 hours ago.
+  sweepBooking('still-fresh', { booking_date: '2026-07-15', start_min: 1380, end_min: 1680 });
+  const t = await releaseOverdueHolds({ stripe: new FakeStripe(), now: new Date('2026-07-16T12:00:00Z') });
+  assert.equal(t.released, 0);
+  assert.equal(booking('still-fresh').payment_state, 'held');
+});
+
+test('release-overdue: any staff login may run it, nobody signed out can', async () => {
+  const out = await call(seriesApi, { query: { action: 'release-overdue' } });
+  assert.equal(out.code, 401);
+  const emp = await staffPost('tok-emp', 'release-overdue', {});
+  assert.equal(emp.code, 200, JSON.stringify(emp.out));
+  // STALE's session was 8 days ago: long overdue. HELD's is in two days.
+  assert.equal(booking(STALE).payment_state, 'released');
+  assert.equal(booking(HELD).payment_state, 'held');
+  assert.equal(emp.out.hours, 5);
+});
+
+test('the daily cron also auto-releases, for days no staff screen was open', async () => {
+  process.env.CRON_SECRET = 'cron-test-secret';
+  try {
+    const cron = await call(seriesApi, { method: 'GET', query: { action: 'place-holds' }, headers: { authorization: 'Bearer cron-test-secret' } });
+    assert.equal(cron.code, 200, JSON.stringify(cron.out));
+    assert.equal(cron.out.autoReleased, 1);
+    assert.equal(booking(STALE).payment_state, 'released');
+  } finally {
+    delete process.env.CRON_SECRET;
+  }
 });

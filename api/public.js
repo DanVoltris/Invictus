@@ -1,5 +1,5 @@
 import { getSettings, getBookingsForDate, getOverridesForDate, cleanupExpiredHolds } from '../lib/db.js';
-import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked, taxPctOf } from '../lib/booking.js';
+import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked, taxPctOf, holdChangesEnabled } from '../lib/booking.js';
 
 // The two anonymous reads every visitor makes before they can do anything — what this install is
 // wired up to, and what is free on a given day. Dispatch on ?action=, the same shape as
@@ -48,6 +48,7 @@ export function config(req, res) {
     publishableKey: enabled ? publishableKey : null,
     dbEnabled,
     supabase: url && anonKey ? { url, anonKey } : null,
+    holdChanges: holdChangesEnabled(process.env),   // the staff portal shows "Change amount" only when on
   });
 }
 

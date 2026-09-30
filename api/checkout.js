@@ -1,4 +1,4 @@
-import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, taxPctOf, winnipegTodayISO, bookingWindowError, holdPlan } from '../lib/booking.js';
+import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, taxPctOf, winnipegTodayISO, bookingWindowError, holdPlan, holdChangesEnabled, HOLD_KEEPS_CARD_MESSAGE } from '../lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
          confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
          releaseHold, deferredHoldsReady, bookingExistsForSetupIntent, stripeCustomerForContact,
@@ -135,8 +135,10 @@ export async function createPaymentIntent(req, res) {
     // server holds it leadDays before the session. Without 0035 it is charged in full, as before.
     // The answer goes back to the caller below so the customer is told which one before they
     // confirm, not after their card is taken.
-    let plan = holdPlan({ settings, dateISO, startMin,
-      deferAvailable: charge > 0 && await deferredHoldsReady() });
+    // Migration 0035 is also where a booking keeps a card, so it gates both saving a card for a
+    // far-ahead booking AND keeping the card behind a hold (below).
+    const cardsKeepable = charge > 0 && await deferredHoldsReady();
+    let plan = holdPlan({ settings, dateISO, startMin, deferAvailable: cardsKeepable });
 
     const description = `${bayName(settings, bayId)} — simulator session`;
     const metadataFor = (p) => ({
@@ -185,18 +187,32 @@ export async function createPaymentIntent(req, res) {
         plan = holdPlan({ settings, dateISO, startMin, deferAvailable: false });
       }
     }
-    if (!intent) {
-      intent = await stripe.paymentIntents.create({
-        amount: charge,
-        currency: settings.currency,
-        automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
-        // Only sent for a hold. Stripe's default is already 'automatic', so the charge-now path is
-        // byte for byte the request it has always been.
-        ...(plan.mode === 'hold' ? { capture_method: 'manual' } : {}),
-        description,
-        metadata: metadataFor(plan),
-      });
+    const paymentIntent = {
+      amount: charge,
+      currency: settings.currency,
+      automatic_payment_methods: { enabled: true }, // dynamic payment methods, no hardcoded card-only
+      // Only sent for a hold. Stripe's default is already 'automatic', so the charge-now path is
+      // byte for byte the request it has always been.
+      ...(plan.mode === 'hold' ? { capture_method: 'manual' } : {}),
+      description,
+      metadata: metadataFor(plan),
+    };
+    // A HOLD KEEPS THE CARD while it is open, so staff can raise or lower it (lib/holds.js
+    // adjustHold) — a bank will not edit an authorisation, it can only be replaced by a new one on
+    // the same card. The card is removed the moment the hold is charged or released. Same fallback
+    // as saving a card above: a key that may not keep cards still places the hold, just without it.
+    if (!intent && plan.mode === 'hold' && cardsKeepable && holdChangesEnabled(process.env)) {
+      try {
+        intent = await withStripeCustomer(stripe, { email, phone }, (customer) =>
+          stripe.paymentIntents.create({ ...paymentIntent, customer, setup_future_usage: 'off_session' }));
+        plan = { ...plan, message: HOLD_KEEPS_CARD_MESSAGE };   // say so before they confirm
+      } catch (err) {
+        if (!err || err.type !== 'StripePermissionError') throw err;
+        console.error(`⚠ Holds are placed without keeping the card — the Stripe key may not save cards (${err.message}). `
+          + 'Give the restricted key write access to Customers and PaymentMethods, or hold amounts cannot be changed.');
+      }
     }
+    if (!intent) intent = await stripe.paymentIntents.create(paymentIntent);
 
     res.status(200).json({ clientSecret: intent.client_secret, amount: charge, fullAmount: amount,
       memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
@@ -233,9 +249,14 @@ export async function createPaymentIntent(req, res) {
 // is one, so a regular does not gain a new Customer in the Stripe dashboard for every booking.
 // A linked Customer that was deleted in Stripe is replaced rather than failing the checkout.
 async function createSetupIntent(stripe, { email, phone, description, metadata }) {
-  const make = (customer) => stripe.setupIntents.create({
+  return withStripeCustomer(stripe, { email, phone }, (customer) => stripe.setupIntents.create({
     customer, usage: 'off_session', payment_method_types: ['card'], description, metadata,
-  });
+  }));
+}
+
+// Run `make(customerId)` with this contact's Stripe Customer: the linked one when there is one, a
+// new one otherwise (or when the linked one was deleted in Stripe).
+async function withStripeCustomer(stripe, { email, phone }, make) {
   const fresh = async () => (await stripe.customers.create({
     email: String(email || '').trim() || undefined, phone: String(phone || '').trim() || undefined,
     metadata: { source: 'invictus-booking' },
