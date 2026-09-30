@@ -233,7 +233,9 @@ async function resetPassword(req, res, db) {
     .eq('token', sha(token)).is('used_at', null).select();
   if (!spent || !spent.length) return json(res, 400, { error: 'That code has already been used.' });
 
-  const upd = await db.auth.admin.updateUserById(cust.user_id, { password });
+  // email_confirm: a login made back when email confirmation was on may never have been confirmed,
+  // and Supabase refuses to sign it in. Proving the phone on the record is what a reset rests on.
+  const upd = await db.auth.admin.updateUserById(cust.user_id, { password, email_confirm: true });
   if (upd.error) {
     console.error('account reset:', upd.error.message);
     return json(res, 500, { error: 'Could not set your new password. Please try again.' });

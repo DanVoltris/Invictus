@@ -292,8 +292,10 @@ function viewSignIn(msg){
     const { error } = await sb.auth.signInWithPassword({ email, password });
     $('#s-go').disabled = false; $('#s-go').textContent = 'Sign in';
     // One message for a wrong password and for an address with no account: saying which would
-    // turn this box into a way to test whether somebody is a customer.
-    if(error){ setErr('#s-err','That email and password do not match.'); return; }
+    // turn this box into a way to test whether somebody is a customer. The other refusals are
+    // named, because they are not about the password and would otherwise send people round in
+    // circles — Supabase only says "not confirmed" once the password was right, so it gives nothing away.
+    if(error){ setErr('#s-err', signInProblem(error)); return; }
     await rememberLogin(email, password);
     viewProfile();
   };
@@ -384,6 +386,14 @@ function viewCode(msg){
 }
 
 /* ---------- FORGOTTEN PASSWORD, after the texted code ---------- */
+function signInProblem(error){
+  const m = String((error && (error.code || '')) + ' ' + ((error && error.message) || ''));
+  if(/not.?confirmed/i.test(m)) return 'This account was never confirmed. Press “Forgotten it? Text me a code” below — it finishes setting it up and you choose your password.';
+  if(/rate|too many|429/i.test(m)) return 'Too many tries in a row. Wait a minute, then try again.';
+  if(/fetch|network|failed to/i.test(m)) return 'Could not reach the server. Check your connection and try again.';
+  return 'That email and password do not match.';
+}
+
 function viewNewPassword(msg){
   // A real <form> with a new-password field, so the phone offers to save the new password.
   render(`<form class="card" id="r-form" method="post" action="/account" autocomplete="on">

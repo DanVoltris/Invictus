@@ -127,7 +127,8 @@ test('forgotten password: a texted code, then a new password — and the answer 
   const r = await act('reset', { token: v.out.token, password: 'a-new-password' });
   assert.equal(r.code, 200, JSON.stringify(r.out));
   assert.equal(r.out.email, 'sam@shop.ca');
-  assert.deepEqual(S.pw, { id: 'U1', password: 'a-new-password' }, 'only the password changes');
+  assert.deepEqual(S.pw, { id: 'U1', password: 'a-new-password', email_confirm: true },
+    'the password changes and the login is left usable — nothing else');
   const again = await act('reset', { token: v.out.token, password: 'another-one!' });
   assert.equal(again.code, 400, 'the proof works once');
 });
