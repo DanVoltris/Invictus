@@ -217,16 +217,23 @@ async function forgot(req, res, db) {
   const same = { ok: true, message: 'If that number belongs to a staff login, a text with a link to choose a new password is on its way. The link works once, for 7 days.' };
   const { data: rows, error } = await db.from('staff').select('user_id,role,is_active');
   if (error) { console.error('staff forgot:', error.message); return json(res, 200, same); }
+  const matches = [];
   for (const row of rows || []) {
     if (row.is_active === false) continue;
     const got = await db.auth.admin.getUserById(row.user_id);
     const u = got && got.data && got.data.user;
-    if (!u || mobileE164(u.user_metadata && u.user_metadata.phone) !== phone) continue;
+    if (u && mobileE164(u.user_metadata && u.user_metadata.phone) === phone) matches.push({ row, u });
+  }
+  // A finished login before an unfinished invite on the same number: someone who forgot their
+  // password wants to reset the login they use, not be sent a set-up link for one they never did.
+  const hit = matches.find((m) => !isPending(m.u.email)) || matches[0];
+  if (hit) {
+    const { row, u } = hit;
     const last = u.user_metadata.staff_invite && Date.parse(u.user_metadata.staff_invite.sentAt);
-    if (last && Date.now() - last < FORGOT_GAP_MS) break;
-    const sent = await textLink({ req, db, user: u, role: row.role, kind: isPending(u.email) ? 'invite' : 'reset' });
-    if (!sent.texted) console.warn(`staff forgot: no text for ${u.id} — ${sent.error || sent.textError}`);
-    break;
+    if (!(last && Date.now() - last < FORGOT_GAP_MS)) {
+      const sent = await textLink({ req, db, user: u, role: row.role, kind: isPending(u.email) ? 'invite' : 'reset' });
+      if (!sent.texted) console.warn(`staff forgot: no text for ${u.id} — ${sent.error || sent.textError}`);
+    }
   }
   return json(res, 200, same);
 }

@@ -336,3 +336,14 @@ test('forgot: at most one text a minute per login, and a bad number is asked for
   const bad = await run('forgot', { phone: '555' });
   assert.equal(bad.code, 400);
 });
+
+test('forgot: a finished login wins over an unfinished invite on the same mobile', async () => {
+  reset();
+  staffWithPhone('PENDING', '+12045550111');
+  S.users.PENDING.email = `invite-abc@${PENDING_DOMAIN}`;
+  staffWithPhone('REAL', '+12045550111');
+  await run('forgot', { phone: '204-555-0111' });
+  const link = lastText().link;
+  assert.match(link, /staff-reset=/);
+  assert.ok(tokenFrom(link).startsWith('REAL.'), 'the reset is for the login they actually use');
+});
