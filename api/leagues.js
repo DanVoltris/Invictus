@@ -59,6 +59,7 @@ export default async function handler(req, res) {
   try {
     if (action === 'list' || (req.method === 'GET' && !action)) return await list(req, res);
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    if (action === 'info') return await info(req, res);
     if (action === 'buy-team') return await buyTeam(req, res);
     if (action === 'invite') return await invite(req, res);
     if (action === 'invite-info') return await inviteInfo(req, res);
@@ -84,6 +85,21 @@ async function list(req, res) {
   const r = await listTeamLeagues({ customerId: me ? me.id : null });
   if (r.error) return res.status(r.code || 503).json({ ok: false, error: r.error, leagues: [] });
   return res.status(200).json({ ok: true, leagues: r.leagues });
+}
+
+// Public. One league's brochure: about, format, challenges, schedule, awards, grand prize
+// (migration 0039). Any ACTIVE league, not only ones still selling teams — a team already in a
+// league that has closed sign-up still needs to read its rules and schedule.
+async function info(req, res) {
+  const league = await teamLeagueById(String((req.body || {}).leagueId || (req.query || {}).leagueId || ''));
+  if (!league || league.is_active === false) return res.status(404).json({ ok: false, error: 'That league is not on the site right now.' });
+  return res.status(200).json({ ok: true, league: {
+    id: league.id, name: league.name, description: league.description || null,
+    fee_cents: league.fee_cents || 0, team_size: league.team_size ?? null, team_min: league.team_min ?? null,
+    season_start: league.season_start, season_end: league.season_end,
+    joinOnline: league.join_online !== false && L.isCurrent(league, winnipegTodayISO()),
+    details: L.normalizeDetails(league.details),
+  } });
 }
 
 // Buy a team. The captain is whoever is signed in — never a name or number in the body.

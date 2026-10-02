@@ -216,7 +216,55 @@
     };
   }
 
+  /* ----- League info: what the printed brochure says (migration 0039, leagues.details) -----
+     About, format & rules, featured challenges, the week-by-week schedule, team awards and the
+     grand prize. One shape and one clean-up, used by the manager's form, the customer page and the
+     server — so nothing oversized or malformed is ever saved or shown. Lists come in as arrays or
+     as text with one item per line; a leading bullet is dropped, so a pasted brochure line works. */
+  const INFO_LIMITS = { about: 2000, prize: 2000, items: 60, item: 200, weeks: 60 };
+  function normalizeDetails(raw) {
+    const d = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const line = (v, max) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, max);
+    const para = (v, max) => String(v == null ? '' : v).replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').trim().slice(0, max);
+    const list = (v) => (Array.isArray(v) ? v : String(v == null ? '' : v).split('\n'))
+      .map((x) => line(String(x == null ? '' : x).replace(/^\s*[•·\-*–—]+\s*/, ''), INFO_LIMITS.item)).filter(Boolean).slice(0, INFO_LIMITS.items);
+    const date = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(Date.parse(`${v}T00:00:00Z`)) ? String(v) : null);
+    const schedule = (Array.isArray(d.schedule) ? d.schedule : []).map((w) => {
+      const x = w && typeof w === 'object' ? w : {};
+      let from = date(x.from), to = date(x.to);
+      if (from && to && to < from) to = from;
+      return { from, to, phase: line(x.phase, 60), event: line(x.event, 80), course: line(x.course, 120), location: line(x.location, 120) };
+    }).filter((w) => w.from || w.event || w.course).slice(0, INFO_LIMITS.weeks);
+    return { about: para(d.about, INFO_LIMITS.about), format: list(d.format), challenges: list(d.challenges),
+      schedule, awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize) };
+  }
+  function hasDetails(raw) {
+    const d = normalizeDetails(raw);
+    return !!(d.about || d.prize || d.format.length || d.challenges.length || d.schedule.length || d.awards.length);
+  }
+  // "Nov 1 – 7", "Nov 29 – Dec 5", "Dec 27 – Jan 2". Dates are plain calendar days, never shifted
+  // by a time zone.
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function dateRangeLabel(from, to) {
+    const p = (iso) => { const [, m, d] = String(iso).split('-').map(Number); return { m, d }; };
+    if (!from) return '';
+    const a = p(from);
+    if (!to || to === from) return `${MON[a.m - 1]} ${a.d}`;
+    const b = p(to);
+    return a.m === b.m ? `${MON[a.m - 1]} ${a.d} – ${b.d}` : `${MON[a.m - 1]} ${a.d} – ${MON[b.m - 1]} ${b.d}`;
+  }
+  // The schedule as the brochure prints it: consecutive weeks under the same phase heading.
+  function schedulePhases(schedule) {
+    const out = [];
+    (schedule || []).forEach((w) => {
+      const last = out[out.length - 1];
+      if (last && last.phase === (w.phase || '')) last.weeks.push(w);
+      else out.push({ phase: w.phase || '', weeks: [w] });
+    });
+    return out;
+  }
+
   root.InvictusLeagues = { DAY_NAMES, timeLabel, scheduleLabel, weekOf, weeks, currentWeek, progress,
     teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName,
-    seatRange, shareOf, teamMoney };
+    seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases };
 })(typeof window !== 'undefined' ? window : globalThis);

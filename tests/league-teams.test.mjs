@@ -191,7 +191,7 @@ test('list: the leagues you can buy a team in, with the team count and your own 
   assert.equal(anon.code, 200);
   assert.deepEqual(anon.out.leagues.map((l) => l.id), ['L-team', 'L-free'], 'the finished season is not offered');
   assert.deepEqual(anon.out.leagues[0], { id: 'L-team', name: 'Winter Team League', description: 'Six weeks, play when you like.',
-    fee_cents: 30000, team_size: 4, team_min: null, weekly_min_mins: 180, season_start: addDays(-14), season_end: addDays(42), teamCount: 0, myTeamId: null });
+    fee_cents: 30000, team_size: 4, team_min: null, weekly_min_mins: 180, season_start: addDays(-14), season_end: addDays(42), teamCount: 0, myTeamId: null, hasInfo: false });
 
   const teamId = await ownTeam();
   const mine = await run(leaguesApi, { query: { action: 'list' }, ...cap });
@@ -792,4 +792,72 @@ test('before migration 0036: leagues and teams still read, with their 0031 sizes
   assert.equal(r.out.leagues[0].team_size, 4, 'not dropped back to the pre-0031 columns');
   const teamId = await ownTeam();
   assert.equal((await db.leagueTeamById(teamId)).captain_customer_id, 'c-cap');
+});
+
+// ---- League info: the brochure (migration 0039, leagues.details) -------------------------------
+const BROCHURE = {
+  about: 'A 16-week, four-person scramble.',
+  format: ['Four-person scramble', '• 2-foot concede', ''],
+  challenges: 'Mega Putt Challenge\nClosest to the Pin Challenge',
+  schedule: [
+    { from: '2026-11-01', to: '2026-11-07', phase: 'Phase 1', event: '', course: 'Marco Simone Golf & Country Club', location: 'Italy' },
+    { from: '2026-11-08', to: '2026-11-14', phase: 'Phase 1', event: 'Mini Tournament 1', course: 'Deer Ridge Golf Club', location: 'Kitchener, Ontario' },
+    { from: 'not-a-date', to: null, phase: '', event: '', course: '', location: '' },
+  ],
+  awards: ['Cup Winner', 'Most Honest'],
+  prize: '3 teams going on the trip.',
+};
+
+test('info: a league\'s brochure, cleaned up the same way the form cleans it', async () => {
+  world();
+  S.db.leagues[0].details = BROCHURE;
+  const r = await run(leaguesApi, { query: { action: 'info' }, body: { leagueId: 'L-team' } });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  const d = r.out.league.details;
+  assert.equal(d.about, 'A 16-week, four-person scramble.');
+  assert.deepEqual(d.format, ['Four-person scramble', '2-foot concede'], 'bullets and blank lines are dropped');
+  assert.deepEqual(d.challenges, ['Mega Putt Challenge', 'Closest to the Pin Challenge'], 'one item per line');
+  assert.equal(d.schedule.length, 2, 'a row with no date, event or course is not a week');
+  assert.equal(d.schedule[1].event, 'Mini Tournament 1');
+  assert.deepEqual(d.awards, ['Cup Winner', 'Most Honest']);
+  assert.equal(r.out.league.joinOnline, true);
+  // The list only says whether there is anything to open.
+  const list = await run(leaguesApi, { query: { action: 'list' } });
+  assert.equal(list.out.leagues[0].hasInfo, true);
+  assert.equal(list.out.leagues[1].hasInfo, false);
+  assert.equal('details' in list.out.leagues[0], false);
+});
+
+test('info: a team in a league that has closed sign-up can still read it; a hidden or unknown league cannot be read', async () => {
+  world();
+  S.db.leagues[2].details = BROCHURE;                       // L-over: its season has ended
+  const over = await run(leaguesApi, { query: { action: 'info' }, body: { leagueId: 'L-over' } });
+  assert.equal(over.code, 200);
+  assert.equal(over.out.league.joinOnline, false);
+  S.db.leagues[0].is_active = false;
+  assert.equal((await run(leaguesApi, { query: { action: 'info' }, body: { leagueId: 'L-team' } })).code, 404);
+  assert.equal((await run(leaguesApi, { query: { action: 'info' }, body: { leagueId: 'nope' } })).code, 404);
+  assert.equal((await run(leaguesApi, { query: { action: 'info' }, body: {} })).code, 404);
+});
+
+test('info: a league with nothing filled in gives an empty brochure, never an error', async () => {
+  world();
+  const r = await run(leaguesApi, { query: { action: 'info' }, body: { leagueId: 'L-free' } });
+  assert.equal(r.code, 200);
+  assert.deepEqual(r.out.league.details, { about: '', format: [], challenges: [], schedule: [], awards: [], prize: '' });
+});
+
+test('before migration 0039 is pasted in: leagues list and open as before, with no brochure yet', async () => {
+  world();
+  S.missing0031 = ['details'];
+  try {
+    const list = await run(leaguesApi, { query: { action: 'list' } });
+    assert.equal(list.code, 200, JSON.stringify(list.out));
+    assert.deepEqual(list.out.leagues.map((l) => l.id), ['L-team', 'L-free']);
+    assert.equal(list.out.leagues[0].hasInfo, false);
+    assert.equal(list.out.leagues[0].team_size, 4, 'the earlier columns are still read');
+    const r = await run(leaguesApi, { query: { action: 'info' }, body: { leagueId: 'L-team' } });
+    assert.equal(r.code, 200);
+    assert.equal(r.out.league.details.about, '');
+  } finally { S.missing0031 = null; }
 });

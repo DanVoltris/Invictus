@@ -123,3 +123,39 @@ test('publicName: how a player appears to other players', () => {
   assert.equal(L.publicName(''), 'Player');
   assert.deepEqual([1, 2, 3, 4, 11, 21].map(L.ordinal), ['1st', '2nd', '3rd', '4th', '11th', '21st']);
 });
+
+// ---- League info: the brochure (migration 0039) ------------------------------------------------
+test('league info: lists take one item per line or an array, and lose bullets and blanks', () => {
+  const d = L.normalizeDetails({ format: '• Four-person scramble\n- 2-foot concede\n\n  * No mulligans  ', awards: ['Cup Winner', '', '  Most   Honest '] });
+  assert.deepEqual(d.format, ['Four-person scramble', '2-foot concede', 'No mulligans']);
+  assert.deepEqual(d.awards, ['Cup Winner', 'Most Honest']);
+  assert.deepEqual(L.normalizeDetails(null), { about: '', format: [], challenges: [], schedule: [], awards: [], prize: '' });
+  assert.deepEqual(L.normalizeDetails('nonsense'), L.normalizeDetails({}));
+});
+
+test('league info: schedule rows keep real dates, drop empty rows, and never end before they start', () => {
+  const d = L.normalizeDetails({ schedule: [
+    { from: '2026-11-01', to: '2026-11-07', phase: 'Phase 1', course: 'Marco Simone' },
+    { from: '2026-13-45', to: 'soon', course: 'Deer Ridge' },         // bad dates, real course: kept undated
+    { from: '', to: '', phase: 'Phase 1', event: '', course: '' },      // nothing in it: dropped
+    { from: '2026-12-27', to: '2026-12-20', course: 'Vidanta' },        // ends before it starts
+    'not a row',
+  ] });
+  assert.equal(d.schedule.length, 3);
+  assert.deepEqual([d.schedule[1].from, d.schedule[1].to], [null, null]);
+  assert.equal(d.schedule[2].to, '2026-12-27');
+  assert.equal(L.dateRangeLabel('2026-12-27', '2027-01-02'), 'Dec 27 – Jan 2');
+  assert.equal(L.dateRangeLabel('2026-11-01', '2026-11-07'), 'Nov 1 – 7');
+  assert.deepEqual(L.schedulePhases(d.schedule).map((p) => [p.phase, p.weeks.length]), [['Phase 1', 1], ['', 2]]);
+});
+
+test('league info: nothing oversized is kept, and "has info" is only true when something is filled in', () => {
+  const d = L.normalizeDetails({ about: 'x'.repeat(5000), awards: Array.from({ length: 200 }, (_, i) => `Award ${i}`),
+    schedule: Array.from({ length: 200 }, (_, i) => ({ course: `Course ${i}` })) });
+  assert.equal(d.about.length, 2000);
+  assert.equal(d.awards.length, 60);
+  assert.equal(d.schedule.length, 60);
+  assert.equal(L.hasDetails({}), false);
+  assert.equal(L.hasDetails({ format: ['\n', '  '] }), false);
+  assert.equal(L.hasDetails({ prize: 'A trip' }), true);
+});
