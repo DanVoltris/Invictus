@@ -3544,7 +3544,7 @@ async function openLeaguePage(id){
         <h2 style="margin-top:5px">${esc(league.name)} ${LG().isCurrent(league,today)?'<span class="pill confirmed">Current</span>':'<span class="pill cancelled">'+(league.is_active?'Season over':'Inactive')+'</span>'}</h2>
         <div class="day-label">${esc([LG().scheduleLabel(league), seasonText(league), (league.bay_ids||[]).length?(league.bay_ids||[]).map(bayName).join(', '):'Any bay'].filter(Boolean).join(' · '))}</div>
       </div>
-      <div class="day-nav">${edit?'<button class="btn btn-ghost" id="lo-addp">+ Add player</button><button class="btn btn-primary" id="lo-edit">Edit league</button>':''}</div>
+      <div class="day-nav">${league.is_active!==false?`<a class="btn btn-ghost" href="/leagues?info=${encodeURIComponent(league.id)}" target="_blank" rel="noopener" style="text-decoration:none">Customer page ↗</a>`:''}${edit?'<button class="btn btn-ghost" id="lo-addp">+ Add player</button><button class="btn btn-primary" id="lo-edit">Edit league</button>':''}</div>
     </div>
     <div class="seg seg-sm lo-tabs" id="lo-seg" role="tablist">
       ${views.map(([v,lbl])=>`<button type="button" role="tab" data-v="${v}" class="${LEAGUE_VIEW===v?'on':''}" aria-selected="${LEAGUE_VIEW===v}">${lbl}</button>`).join('')}
@@ -3969,6 +3969,13 @@ function leagueResults(ctx){
   const cols=all.filter(w=>w.end<today || scored.has(w.start));                      // weeks already gone, plus any with scores
   const pickable=all.filter(w=>w.start<=LG().weekOf(today) || scored.has(w.start));  // never next month's results
   const weekAt=s=>all.find(w=>w.start===s);
+  // Before the season starts there is no week to enter yet. Say when it opens, rather than show an
+  // empty week list over a score table that cannot be saved.
+  if(!pickable.length){
+    host.innerHTML=`<div class="empty">The season starts on <b>${esc(dateLabel(league.season_start))}</b>. Results are entered a week at a time, so this opens in the first week — until then there is nothing to score.<br /><br />
+      The <b>Weeks</b> tab lists every week of the season.</div>`;
+    return;
+  }
   // The day that team booked in that week, so the record matches when they really played.
   const playedOn=(key,w)=>{ if(!league.team_mode) return w.end<today?w.end:w.start;
     const r=(rounds||[]).find(x=>x.league_team_id===key && x.status!=='cancelled' && roundWeek(x)===w.start);

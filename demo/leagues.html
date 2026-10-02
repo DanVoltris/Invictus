@@ -24,11 +24,12 @@
   header a.back:hover{color:var(--white)}
   /* Full details: the brochure */
   .info{max-width:760px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:34px 34px 30px}
-  .info h1{font-size:30px;line-height:1.2;margin-bottom:10px}
+  .info-title{font-family:'Space Grotesk';font-size:30px;line-height:1.2;margin-bottom:10px;color:var(--white)}
+  .info-slot{max-width:760px;margin:34px auto 0;scroll-margin-top:16px}
   .info-meta{color:var(--muted);font-size:14.5px;font-weight:600;line-height:1.7}
   .info-about{color:var(--white);font-size:15.5px;line-height:1.7;margin-top:18px;white-space:pre-line}
   .info section{margin-top:28px}
-  .info h2{font-family:'Space Grotesk';font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);margin-bottom:12px}
+  .info h3{font-family:'Space Grotesk';font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);margin-bottom:12px}
   .info-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 34px}
   .info-list{list-style:none;padding:0;margin:0}
   .info-list li{position:relative;padding:0 0 9px 18px;font-size:14.5px;line-height:1.5;color:var(--white)}
@@ -46,7 +47,7 @@
   .info-prize{background:rgba(240,82,61,.07);border:1px solid rgba(240,82,61,.3);border-radius:12px;padding:18px 20px}
   .info-prize p{font-size:14.5px;line-height:1.65;white-space:pre-line}
   .info-actions{margin-top:26px;max-width:380px;margin-left:auto;margin-right:auto}
-  @media(max-width:640px){ .info{padding:24px 18px} .info h1{font-size:25px} .info-cols{grid-template-columns:1fr} .info-weeks li{grid-template-columns:1fr;gap:2px} }
+  @media(max-width:640px){ .info{padding:24px 18px} .info-title{font-size:25px} .info-cols{grid-template-columns:1fr} .info-weeks li{grid-template-columns:1fr;gap:2px} }
   .head-block{max-width:640px;margin:6px auto 30px;text-align:center}
   .eyebrow{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange);margin-bottom:10px}
   .head-block h1{font-size:32px;margin-bottom:10px}
@@ -232,6 +233,7 @@ function listView(){
       <div class="how-step"><div class="n">Step 3</div><div class="t">Play once a week</div><div class="d">Book any bay at any time you like. Anyone on the team can book it, and it is free.</div></div>
     </div>
     <div class="plans">${LEAGUES.map(planCard).join('')}</div>
+    ${LEAGUES.filter(l => l.hasInfo).map(l => `<div class="info-slot" id="info-${esc(l.id)}"><div class="spin">Loading the league details…</div></div>`).join('')}
     ${MY_TEAMS===null && SIGNED_IN ? `<div class="note is-plain" style="max-width:520px;margin:22px auto 0">We could not check whether you are already on a team — that part of the site is still being switched on. Your team, if you have one, is on <a href="/account">My Account</a>.</div>` : ''}`);
   document.querySelectorAll('[data-start]').forEach(b => b.onclick = () => {
     const lg = LEAGUES.find(l => l.id === b.dataset.start);
@@ -239,7 +241,22 @@ function listView(){
     if(!SIGNED_IN){ location.href = signInHref('/leagues?start='+encodeURIComponent(lg.id)); return; }
     startView(lg);
   });
-  document.querySelectorAll('[data-info]').forEach(b => b.onclick = () => infoView(b.dataset.info, true));
+  // The brochure for each league sits right under the cards — rules, schedule and prizes are the
+  // reason people sign up, so they are on the page, not behind a button. The card's button scrolls
+  // to it. Each also keeps its own address (?info=<id>) for texting to a team.
+  document.querySelectorAll('[data-info]').forEach(b => b.onclick = () => {
+    const slot = document.getElementById('info-' + b.dataset.info);
+    if(slot) slot.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    else infoView(b.dataset.info, true);
+  });
+  LEAGUES.filter(l => l.hasInfo).forEach(async l => {
+    const r = await leaguesApi('info', { leagueId: l.id });
+    const slot = document.getElementById('info-' + l.id);
+    if(!slot) return;                                   // they have moved on to another view
+    if(!r.ok || !r.league){ slot.remove(); return; }
+    slot.innerHTML = infoHTML(r.league, { inline: true });
+    wireInfo(slot, r.league);
+  });
 }
 
 /* ---------- full details: the brochure (migration 0039) ----------
@@ -257,7 +274,13 @@ async function infoView(id, push){
     $('#i-back').onclick = backToList;
     return;
   }
-  const lg = r.league, d = L.normalizeDetails(lg.details);
+  render(infoHTML(r.league, { inline: false }));
+  window.scrollTo(0, 0);
+  wireInfo($('#content'), r.league);
+}
+// The brochure as a page section. inline: on the Leagues list, under the cards (no Back button).
+function infoHTML(lg, { inline }){
+  const d = L.normalizeDetails(lg.details);
   const range = L.seatRange({ team_size: lg.team_size, team_min: lg.team_min });
   const price = !(lg.fee_cents > 0) ? 'Free'
     : !range ? `${money(lg.fee_cents)} per team`
@@ -266,17 +289,18 @@ async function infoView(id, push){
   const ul = items => `<ul class="info-list">${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
   const listed = LEAGUES.find(l => l.id === lg.id);
   const mine = listed ? myTeamIn(listed) : null;
-  render(`
+  const H = inline ? 'h2' : 'h1';
+  return `
     <article class="info">
-      <div class="eyebrow">Invictus Golf league</div>
-      <h1>${esc(lg.name)}</h1>
+      <div class="eyebrow">${inline ? 'Rules, schedule &amp; prizes' : 'Invictus Golf league'}</div>
+      <${H} class="info-title">${esc(lg.name)}</${H}>
       <div class="info-meta">${esc(season(lg))}<br />${esc(price)}</div>
       ${d.about ? `<p class="info-about">${esc(d.about)}</p>` : (lg.description ? `<p class="info-about">${esc(lg.description)}</p>` : '')}
       ${(d.format.length || d.challenges.length) ? `<div class="info-cols">
-        ${d.format.length ? `<section><h2>Format &amp; rules</h2>${ul(d.format)}</section>` : ''}
-        ${d.challenges.length ? `<section><h2>Featured challenges</h2>${ul(d.challenges)}</section>` : ''}
+        ${d.format.length ? `<section><h3>Format &amp; rules</h3>${ul(d.format)}</section>` : ''}
+        ${d.challenges.length ? `<section><h3>Featured challenges</h3>${ul(d.challenges)}</section>` : ''}
       </div>` : ''}
-      ${d.schedule.length ? `<section><h2>Schedule</h2>
+      ${d.schedule.length ? `<section><h3>Schedule</h3>
         ${L.schedulePhases(d.schedule).map(ph => `
           ${ph.phase ? `<div class="info-phase">${esc(ph.phase)}</div>` : ''}
           <ol class="info-weeks">${ph.weeks.map(w => `<li>
@@ -284,20 +308,23 @@ async function infoView(id, push){
             <span class="info-what">${w.event ? `<span class="info-event">${esc(w.event)}</span>` : ''}<b>${esc(w.course || 'To be announced')}</b>${w.location ? `<span class="info-where">${esc(w.location)}</span>` : ''}</span>
           </li>`).join('')}</ol>`).join('')}
       </section>` : ''}
-      ${d.awards.length ? `<section><h2>Team awards</h2><ul class="info-awards">${d.awards.map(a => `<li>${esc(a)}</li>`).join('')}</ul></section>` : ''}
-      ${d.prize ? `<section class="info-prize"><h2>Grand prize</h2><p>${esc(d.prize)}</p></section>` : ''}
+      ${d.awards.length ? `<section><h3>Team awards</h3><ul class="info-awards">${d.awards.map(a => `<li>${esc(a)}</li>`).join('')}</ul></section>` : ''}
+      ${d.prize ? `<section class="info-prize"><h3>Grand prize</h3><p>${esc(d.prize)}</p></section>` : ''}
       <div class="info-actions">
         ${mine ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'} — see My Account</a>`
-          : (lg.joinOnline && listed) ? `<button class="btn btn-primary" id="i-start">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>`
+          : (lg.joinOnline && listed) ? `<button class="btn btn-primary i-start">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>`
           : `<div class="note is-plain" style="text-align:left">Online sign-up is not open for this league. Call the shop at ${SHOP} to get your team in.</div>`}
-        <button class="btn btn-ghost" id="i-back">Back to leagues</button>
+        ${inline ? '' : '<button class="btn btn-ghost" id="i-back">Back to leagues</button>'}
       </div>
-    </article>`);
-  window.scrollTo(0, 0);
-  $('#i-back').onclick = backToList;
-  if($('#i-start')) $('#i-start').onclick = () => {
+    </article>`;
+}
+function wireInfo(root, lg){
+  const listed = LEAGUES.find(l => l.id === lg.id);
+  const back = root.querySelector('#i-back'); if(back) back.onclick = backToList;
+  const start = root.querySelector('.i-start');
+  if(start) start.onclick = () => {
     if(!SIGNED_IN){ location.href = signInHref('/leagues?start=' + encodeURIComponent(lg.id)); return; }
-    history.replaceState({}, '', '/leagues'); startView(listed);
+    history.replaceState({}, '', '/leagues'); startView(listed); window.scrollTo(0, 0);
   };
 }
 function backToList(){ history.pushState({}, '', '/leagues'); listView(); window.scrollTo(0, 0); }
@@ -325,15 +352,13 @@ function planCard(l){
       <li>${esc(season(l))}</li>
       <li>${range ? (range.min === range.max ? `Teams of <b>${range.max} golfers</b>` : `Teams of <b>${range.min} to ${range.max} golfers</b> — you pick`) : 'As many players as you like on a team'}</li>
       <li>One round a week, <b>any bay, any time</b> — about ${hrs} hour${hrs===1?'':'s'} is the usual</li>
-      <li>Every round is <b>free</b> — the season is paid up front</li>
-      ${l.teamCount!=null ? `<li>${l.teamCount} team${l.teamCount===1?'':'s'} signed up so far</li>` : ''}
     </ul>
     ${l.description?`<div class="plan-desc">${esc(l.description)}</div>`:''}
     <span class="perk">Weekly rounds included</span>
     ${mine
       ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'} — see My Account</a>`
       : `<button class="btn btn-line" data-start="${esc(l.id)}">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>`}
-    ${l.hasInfo ? `<button class="btn btn-ghost" data-info="${esc(l.id)}" style="margin-top:10px">Full details</button>` : ''}
+    ${l.hasInfo ? `<button class="btn btn-ghost" data-info="${esc(l.id)}" style="margin-top:10px">Rules, schedule &amp; prizes ↓</button>` : ''}
     ${mine || SIGNED_IN ? '' : '<div class="fine">You need an account to buy a team — it takes a minute, and we bring you straight back here.</div>'}
   </div>`;
 }
