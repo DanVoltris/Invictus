@@ -159,3 +159,35 @@ test('league info: nothing oversized is kept, and "has info" is only true when s
   assert.equal(L.hasDetails({ format: ['\n', '  '] }), false);
   assert.equal(L.hasDetails({ prize: 'A trip' }), true);
 });
+
+// ---- The day a league week starts (migration 0040) --------------------------------------------
+test('week start: the 2026-27 Winter League runs Sunday to Saturday — 12 weeks, exactly the brochure\'s', () => {
+  const winter = { season_start: '2026-11-01', season_end: '2027-01-23', week_start: 0 };
+  const w = L.weeks(winter);
+  assert.equal(w.length, 12);
+  assert.deepEqual([w[0].start, w[0].end], ['2026-11-01', '2026-11-07']);
+  assert.deepEqual([w[8].start, w[8].end], ['2026-12-27', '2027-01-02'], 'across the year end');
+  assert.deepEqual([w[11].start, w[11].end], ['2027-01-17', '2027-01-23']);
+  assert.equal(L.weekIn(winter, '2026-11-08'), '2026-11-08', 'Sunday opens the week');
+  assert.equal(L.weekIn(winter, '2026-11-07'), '2026-11-01', 'Saturday closes it');
+  assert.equal(L.currentWeek(winter, '2026-11-10').number, 2);
+});
+
+test('week start: a league that does not say is Monday to Sunday, and nonsense falls back to Monday', () => {
+  const season = { season_start: '2026-11-01', season_end: '2027-01-23' };
+  assert.equal(L.weeks(season).length, 13, 'the old reading: Oct 26 – Nov 1 is a part week');
+  assert.equal(L.weeks(season)[0].start, '2026-10-26');
+  for (const bad of [null, undefined, 7, -1, 'x', 1.5]) assert.equal(L.weekStartOf({ week_start: bad }), 1, String(bad));
+  assert.equal(L.weekStartOf({ week_start: 0 }), 0);
+  assert.equal(L.weekStartOf({ week_start: '6' }), 6, 'a number that arrived as text');
+  assert.equal(L.weekOf('2026-11-08'), '2026-11-02', 'weekOf alone is still the Monday');
+});
+
+test('week start: a round is filed by the day it was played, whatever week was stored with it', () => {
+  const winter = { season_start: '2026-11-01', season_end: '2027-01-23', week_start: 0 };
+  // Stored under the old Monday week (Nov 2); it was played Sunday Nov 8, which is week 2 here.
+  const rounds = [{ booking_date: '2026-11-08', league_week: '2026-11-02', status: 'confirmed' }];
+  const w = L.teamWeeks({ league: winter, todayISO: '2026-11-20', rounds });
+  assert.equal(w[0].round, null); assert.equal(w[0].missed, true);
+  assert.equal(w[1].round.booking_date, '2026-11-08');
+});

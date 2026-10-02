@@ -32,14 +32,21 @@
     return ['Once a week, your own time', hrs ? `${hrs} hour${hrs === 1 ? '' : 's'} recommended` : ''].filter(Boolean).join(' · ');
   }
 
-  // The Monday of that date's week. Matches Postgres date_trunc('week'), which generates
+  // The first day of that date's week, for a week starting on weekStart (0 = Sunday … 6 = Saturday;
+  // Monday unless told otherwise). Matches public.league_week_of() in migration 0040, which fills
   // bookings.league_week — the column the "one round per team per week" rule is built on, so these
-  // two must agree exactly.
-  function weekOf(dateISO) {
+  // two must agree exactly. tests/league-week-db.test.mjs checks them day by day.
+  const validStart = (n) => (Number.isInteger(n) && n >= 0 && n <= 6 ? n : 1);
+  function weekOf(dateISO, weekStart = 1) {
     const d = dateOf(dateISO);
-    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));   // Sunday(0) goes back 6, Monday(1) back 0
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() - validStart(weekStart) + 7) % 7));
     return isoOf(d);
   }
+  // The day a league's week starts (leagues.week_start, migration 0040). Monday when the league
+  // does not say — which is every league before 0040, and what the database assumed all along.
+  const weekStartOf = (league) => (league && league.week_start != null ? validStart(Number(league.week_start)) : 1);
+  // The week dateISO falls in FOR THIS LEAGUE. Anything about a league's weeks goes through here.
+  const weekIn = (league, dateISO) => weekOf(dateISO, weekStartOf(league));
 
   const weekEnd = (weekISO) => { const d = dateOf(weekISO); d.setUTCDate(d.getUTCDate() + 6); return isoOf(d); };
 
@@ -47,8 +54,8 @@
   // weeks at each end, because a team can play in them.
   function weeks(league) {
     if (!league || !league.season_start || !league.season_end) return [];
-    const out = [], last = weekOf(league.season_end);
-    let w = weekOf(league.season_start);
+    const out = [], last = weekIn(league, league.season_end);
+    let w = weekIn(league, league.season_start);
     for (let i = 0; w <= last && i < MAX_WEEKS; i++) {
       out.push({ start: w, end: weekEnd(w), number: i + 1 });
       const d = dateOf(w); d.setUTCDate(d.getUTCDate() + 7); w = isoOf(d);
@@ -58,7 +65,7 @@
 
   // The week todayISO falls in, or null when the season has not started or is over.
   function currentWeek(league, todayISO) {
-    return weeks(league).find((w) => w.start === weekOf(todayISO)) || null;
+    return weeks(league).find((w) => w.start === weekIn(league, todayISO)) || null;
   }
 
   // "Week 3 of 22": weeks gone, weeks in the season, weeks still to come. The current week counts
@@ -74,10 +81,12 @@
   // `rounds` are that team's league bookings: [{ league_week, booking_date, start_min, end_min,
   // bay_id, status }]. A week in the past with no round is `missed` — the list staff chase.
   function teamWeeks({ league, todayISO, rounds = [] }) {
-    const thisWeek = weekOf(todayISO);
+    const thisWeek = weekIn(league, todayISO);
     const byWeek = new Map();
+    // Filed by the day it was played, not by a stored league_week: the stored one only catches up
+    // with a changed start day once migration 0040's trigger has re-stamped it.
     rounds.filter((r) => r && r.status !== 'cancelled')
-      .forEach((r) => { const k = r.league_week || weekOf(r.booking_date); if (k && !byWeek.has(k)) byWeek.set(k, r); });
+      .forEach((r) => { const k = r.booking_date ? weekIn(league, r.booking_date) : r.league_week; if (k && !byWeek.has(k)) byWeek.set(k, r); });
     return weeks(league).map((w) => {
       const round = byWeek.get(w.start) || null;
       const past = w.end < todayISO;
@@ -92,7 +101,8 @@
   function teamsWithoutRound({ league, todayISO, teams = [], rounds = [] }) {
     const week = currentWeek(league, todayISO);
     if (!week) return [];
-    const booked = new Set(rounds.filter((r) => r && r.status !== 'cancelled' && r.league_week === week.start)
+    const booked = new Set(rounds.filter((r) => r && r.status !== 'cancelled'
+      && (r.booking_date ? weekIn(league, r.booking_date) : r.league_week) === week.start)
       .map((r) => r.league_team_id));
     return teams.filter((t) => !booked.has(t.id));
   }
@@ -266,5 +276,6 @@
 
   root.InvictusLeagues = { DAY_NAMES, timeLabel, scheduleLabel, weekOf, weeks, currentWeek, progress,
     teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName,
-    seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases };
+    seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
+    weekIn, weekStartOf };
 })(typeof window !== 'undefined' ? window : globalThis);

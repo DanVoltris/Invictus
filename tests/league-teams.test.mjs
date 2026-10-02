@@ -17,6 +17,8 @@ const S = {};
 let seq = 0;
 
 // The Monday of a date's week — date_trunc('week'), which is what the generated column does.
+// What public.league_week_of() does (migration 0040), written out separately from the page's own maths.
+const startOfWeek = (iso, ws) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() - ws + 7) % 7)); return d.toISOString().slice(0, 10); };
 const mondayOf = (iso) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
 
 // The unique indexes migration 0031 creates. Returning a name means the insert is refused with a
@@ -55,8 +57,13 @@ function builder(table) {
     if (st.op === 'insert') {
       const list = (Array.isArray(st.payload) ? st.payload : [st.payload]).map((p) => {
         const row = { id: `${table}-${++seq}`, ...p };
-        // league_week is generated always: supplied values are ignored, the date decides.
-        if (table === 'bookings' && row.booking_date) row.league_week = mondayOf(row.booking_date);
+        // league_week is never supplied: the database works it out from the date and — since
+        // migration 0040 — the day the team's league says its week starts (Monday by default).
+        if (table === 'bookings' && row.booking_date) {
+          const team = (S.db.league_teams || []).find((t) => t.id === row.league_team_id);
+          const lg = team && (S.db.leagues || []).find((l) => l.id === team.league_id);
+          row.league_week = startOfWeek(row.booking_date, lg && lg.week_start != null ? lg.week_start : 1);
+        }
         return row;
       });
       for (const row of list) {
@@ -860,4 +867,43 @@ test('before migration 0039 is pasted in: leagues list and open as before, with 
     assert.equal(r.code, 200);
     assert.equal(r.out.league.details.about, '');
   } finally { S.missing0031 = null; }
+});
+
+// ---- A league chooses the day its week starts (migration 0040) ---------------------------------
+// The first Tuesday from tomorrow on, then the Sunday five days later (same Monday–Sunday week, a
+// NEW Sunday–Saturday week), then the Saturday closing that Sunday week.
+function tueSunSat() {
+  let tue = addDays(1);
+  while (new Date(`${tue}T00:00:00Z`).getUTCDay() !== 2) tue = addDays(1, tue);
+  return { tue, sun: addDays(5, tue), sat: addDays(11, tue) };
+}
+
+test('a Sunday-start league: Tuesday then the following Sunday are two weeks; that Sunday and its Saturday are one', async () => {
+  world();
+  S.db.leagues[0].week_start = 0;
+  const teamId = await ownTeam();
+  const { tue, sun, sat } = tueSunSat();
+  const a = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: tue }), ...cap });
+  assert.equal(a.code, 200, JSON.stringify(a.out));
+  const b = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: sun }), ...cap });
+  assert.equal(b.code, 200, 'the Sunday starts a new week — Monday weeks refused this: ' + JSON.stringify(b.out));
+  assert.equal(b.out.round.week, sun);
+  const c = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: sat }), ...cap });
+  assert.equal(c.code, 409, 'the Saturday closes the week that Sunday opened');
+  assert.equal(c.out.code, 'round_booked');
+  // The team's own page files both rounds under the right weeks.
+  const seen = await run(leaguesApi, { query: { action: 'my-teams' }, ...cap });
+  const weeks = seen.out.teams[0].weeks.filter((w) => w.round);
+  assert.deepEqual(weeks.map((w) => [w.start, w.round.booking_date]), [[startOfWeek(tue, 0), tue], [sun, sun]]);
+  assert.ok(seen.out.teams[0].weeks.every((w) => new Date(`${w.start}T00:00:00Z`).getUTCDay() === 0), 'every week starts on a Sunday');
+});
+
+test('a league that says nothing still counts Monday to Sunday: Tuesday then Sunday is refused', async () => {
+  world();
+  const teamId = await ownTeam();
+  const { tue, sun } = tueSunSat();
+  assert.equal((await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: tue }), ...cap })).code, 200);
+  const b = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: sun }), ...cap });
+  assert.equal(b.code, 409);
+  assert.equal(b.out.code, 'round_booked');
 });

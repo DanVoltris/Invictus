@@ -297,7 +297,7 @@ async function leagueRound(req, res) {
   // 5. One round per team per week. Checked here so the answer can name the round they already
   // have, and enforced by the database's partial unique index so two members booking at the same
   // moment cannot both win.
-  const existing = await teamRoundForWeek(team.id, dateISO);
+  const existing = await teamRoundForWeek(team.id, dateISO, league);
   if (existing) return res.status(409).json(alreadyBooked(settings, team, existing));
 
   const round = await insertLeagueRound({
@@ -309,7 +309,7 @@ async function leagueRound(req, res) {
   if (round.unsupported) return res.status(503).json({ ok: false, error: round.error });
   if (round.conflict === 'slot') return res.status(409).json({ ok: false, code: 'slot_taken', error: 'That time was just taken — pick another slot.' });
   if (round.conflict === 'week') {
-    const again = await teamRoundForWeek(team.id, dateISO);
+    const again = await teamRoundForWeek(team.id, dateISO, league);
     return res.status(409).json(again ? alreadyBooked(settings, team, again)
       : { ok: false, code: 'round_booked', error: 'Your team has already booked its round for this week.' });
   }
@@ -318,7 +318,7 @@ async function leagueRound(req, res) {
   return res.status(200).json({
     ok: true, bookingId: round.id,
     round: { id: round.id, teamId: team.id, booking_date: dateISO, bay: bayName(settings, bayId) || bayId,
-      start: fmtMin(startMin), end: fmtMin(endMin), week: L().weekOf(dateISO) },
+      start: fmtMin(startMin), end: fmtMin(endMin), week: L().weekIn(league, dateISO) },
   });
 }
 
