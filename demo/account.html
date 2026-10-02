@@ -811,7 +811,8 @@ function teamCard(t, idx, opts){
   return `<div class="card" data-team-card="${idx}" data-team-id="${esc(team.id || '')}">
     <div class="sec-title" style="margin-top:0">My team</div>
     <h2 class="lg-name">${esc(team.name || 'Your team')} ${paidPill}</h2>
-    <div class="sub" style="margin-bottom:12px">${esc(lg.name || 'League')}${lg.description ? ' · ' + esc(lg.description) : ''}</div>
+    <div class="sub" style="margin-bottom:12px">${esc(lg.name || 'League')}${lg.description ? ' · ' + esc(lg.description) : ''}${
+      (lg.id && L.hasDetails(lg.details)) ? ` · <a href="/leagues?info=${encodeURIComponent(lg.id)}" style="color:var(--orange);font-weight:600">Rules, schedule &amp; prizes</a>` : ''}</div>
     ${now}
     <div class="sec-title">On the team</div>
     ${chips}

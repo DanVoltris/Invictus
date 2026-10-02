@@ -22,6 +22,31 @@
   .brand-fallback .joy{color:var(--orange);margin-right:6px}
   header a.back{color:var(--muted);text-decoration:none;font-size:13px}
   header a.back:hover{color:var(--white)}
+  /* Full details: the brochure */
+  .info{max-width:760px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:34px 34px 30px}
+  .info h1{font-size:30px;line-height:1.2;margin-bottom:10px}
+  .info-meta{color:var(--muted);font-size:14.5px;font-weight:600;line-height:1.7}
+  .info-about{color:var(--white);font-size:15.5px;line-height:1.7;margin-top:18px;white-space:pre-line}
+  .info section{margin-top:28px}
+  .info h2{font-family:'Space Grotesk';font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);margin-bottom:12px}
+  .info-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 34px}
+  .info-list{list-style:none;padding:0;margin:0}
+  .info-list li{position:relative;padding:0 0 9px 18px;font-size:14.5px;line-height:1.5;color:var(--white)}
+  .info-list li:before{content:'';position:absolute;left:0;top:.62em;width:6px;height:6px;border-radius:50%;background:var(--orange)}
+  .info-phase{font-family:'Space Grotesk';font-weight:700;font-size:15px;margin:18px 0 6px}
+  .info-phase:first-of-type{margin-top:0}
+  .info-weeks{list-style:none;padding:0;margin:0;border-top:1px solid var(--border)}
+  .info-weeks li{display:grid;grid-template-columns:128px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid var(--border);font-size:14.5px;line-height:1.45}
+  .info-when{font-family:'Space Grotesk';font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+  .info-what b{font-weight:700}
+  .info-event{display:block;font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--orange);margin-bottom:2px}
+  .info-where{display:block;color:var(--muted);font-size:13.5px}
+  .info-awards{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+  .info-awards li{border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:13.5px;font-weight:700;text-align:center;background:var(--near-black)}
+  .info-prize{background:rgba(240,82,61,.07);border:1px solid rgba(240,82,61,.3);border-radius:12px;padding:18px 20px}
+  .info-prize p{font-size:14.5px;line-height:1.65;white-space:pre-line}
+  .info-actions{margin-top:26px;max-width:380px;margin-left:auto;margin-right:auto}
+  @media(max-width:640px){ .info{padding:24px 18px} .info h1{font-size:25px} .info-cols{grid-template-columns:1fr} .info-weeks li{grid-template-columns:1fr;gap:2px} }
   .head-block{max-width:640px;margin:6px auto 30px;text-align:center}
   .eyebrow{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange);margin-bottom:10px}
   .head-block h1{font-size:32px;margin-bottom:10px}
@@ -143,7 +168,7 @@ const IS_LOCAL = ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
 const authHeaders = () => { const t=accountToken(); return { 'Content-Type':'application/json',
   ...(t?{ Authorization:'Bearer '+t }:{}), ...(IS_LOCAL?{ 'X-Dev-Account':'1' }:{}) }; };
 const SHOP = '204-488-6177';
-const money = c => '$'+(c/100).toFixed(c%100?2:0);
+const money = c => '$'+(c/100).toLocaleString('en-US',{ minimumFractionDigits:c%100?2:0, maximumFractionDigits:2 });   // $1,140
 const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
 const season = l => (l.season_start && l.season_end) ? `${fmtDate(l.season_start)} – ${fmtDate(l.season_end)}` : (l.season_start ? `From ${fmtDate(l.season_start)}` : 'Season dates to be announced');
 function render(html){ $('#content').innerHTML = html; }
@@ -214,7 +239,73 @@ function listView(){
     if(!SIGNED_IN){ location.href = signInHref('/leagues?start='+encodeURIComponent(lg.id)); return; }
     startView(lg);
   });
+  document.querySelectorAll('[data-info]').forEach(b => b.onclick = () => infoView(b.dataset.info, true));
 }
+
+/* ---------- full details: the brochure (migration 0039) ----------
+   About, format & rules, featured challenges, the week-by-week schedule, team awards and the grand
+   prize — whatever the shop filled in on the league form. It has its own address (?info=<id>), so
+   it can be texted to a team and the back button returns to the list. */
+async function infoView(id, push){
+  if(push) history.pushState({}, '', '/leagues?info=' + encodeURIComponent(id));
+  render('<div class="spin">Loading…</div>');
+  const r = await leaguesApi('info', { leagueId: id });
+  if(!r.ok || !r.league){
+    render(`<div class="center"><h1>League details</h1>
+      <div class="note is-plain" style="text-align:left">${esc(r.status===404 ? (r.error || 'That league is not on the site right now.') : (r.error || 'We could not load that league just now.'))} Call the shop at ${SHOP} and we will tell you all about it.</div>
+      <button class="btn btn-ghost" id="i-back" style="max-width:300px;margin:22px auto 0">Back to leagues</button></div>`);
+    $('#i-back').onclick = backToList;
+    return;
+  }
+  const lg = r.league, d = L.normalizeDetails(lg.details);
+  const range = L.seatRange({ team_size: lg.team_size, team_min: lg.team_min });
+  const price = !(lg.fee_cents > 0) ? 'Free'
+    : !range ? `${money(lg.fee_cents)} per team`
+    : range.min === range.max ? `${money(L.shareOf(lg.fee_cents, range.max))} per golfer · teams of ${range.max} · ${money(lg.fee_cents)} per team`
+    : `${money(L.shareOf(lg.fee_cents, range.max))}–${money(L.shareOf(lg.fee_cents, range.min))} per golfer · teams of ${range.min} to ${range.max}`;
+  const ul = items => `<ul class="info-list">${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+  const listed = LEAGUES.find(l => l.id === lg.id);
+  const mine = listed ? myTeamIn(listed) : null;
+  render(`
+    <article class="info">
+      <div class="eyebrow">Invictus Golf league</div>
+      <h1>${esc(lg.name)}</h1>
+      <div class="info-meta">${esc(season(lg))}<br />${esc(price)}</div>
+      ${d.about ? `<p class="info-about">${esc(d.about)}</p>` : (lg.description ? `<p class="info-about">${esc(lg.description)}</p>` : '')}
+      ${(d.format.length || d.challenges.length) ? `<div class="info-cols">
+        ${d.format.length ? `<section><h2>Format &amp; rules</h2>${ul(d.format)}</section>` : ''}
+        ${d.challenges.length ? `<section><h2>Featured challenges</h2>${ul(d.challenges)}</section>` : ''}
+      </div>` : ''}
+      ${d.schedule.length ? `<section><h2>Schedule</h2>
+        ${L.schedulePhases(d.schedule).map(ph => `
+          ${ph.phase ? `<div class="info-phase">${esc(ph.phase)}</div>` : ''}
+          <ol class="info-weeks">${ph.weeks.map(w => `<li>
+            <span class="info-when">${esc(L.dateRangeLabel(w.from, w.to) || '—')}</span>
+            <span class="info-what">${w.event ? `<span class="info-event">${esc(w.event)}</span>` : ''}<b>${esc(w.course || 'To be announced')}</b>${w.location ? `<span class="info-where">${esc(w.location)}</span>` : ''}</span>
+          </li>`).join('')}</ol>`).join('')}
+      </section>` : ''}
+      ${d.awards.length ? `<section><h2>Team awards</h2><ul class="info-awards">${d.awards.map(a => `<li>${esc(a)}</li>`).join('')}</ul></section>` : ''}
+      ${d.prize ? `<section class="info-prize"><h2>Grand prize</h2><p>${esc(d.prize)}</p></section>` : ''}
+      <div class="info-actions">
+        ${mine ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'} — see My Account</a>`
+          : (lg.joinOnline && listed) ? `<button class="btn btn-primary" id="i-start">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>`
+          : `<div class="note is-plain" style="text-align:left">Online sign-up is not open for this league. Call the shop at ${SHOP} to get your team in.</div>`}
+        <button class="btn btn-ghost" id="i-back">Back to leagues</button>
+      </div>
+    </article>`);
+  window.scrollTo(0, 0);
+  $('#i-back').onclick = backToList;
+  if($('#i-start')) $('#i-start').onclick = () => {
+    if(!SIGNED_IN){ location.href = signInHref('/leagues?start=' + encodeURIComponent(lg.id)); return; }
+    history.replaceState({}, '', '/leagues'); startView(listed);
+  };
+}
+function backToList(){ history.pushState({}, '', '/leagues'); listView(); window.scrollTo(0, 0); }
+// The browser's own back/forward buttons between the list and a league's details.
+window.addEventListener('popstate', () => {
+  const id = new URLSearchParams(location.search).get('info');
+  id ? infoView(id, false) : listView();
+});
 
 function planCard(l){
   const mine = myTeamIn(l);
@@ -242,6 +333,7 @@ function planCard(l){
     ${mine
       ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'} — see My Account</a>`
       : `<button class="btn btn-line" data-start="${esc(l.id)}">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>`}
+    ${l.hasInfo ? `<button class="btn btn-ghost" data-info="${esc(l.id)}" style="margin-top:10px">Full details</button>` : ''}
     ${mine || SIGNED_IN ? '' : '<div class="fine">You need an account to buy a team — it takes a minute, and we bring you straight back here.</div>'}
   </div>`;
 }
@@ -532,6 +624,8 @@ async function load(){
   }
   LEAGUES = list.leagues;
   listView();
+  // Opened straight at a league's details (a link texted to a team, or the back button).
+  if(params.get('info')) infoView(params.get('info'), false);
 
   // Sent here to start a team, and signed in on the way: open that league's form.
   const start = params.get('start');

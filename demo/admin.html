@@ -549,6 +549,14 @@
   /* Equal columns that can shrink below their content, so a long option can't squeeze a
      neighbour's label onto two lines; inputs line up along the bottom either way. */
   .lea-grid{grid-template-columns:repeat(3,minmax(0,1fr));align-items:end}
+  /* League info: one card per week of the schedule */
+  .li-week{border:1px solid var(--border);border-radius:10px;padding:10px 12px 12px;margin-bottom:8px;background:var(--near-black)}
+  .li-week-h{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;margin-bottom:8px}
+  .li-week-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px}
+  .li-week-grid label{margin-bottom:4px}
+  .li-week-grid .input{background:var(--surface)}
+  .li-week-grid .datepick{display:block}.li-week-grid .dp-trigger{width:100%;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media(max-width:700px){ .li-week-grid{grid-template-columns:1fr} }
   .lea-grid .cs-wrap{display:block}
   .lea-grid .cs-trigger{height:44px;display:block;position:relative;padding-right:30px;text-overflow:ellipsis}
   .lea-grid .cs-trigger:after{position:absolute;right:12px;top:50%;margin-top:-3px}
@@ -3089,15 +3097,17 @@ async function loadLeaguesTab(){
   if(leagueRoute()) return openLeaguePage(leagueRoute());   // the address bar is showing one league
   showLeagueIndex();
   const host=$('#lea-list');
-  const [l, m, t, p, p36] = await Promise.all([
+  const [l, m, t, p, p36, p39] = await Promise.all([
     sb.from('leagues').select('*').order('sort').order('season_start'),
     sb.from('league_members').select('league_id,status'),
     sb.from('league_teams').select('league_id'),
     sb.from('leagues').select('id,team_size,weekly_min_mins').limit(1),   // has migration 0031 been run?
     sb.from('leagues').select('id,team_min').limit(1),                    // …and 0036 (min team size)?
+    sb.from('leagues').select('id,details').limit(1),                     // …and 0039 (league info)?
   ]);
   LG31.league = !p.error;
   LG31.min = !p36.error;
+  LG31.info = !p39.error;
   renderBookingWindowCard();
   if(l.error){
     if(isAuthError(l.error)) return;
@@ -3181,6 +3191,8 @@ function openLeagueEditor(x){
   const bays=new Set(x.bay_ids||[]);
   const cols31 = isNew ? LG31.league : ('weekly_min_mins' in x);   // 0031 columns readable here?
   const cols36 = isNew ? !!LG31.min : ('team_min' in x);            // 0036: minimum team size
+  const cols39 = isNew ? !!LG31.info : ('details' in x);            // 0039: league info (the brochure)
+  const info = InvictusLeagues.normalizeDetails(x.details);
   sheet.classList.remove('res-wide');
   sheet.innerHTML=`
     <button class="sheet-close" id="x">✕</button>
@@ -3210,6 +3222,19 @@ function openLeagueEditor(x){
     ${switchRow('le-teams','Teams','Players are grouped into teams, and results are entered per team. Turn off for an individual league.',x.team_mode)}
     ${switchRow('le-online','Online sign-up','Listed on the Leagues page, where a captain can buy a team and invite their friends.',x.join_online)}
     ${switchRow('le-active','Active','Turn off to hide the league everywhere without deleting its history.',x.is_active)}
+    <div class="sec-h" style="margin-top:22px">League info</div>
+    <div class="sub" style="margin-bottom:12px">Everything on the brochure. Customers see it under “Full details” on the Leagues page. All of it is optional.</div>
+    ${cols39 ? `
+    <div class="field"><label for="li-about">About the league</label><textarea class="input" id="li-about" rows="4" maxlength="2000" placeholder="What the league is, who it is for, what the champions win.">${esc(info.about)}</textarea></div>
+    <div class="field"><label for="li-format">Format &amp; rules <span class="dim">(one per line)</span></label><textarea class="input" id="li-format" rows="6" placeholder="Four-person scramble&#10;2-foot concede&#10;No mulligans">${esc(info.format.join('\n'))}</textarea></div>
+    <div class="field"><label for="li-challenges">Featured challenges <span class="dim">(one per line)</span></label><textarea class="input" id="li-challenges" rows="4" placeholder="Mega Putt Challenge&#10;Closest to the Pin Challenge">${esc(info.challenges.join('\n'))}</textarea></div>
+    <div class="field" style="margin-bottom:6px"><label>Schedule <span class="dim">(one row per week — dates, course and where it is)</span></label>
+      <div id="li-weeks"></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="li-week-add">+ Add week</button>
+      <span class="dim" style="font-size:12px;margin-left:8px">Adds the next 7 days and keeps the phase, so you only type the course.</span></div>
+    <div class="field" style="margin-top:14px"><label for="li-awards">Team awards <span class="dim">(one per line)</span></label><textarea class="input" id="li-awards" rows="5" placeholder="Cup Winner&#10;Second Place&#10;Most Birdies">${esc(info.awards.join('\n'))}</textarea></div>
+    <div class="field"><label for="li-prize">Grand prize</label><textarea class="input" id="li-prize" rows="3" maxlength="2000" placeholder="What the winners get, and how they are chosen.">${esc(info.prize)}</textarea></div>`
+    : `<div class="note-flag"><span>Run supabase/migrations/0039_league_details.sql in Supabase to add the brochure details here (about, rules, schedule, awards, grand prize). Everything above can be saved without it.</span></div>`}
     ${cols31?'':`<div class="note-flag" style="margin-top:10px"><span>${esc(MIG31_NOTE)} Until then the team size and the round length can’t be saved — everything else can.</span></div>`}
     ${cols31 && !cols36?`<div class="note-flag" style="margin-top:10px"><span>Run supabase/migrations/0036_league_split_payments.sql to set a minimum team size and split the price between golfers. Until then captains pay the whole team price.</span></div>`:''}
     <div class="err" id="le-err"></div>
@@ -3226,6 +3251,37 @@ function openLeagueEditor(x){
       : `Captains will be offered ${t}. ${min&&min<max?'They pick the size; fewer golfers means a bigger share each.':'Every team is this size.'}`;
   };
   ['#le-fee','#le-cap','#le-min'].forEach(id=>$(id).addEventListener('input',splitText)); splitText();
+  // The schedule: one card per week. The inputs themselves are the record — they are read back
+  // when a week is added or removed and again at save, so nothing typed is lost to a re-draw.
+  let weeks=info.schedule.map(w=>({ ...w }));
+  const readWeeks=()=>[...sheet.querySelectorAll('.li-week')].map(r=>Object.fromEntries(
+    ['from','to','phase','event','course','location'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])));
+  const drawWeeks=()=>{
+    const host=$('#li-weeks'); if(!host) return;
+    host.innerHTML=weeks.map((w,i)=>`<div class="li-week">
+      <div class="li-week-h"><b>Week ${i+1}</b><button type="button" class="link-btn li-week-del" data-i="${i}" aria-label="Remove week ${i+1}">Remove</button></div>
+      <div class="li-week-grid">
+        <div><label>From</label><input class="input" type="date" data-k="from" value="${esc(w.from||'')}" /></div>
+        <div><label>To</label><input class="input" type="date" data-k="to" value="${esc(w.to||'')}" /></div>
+        <div><label>Phase</label><input class="input" data-k="phase" maxlength="60" value="${esc(w.phase||'')}" placeholder="e.g. Phase 1" /></div>
+        <div><label>Event <span class="dim">(optional)</span></label><input class="input" data-k="event" maxlength="80" value="${esc(w.event||'')}" placeholder="e.g. Mini Tournament 1" /></div>
+        <div><label>Course</label><input class="input" data-k="course" maxlength="120" value="${esc(w.course||'')}" placeholder="e.g. Deer Ridge Golf Club" /></div>
+        <div><label>Location</label><input class="input" data-k="location" maxlength="120" value="${esc(w.location||'')}" placeholder="e.g. Kitchener, Ontario" /></div>
+      </div></div>`).join('') || '<div class="dim" style="font-size:12.5px;margin-bottom:8px">No weeks yet.</div>';
+    host.querySelectorAll('input[type="date"]').forEach(buildDatePicker);
+    host.querySelectorAll('.li-week-del').forEach(b=>b.onclick=()=>{ weeks=readWeeks(); weeks.splice(+b.dataset.i,1); drawWeeks(); });
+  };
+  if(cols39){
+    drawWeeks();
+    $('#li-week-add').onclick=()=>{
+      weeks=readWeeks();
+      const last=weeks[weeks.length-1];
+      const from = last ? (last.to ? addDaysISO(last.to,1) : last.from ? addDaysISO(last.from,7) : '') : ($('#le-from').value||'');
+      weeks.push({ from, to: from ? addDaysISO(from,6) : '', phase: last ? last.phase : '', event:'', course:'', location:'' });
+      drawWeeks();
+      const rows=sheet.querySelectorAll('.li-week'); rows[rows.length-1].querySelector('[data-k="course"]').focus();
+    };
+  }
   $('#le-name').focus();
   $('#le-save').onclick=async()=>{
     const err=m=>{ $('#le-err').textContent=m; };
@@ -3243,11 +3299,20 @@ function openLeagueEditor(x){
     if(tmin!=null && size==null) return err('Set the most golfers per team too — a minimum needs a maximum to split the price by.');
     if(tmin!=null && tmin>size) return err('The fewest golfers can’t be more than the most.');
     if(!(Number.isInteger(mins) && mins>0)) return err('Pick a recommended round length.');
+    let details=null;
+    if(cols39){
+      const sched=readWeeks();
+      const bad=sched.findIndex(w=>w.from && w.to && w.to<w.from);
+      if(bad>=0) return err(`Week ${bad+1} in the schedule ends before it starts.`);
+      details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, format:$('#li-format').value, challenges:$('#li-challenges').value,
+        schedule:sched, awards:$('#li-awards').value, prize:$('#li-prize').value });
+    }
     const row={ name, description:$('#le-desc').value.trim()||null,
       season_start:from, season_end:to, bay_ids:[...bays], fee_cents:fee, scoring:$('#le-scoring').value,
       team_mode:$('#le-teams').checked, join_online:$('#le-online').checked, is_active:$('#le-active').checked,
       ...(cols31 ? { team_size:size, weekly_min_mins:mins } : {}),
-      ...(cols36 ? { team_min:tmin } : {}) };
+      ...(cols36 ? { team_min:tmin } : {}),
+      ...(cols39 ? { details } : {}) };
     $('#le-save').disabled=true;
     const ok = isNew ? await dbInsert('leagues',{ ...row, sort:LEAGUES.length }) : await dbUpdate('leagues',x.id,row);
     $('#le-save').disabled=false;
@@ -3285,7 +3350,7 @@ window.addEventListener('hashchange', applyLeagueRoute);
 // and tables are not there, so every read that needs them degrades on its own and says so.
 const MIG31_NOTE = 'Run migration 0031 (supabase/migrations/0031_league_teams.sql) to record team captains, team payments, invites and the weekly rounds teams book for themselves.';
 const mig31Flag = (ok, extra) => ok ? '' : `<div class="note-flag" style="margin-top:10px"><span>${esc(MIG31_NOTE)}${extra?' '+esc(extra):''}</span></div>`;
-let LG31 = { league:true, rounds:true, min:true };   // 0031 columns: on leagues (loadLeaguesTab) / on bookings (loadLeagueIndex)
+let LG31 = { league:true, rounds:true, min:true, info:true };   // 0031 columns: on leagues (loadLeaguesTab) / on bookings (loadLeagueIndex)
 
 // The person staff ring about a team: its captain, or failing that whoever joined first.
 function teamCaptain(team, members){
