@@ -6,71 +6,123 @@
 <title>Invictus Golf — Leagues</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Raleway:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
 <style>
   :root{ --black:#F6F7F9;--near-black:#F5F7FA;--surface:#FFFFFF;--surface-2:#EDEFF3;--border:#D7DCE3;
-    --white:#14161A;--muted:#555C68;--dim:#858C99;--orange:#F0523D;--danger:#D92D20;--ok:#067647;--radius:16px; }
+    --white:#14161A;--muted:#555C68;--dim:#858C99;--orange:#F0523D;--orange-ink:#C7402E;--danger:#D92D20;--ok:#067647;--radius:16px; }
   *{box-sizing:border-box;margin:0;padding:0}
   *{scrollbar-width:none;-ms-overflow-style:none} *::-webkit-scrollbar{width:0;height:0;display:none}
   body{background:radial-gradient(1200px 600px at 70% -10%,#FFFFFF 0%,var(--black) 55%),var(--black);
     color:var(--white);font-family:'Raleway',system-ui,sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;padding:24px}
   h1,h2,h3{font-family:'Space Grotesk',sans-serif;letter-spacing:-.01em}
-  .wrap{max-width:940px;margin:0 auto}
+  .wrap{max-width:1080px;margin:0 auto}
   header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 0 26px}
   header img{height:46px;width:auto}
   .brand-fallback{font-family:'Space Grotesk';font-weight:700;font-size:20px}
   .brand-fallback .joy{color:var(--orange);margin-right:6px}
   header a.back{color:var(--muted);text-decoration:none;font-size:13px}
   header a.back:hover{color:var(--white)}
-  /* Full details: the brochure */
-  .info{max-width:760px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:34px 34px 30px}
-  .info-title{font-family:'Space Grotesk';font-size:30px;line-height:1.2;margin-bottom:10px;color:var(--white)}
-  .info-slot{max-width:760px;margin:34px auto 0;scroll-margin-top:16px}
-  .info-meta{color:var(--muted);font-size:14.5px;font-weight:600;line-height:1.7}
-  .info-about{color:var(--white);font-size:15.5px;line-height:1.7;margin-top:18px;white-space:pre-line}
-  .info section{margin-top:28px}
-  .info h3{font-family:'Space Grotesk';font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);margin-bottom:12px}
-  .info-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 34px}
-  .info-list{list-style:none;padding:0;margin:0}
-  .info-list li{position:relative;padding:0 0 9px 18px;font-size:14.5px;line-height:1.5;color:var(--white)}
-  .info-list li:before{content:'';position:absolute;left:0;top:.62em;width:6px;height:6px;border-radius:50%;background:var(--orange)}
-  .info-phase{font-family:'Space Grotesk';font-weight:700;font-size:15px;margin:18px 0 6px}
-  .info-phase:first-of-type{margin-top:0}
-  .info-weeks{list-style:none;padding:0;margin:0;border-top:1px solid var(--border)}
-  .info-weeks li{display:grid;grid-template-columns:128px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid var(--border);font-size:14.5px;line-height:1.45}
-  .info-when{font-family:'Space Grotesk';font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
-  .info-what b{font-weight:700}
-  .info-event{display:block;font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--orange);margin-bottom:2px}
-  .info-where{display:block;color:var(--muted);font-size:13.5px}
-  .info-awards{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
-  .info-awards li{border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:13.5px;font-weight:700;text-align:center;background:var(--near-black)}
-  .info-prize{background:rgba(240,82,61,.07);border:1px solid rgba(240,82,61,.3);border-radius:12px;padding:18px 20px}
-  .info-prize p{font-size:14.5px;line-height:1.65;white-space:pre-line}
-  .info-actions{margin-top:26px;max-width:380px;margin-left:auto;margin-right:auto}
-  @media(max-width:640px){ .info{padding:24px 18px} .info-title{font-size:25px} .info-cols{grid-template-columns:1fr} .info-weeks li{grid-template-columns:1fr;gap:2px} }
-  .head-block{max-width:640px;margin:6px auto 30px;text-align:center}
-  .eyebrow{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange);margin-bottom:10px}
-  .head-block h1{font-size:32px;margin-bottom:10px}
-  .head-block .sub{color:var(--muted);font-size:15.5px;font-weight:500;line-height:1.65}
-  /* How the team deal works — said once at the top instead of on every card. */
-  .how{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:0 auto 26px;max-width:860px}
-  .how-step{flex:1 1 200px;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
-  .how-step .n{font-family:'Space Grotesk';font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange);margin-bottom:6px}
-  .how-step .t{font-family:'Space Grotesk';font-weight:700;font-size:14.5px;margin-bottom:4px}
-  .how-step .d{color:var(--muted);font-size:13px;line-height:1.5}
-  /* Fixed-width cards on centered wrap lines — partial rows stay symmetric. */
-  .plans{display:flex;flex-wrap:wrap;justify-content:center;gap:16px}
-  .plan{width:296px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:26px 24px 22px;display:flex;flex-direction:column}
-  @media(max-width:680px){ .plan{width:100%} .how-step{flex:1 1 100%} }
-  .cdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:2px}
-  .plan-name{font-family:'Space Grotesk';font-weight:700;font-size:18px;color:var(--white);margin-bottom:6px;line-height:1.3}
-  .plan-when{font-size:13.5px;color:var(--muted);font-weight:600}
-  .plan-price{font-family:'Space Grotesk';font-weight:700;font-size:30px;line-height:1;color:var(--white);margin-top:16px}
-  .plan-price .per{font-size:13px;font-weight:500;color:var(--dim);margin-left:5px}
-  .facts{list-style:none;color:var(--muted);font-size:13px;line-height:1.55;margin-top:14px;display:grid;gap:4px;flex:1}
-  .facts b{color:var(--white);font-weight:600}
-  .plan-desc{color:var(--muted);font-size:13.5px;line-height:1.6;margin-top:12px;white-space:pre-line}
-  .perk{display:inline-block;align-self:flex-start;margin-top:12px;font-size:12px;font-weight:700;color:var(--ok);background:rgba(78,192,106,.12);border:1px solid rgba(78,192,106,.4);border-radius:999px;padding:4px 11px}
+  /* --orange-ink: the brand orange is too light for small text on white (3.5:1); this passes (5:1). */
+  .eyebrow{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange-ink);margin-bottom:10px}
+
+  /* ---- The league page ------------------------------------------------------------------
+     One league, laid out like its brochure: a title, the story, the rules, a scorecard of the
+     season, the honours, the prize. The sign-up panel on the right stays in view while people
+     read. Type: Marcellus for the league's own headings (an engraved, trophy-plate face), Raleway
+     for reading, Space Grotesk for small labels as on the rest of the site.
+     Radius rule: panels 14px, the scorecard 4px (a printed card), buttons 11px. No shadows. */
+  .lp{max-width:1080px;margin:0 auto}
+  .lp-back{background:none;border:none;padding:0;margin:0 0 18px;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+  .lp-back:hover{color:var(--white)} .lp-back:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
+  .lp-head{padding:18px 0 34px;border-bottom:1px solid var(--border);margin-bottom:38px}
+  .lp-title{font-family:'Marcellus',Georgia,serif;font-weight:400;font-size:clamp(34px,5.4vw,58px);line-height:1.06;letter-spacing:-.005em;color:var(--white);max-width:16ch}
+  .lp-lede{font-size:clamp(16px,1.5vw,18.5px);line-height:1.62;color:var(--muted);max-width:62ch;margin-top:20px}
+  .lp-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:56px;align-items:start}
+  .lp-main > section{margin-bottom:54px}
+  .lp-main > section:last-child{margin-bottom:0}
+  .lp h2{font-family:'Marcellus',Georgia,serif;font-weight:400;font-size:25px;line-height:1.2;letter-spacing:0;color:var(--white);margin-bottom:16px}
+  .lp-about p{font-size:16px;line-height:1.72;color:var(--white);max-width:66ch;white-space:pre-line}
+  .lp-about p + p{margin-top:14px}
+  .lp-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 44px}
+  /* Plain ruled lists: the rule does the separating, so there are no bullets to decorate. */
+  .lp-list{list-style:none;border-top:1px solid var(--border)}
+  .lp-list li{padding:11px 0;border-bottom:1px solid var(--border);font-size:15px;line-height:1.45;color:var(--white)}
+
+  /* The scorecard: the season, week by week. The page's one bold element. */
+  .sc{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--white);border-radius:4px;overflow:hidden;font-variant-numeric:tabular-nums lining-nums}
+  .sc th,.sc td{text-align:left;vertical-align:top;padding:13px 14px;font-size:14.5px;line-height:1.4}
+  .sc thead th{background:var(--white);color:#fff;font-family:'Space Grotesk';font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;padding:10px 14px}
+  .sc tbody tr + tr td{border-top:1px solid var(--border)}
+  .sc .sc-phase th{background:var(--surface-2);font-family:'Space Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:9px 14px;border-top:1px solid var(--white)}
+  .sc tbody:first-of-type .sc-phase th{border-top:none}
+  .sc .sc-n{width:52px;font-family:'Marcellus',Georgia,serif;font-size:19px;line-height:1.15;color:var(--white)}
+  .sc .sc-d{width:132px;white-space:nowrap;color:var(--muted);font-weight:600}
+  .sc .sc-c b{display:block;font-weight:700;color:var(--white)}
+  .sc .sc-c span{display:block;color:var(--muted);font-size:13.5px;margin-top:2px}
+  .sc .sc-e{width:190px;font-family:'Space Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--orange-ink);padding-top:15px}
+
+  /* The honours: a ruled list in columns, like names on a clubhouse board. */
+  .lp-honours{list-style:none;columns:3;column-gap:36px}
+  .lp-honours li{break-inside:avoid;padding:10px 0;border-bottom:1px solid var(--border);font-size:14.5px;font-weight:600;color:var(--white)}
+  .lp-prize{border-top:2px solid var(--white);border-bottom:1px solid var(--border);padding:26px 0 28px}
+  .lp-prize p{font-size:17px;line-height:1.66;color:var(--white);max-width:60ch;white-space:pre-line}
+  .lp-how{list-style:none;counter-reset:how;border-top:1px solid var(--border)}
+  .lp-how li{counter-increment:how;display:grid;grid-template-columns:44px 1fr;gap:6px;padding:16px 0;border-bottom:1px solid var(--border);font-size:15px;line-height:1.55;color:var(--muted)}
+  .lp-how li:before{content:counter(how);font-family:'Marcellus',Georgia,serif;font-size:24px;line-height:1;color:var(--white)}
+  .lp-how b{display:block;color:var(--white);font-weight:700;margin-bottom:2px}
+
+  /* The sign-up panel */
+  .lp-panel{position:sticky;top:24px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:26px 24px 22px}
+  .lp-price{font-family:'Marcellus',Georgia,serif;font-size:46px;line-height:1;color:var(--white)}
+  .lp-price-note{font-size:13.5px;color:var(--muted);font-weight:600;margin-top:8px}
+  .lp-facts{margin:22px 0 4px;border-top:1px solid var(--border)}
+  .lp-facts div{display:grid;grid-template-columns:86px 1fr;gap:10px;padding:11px 0;border-bottom:1px solid var(--border);font-size:13.5px;line-height:1.45}
+  .lp-facts dt{font-family:'Space Grotesk';font-weight:700;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-top:2px}
+  .lp-facts dd{color:var(--white);font-weight:600}
+  .lp-facts dd span{display:block;color:var(--muted);font-weight:500}
+  .lp-panel .fine{text-align:left;margin-top:12px;color:var(--muted)}
+  /* On a phone the panel sits first in the page, and this bar keeps the button within reach. */
+  .lp-bar{display:none}
+
+  /* Several leagues: a list, each one opening its own page. */
+  .lg-index{max-width:860px;margin:0 auto}
+  .lg-index-head{padding:18px 0 30px}
+  .lg-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px 28px;align-items:center;padding:26px 0;border-top:1px solid var(--border)}
+  .lg-row:last-child{border-bottom:1px solid var(--border)}
+  .lg-row h2{font-family:'Marcellus',Georgia,serif;font-weight:400;font-size:27px;line-height:1.15;letter-spacing:0}
+  .lg-row .lg-meta{color:var(--muted);font-size:14.5px;line-height:1.6;margin-top:8px}
+  .lg-row .btn{margin-top:0;width:auto;padding:13px 22px;white-space:nowrap}
+
+  @media(max-width:900px){
+    .lp-grid{grid-template-columns:1fr;gap:34px}
+    .lp-panel{position:static;order:-1}
+    .lp-head{padding-bottom:26px;margin-bottom:28px}
+    .lp.has-bar{padding-bottom:86px}
+    .lp-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;position:fixed;left:0;right:0;bottom:0;z-index:15;
+      background:var(--surface);border-top:1px solid var(--border);padding:12px 18px calc(12px + env(safe-area-inset-bottom))}
+    .lp-bar .lp-bar-p{font-family:'Marcellus',Georgia,serif;font-size:24px;line-height:1;color:var(--white)}
+    .lp-bar .lp-bar-p span{display:block;font-family:'Raleway';font-size:11.5px;font-weight:600;color:var(--muted);margin-top:4px}
+    .lp-bar .btn{margin-top:0;width:auto;padding:13px 20px;white-space:nowrap}
+  }
+  @media(max-width:640px){
+    .lp-cols{grid-template-columns:1fr;gap:38px 0}
+    .lp-main > section{margin-bottom:42px}
+    .lp-honours{columns:2;column-gap:22px}
+    .lg-row{grid-template-columns:1fr}
+    .lg-row .btn{width:100%}
+    /* The scorecard folds: week and dates on one line, the course under them, the event last. */
+    .sc thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+    .sc,.sc tbody,.sc tr,.sc td,.sc .sc-phase th{display:block}
+    .sc tbody tr:not(.sc-phase){display:grid;grid-template-columns:34px 1fr;gap:2px 8px;padding:13px 14px;border-top:1px solid var(--border)}
+    .sc tbody tr + tr td{border-top:none}
+    .sc td{padding:0}
+    .sc .sc-n{width:auto;grid-row:1 / span 3;font-size:20px}
+    .sc .sc-d{width:auto;font-size:13px}
+    .sc .sc-c,.sc .sc-e{grid-column:2}
+    .sc .sc-e{width:auto;padding-top:3px}
+    .sc .sc-e:empty{display:none}
+  }
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .btn{display:block;width:100%;border:none;border-radius:11px;padding:14px;font-weight:700;font-size:15px;font-family:'Space Grotesk';cursor:pointer;transition:.15s;margin-top:18px;text-align:center;text-decoration:none}
   .btn-primary{background:var(--orange);color:#fff}.btn-primary:hover{background:#d8452f}
   .btn-primary:disabled{background:#E4E7EC;color:#98A2B3;cursor:not-allowed}
@@ -147,7 +199,7 @@
    is shared across them (migration 0036): the captain pays one share, each friend pays one when they
    accept the invite, and a friend joining a seat the captain already covered pays nothing. There is
    no league night: each team plays once a week whenever it likes, booked from the ordinary booking
-   page, and those rounds are free because the season was paid up front.
+   page. The league fee is the entry; bay time for the rounds is paid at the regular rate.
 
    This page does three jobs:
      · the shop window — what a team costs, how many players fit, how the weekly round works;
@@ -172,7 +224,13 @@ const SHOP = '204-488-6177';
 const money = c => '$'+(c/100).toLocaleString('en-US',{ minimumFractionDigits:c%100?2:0, maximumFractionDigits:2 });   // $1,140
 const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
 const season = l => (l.season_start && l.season_end) ? `${fmtDate(l.season_start)} – ${fmtDate(l.season_end)}` : (l.season_start ? `From ${fmtDate(l.season_start)}` : 'Season dates to be announced');
-function render(html){ $('#content').innerHTML = html; }
+// Every screen goes through here. VIEW counts them, so a slow answer that arrives after the
+// customer has moved on can tell it is no longer wanted (see leaguePage).
+let VIEW = 0;
+// A one-off message for the next screen (a canceled payment). Shown once, then gone.
+let FLASH = '';
+const flash = () => { const m = FLASH; FLASH = ''; return m ? `<div class="note is-plain" style="max-width:640px;margin:0 0 22px">${esc(m)}</div>` : ''; };
+function render(html){ VIEW++; $('#content').innerHTML = html; }
 // Where to send somebody who has to sign in first, and how to get them back here afterwards.
 const signInHref = back => '/account?next=' + encodeURIComponent(back);
 
@@ -213,155 +271,149 @@ function myTeamIn(league){
   return league.myTeamId ? { id: league.myTeamId, name: null } : null;       // knows only that there is one
 }
 
-/* ---------- the shop window ---------- */
+/* ---------- the Leagues page ----------
+   One league open: the page IS that league. Several: a short list, each opening its own page
+   (/leagues?info=<id>, which is also the link to text to a team). */
 function listView(){
   if(!LEAGUES.length){
     render(`<div class="center"><h1>Leagues</h1>
-      <div class="note is-plain" style="text-align:left">No leagues are taking sign-ups online right now. Check back soon, or call the shop at ${SHOP} and we'll tell you what is coming up.</div>
+      <div class="note is-plain" style="text-align:left">No leagues are taking sign-ups online right now. Check back soon, or call the shop at ${SHOP} and we will tell you what is coming up.</div>
       <a class="btn btn-ghost" href="/" style="max-width:300px;margin:22px auto 0">Back to booking</a></div>`);
     return;
   }
-  render(`
-    <div class="head-block">
-      <div class="eyebrow">Invictus Golf leagues</div>
-      <h1>Start a team</h1>
-      <div class="sub">A league here is sold by the team. The team price is split between the players, everyone pays their own share, and then you play a round a week whenever it suits you — and those rounds cost nothing.</div>
+  if(LEAGUES.length === 1){ leaguePage(LEAGUES[0].id, { solo: true }); return; }
+  render(`<div class="lg-index">
+    ${flash()}
+    <div class="lg-index-head">
+      <div class="eyebrow">Invictus Golf</div>
+      <h1 class="lp-title">Leagues</h1>
     </div>
-    <div class="how">
-      <div class="how-step"><div class="n">Step 1</div><div class="t">Start the team</div><div class="d">Name it, pick how many golfers, and pay your own share. You are the captain.</div></div>
-      <div class="how-step"><div class="n">Step 2</div><div class="t">Invite your players</div><div class="d">Add them by mobile number from My Account. They tap the link, pay their share, and they are on the team.</div></div>
-      <div class="how-step"><div class="n">Step 3</div><div class="t">Play once a week</div><div class="d">Book any bay at any time you like. Anyone on the team can book it, and it is free.</div></div>
-    </div>
-    <div class="plans">${LEAGUES.map(planCard).join('')}</div>
-    ${LEAGUES.filter(l => l.hasInfo).map(l => `<div class="info-slot" id="info-${esc(l.id)}"><div class="spin">Loading the league details…</div></div>`).join('')}
-    ${MY_TEAMS===null && SIGNED_IN ? `<div class="note is-plain" style="max-width:520px;margin:22px auto 0">We could not check whether you are already on a team — that part of the site is still being switched on. Your team, if you have one, is on <a href="/account">My Account</a>.</div>` : ''}`);
-  document.querySelectorAll('[data-start]').forEach(b => b.onclick = () => {
-    const lg = LEAGUES.find(l => l.id === b.dataset.start);
-    if(!lg) return;
-    if(!SIGNED_IN){ location.href = signInHref('/leagues?start='+encodeURIComponent(lg.id)); return; }
-    startView(lg);
-  });
-  // The brochure for each league sits right under the cards — rules, schedule and prizes are the
-  // reason people sign up, so they are on the page, not behind a button. The card's button scrolls
-  // to it. Each also keeps its own address (?info=<id>) for texting to a team.
-  document.querySelectorAll('[data-info]').forEach(b => b.onclick = () => {
-    const slot = document.getElementById('info-' + b.dataset.info);
-    if(slot) slot.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
-    else infoView(b.dataset.info, true);
-  });
-  LEAGUES.filter(l => l.hasInfo).forEach(async l => {
-    const r = await leaguesApi('info', { leagueId: l.id });
-    const slot = document.getElementById('info-' + l.id);
-    if(!slot) return;                                   // they have moved on to another view
-    if(!r.ok || !r.league){ slot.remove(); return; }
-    slot.innerHTML = infoHTML(r.league, { inline: true });
-    wireInfo(slot, r.league);
-  });
+    ${LEAGUES.map(l => {
+      const mine = myTeamIn(l);
+      return `<div class="lg-row">
+        <div><h2>${esc(l.name)}</h2>
+          <div class="lg-meta">${esc(season(l))}<br />${esc(priceLine(l))}${mine ? `<br /><b>${mine.name ? 'Your team: ' + esc(mine.name) : 'You are on a team'}</b>` : ''}</div></div>
+        <button class="btn btn-line" data-open="${esc(l.id)}">View league</button>
+      </div>`; }).join('')}
+    ${MY_TEAMS===null && SIGNED_IN ? `<div class="note is-plain" style="margin-top:22px">We could not check whether you are already on a team. Your team, if you have one, is on <a href="/account">My Account</a>.</div>` : ''}
+  </div>`);
+  document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => leaguePage(b.dataset.open, { push: true }));
 }
 
-/* ---------- full details: the brochure (migration 0039) ----------
-   About, format & rules, featured challenges, the week-by-week schedule, team awards and the grand
-   prize — whatever the shop filled in on the league form. It has its own address (?info=<id>), so
-   it can be texted to a team and the back button returns to the list. */
-async function infoView(id, push){
+// "$285 per golfer" / "$285 to $380 per golfer" / "$1,140 per team" / "Free".
+function priceParts(l){
+  const size = l.team_size != null ? l.team_size : l.capacity;
+  const range = L.seatRange({ team_size: size, team_min: l.team_min });
+  if(!(l.fee_cents > 0)) return { big: 'Free', note: 'No charge to enter', range };
+  if(!range) return { big: money(l.fee_cents), note: 'per team, tax included', range };
+  if(range.min === range.max) return { big: money(L.shareOf(l.fee_cents, range.max)), note: 'per golfer, tax included', range };
+  return { big: `${money(L.shareOf(l.fee_cents, range.max))} to ${money(L.shareOf(l.fee_cents, range.min))}`, note: 'per golfer, tax included', range };
+}
+const priceLine = l => { const p = priceParts(l); return p.big === 'Free' ? 'Free to enter' : `${p.big} ${p.note}`; };
+
+/* One league's page. The brochure (about, rules, schedule, honours, prize) comes from
+   ?action=info; if that cannot be read, the page still shows what the list already knows. */
+async function leaguePage(id, { solo = false, push = false } = {}){
   if(push) history.pushState({}, '', '/leagues?info=' + encodeURIComponent(id));
-  render('<div class="spin">Loading…</div>');
+  render('<div class="spin">Loading the league…</div>');
+  const mine = VIEW;
+  const listed = LEAGUES.find(l => l.id === id) || null;
   const r = await leaguesApi('info', { leagueId: id });
-  if(!r.ok || !r.league){
+  if(mine !== VIEW) return;                       // they opened something else while this loaded
+  const lg = (r.ok && r.league) ? r.league : (listed ? { ...listed, joinOnline: true, details: null } : null);
+  if(!lg){
     render(`<div class="center"><h1>League details</h1>
       <div class="note is-plain" style="text-align:left">${esc(r.status===404 ? (r.error || 'That league is not on the site right now.') : (r.error || 'We could not load that league just now.'))} Call the shop at ${SHOP} and we will tell you all about it.</div>
       <button class="btn btn-ghost" id="i-back" style="max-width:300px;margin:22px auto 0">Back to leagues</button></div>`);
     $('#i-back').onclick = backToList;
     return;
   }
-  render(infoHTML(r.league, { inline: false }));
+  const many = LEAGUES.length > 1 || (!listed && LEAGUES.length > 0);
+  render(leaguePageHTML(lg, { back: !solo && many }));
   window.scrollTo(0, 0);
-  wireInfo($('#content'), r.league);
-}
-// The brochure as a page section. inline: on the Leagues list, under the cards (no Back button).
-function infoHTML(lg, { inline }){
-  const d = L.normalizeDetails(lg.details);
-  const range = L.seatRange({ team_size: lg.team_size, team_min: lg.team_min });
-  const price = !(lg.fee_cents > 0) ? 'Free'
-    : !range ? `${money(lg.fee_cents)} per team`
-    : range.min === range.max ? `${money(L.shareOf(lg.fee_cents, range.max))} per golfer · teams of ${range.max} · ${money(lg.fee_cents)} per team`
-    : `${money(L.shareOf(lg.fee_cents, range.max))}–${money(L.shareOf(lg.fee_cents, range.min))} per golfer · teams of ${range.min} to ${range.max}`;
-  const ul = items => `<ul class="info-list">${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
-  const listed = LEAGUES.find(l => l.id === lg.id);
-  const mine = listed ? myTeamIn(listed) : null;
-  const H = inline ? 'h2' : 'h1';
-  return `
-    <article class="info">
-      <div class="eyebrow">${inline ? 'Rules, schedule &amp; prizes' : 'Invictus Golf league'}</div>
-      <${H} class="info-title">${esc(lg.name)}</${H}>
-      <div class="info-meta">${esc(season(lg))}<br />${esc(price)}</div>
-      ${d.about ? `<p class="info-about">${esc(d.about)}</p>` : (lg.description ? `<p class="info-about">${esc(lg.description)}</p>` : '')}
-      ${(d.format.length || d.challenges.length) ? `<div class="info-cols">
-        ${d.format.length ? `<section><h3>Format &amp; rules</h3>${ul(d.format)}</section>` : ''}
-        ${d.challenges.length ? `<section><h3>Featured challenges</h3>${ul(d.challenges)}</section>` : ''}
-      </div>` : ''}
-      ${d.schedule.length ? `<section><h3>Schedule</h3>
-        ${L.schedulePhases(d.schedule).map(ph => `
-          ${ph.phase ? `<div class="info-phase">${esc(ph.phase)}</div>` : ''}
-          <ol class="info-weeks">${ph.weeks.map(w => `<li>
-            <span class="info-when">${esc(L.dateRangeLabel(w.from, w.to) || '—')}</span>
-            <span class="info-what">${w.event ? `<span class="info-event">${esc(w.event)}</span>` : ''}<b>${esc(w.course || 'To be announced')}</b>${w.location ? `<span class="info-where">${esc(w.location)}</span>` : ''}</span>
-          </li>`).join('')}</ol>`).join('')}
-      </section>` : ''}
-      ${d.awards.length ? `<section><h3>Team awards</h3><ul class="info-awards">${d.awards.map(a => `<li>${esc(a)}</li>`).join('')}</ul></section>` : ''}
-      ${d.prize ? `<section class="info-prize"><h3>Grand prize</h3><p>${esc(d.prize)}</p></section>` : ''}
-      <div class="info-actions">
-        ${mine ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'} — see My Account</a>`
-          : (lg.joinOnline && listed) ? `<button class="btn btn-primary i-start">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>`
-          : `<div class="note is-plain" style="text-align:left">Online sign-up is not open for this league. Call the shop at ${SHOP} to get your team in.</div>`}
-        ${inline ? '' : '<button class="btn btn-ghost" id="i-back">Back to leagues</button>'}
-      </div>
-    </article>`;
-}
-function wireInfo(root, lg){
-  const listed = LEAGUES.find(l => l.id === lg.id);
-  const back = root.querySelector('#i-back'); if(back) back.onclick = backToList;
-  const start = root.querySelector('.i-start');
-  if(start) start.onclick = () => {
+  const back = $('#i-back'); if(back) back.onclick = backToList;
+  document.querySelectorAll('.i-start').forEach(btn => btn.onclick = () => {
     if(!SIGNED_IN){ location.href = signInHref('/leagues?start=' + encodeURIComponent(lg.id)); return; }
     history.replaceState({}, '', '/leagues'); startView(listed); window.scrollTo(0, 0);
-  };
+  });
+}
+// Kept under its old name too: the address ?info=<id> and the back button call it.
+const infoView = (id, push) => leaguePage(id, { push });
+
+function leaguePageHTML(lg, { back }){
+  const d = L.normalizeDetails(lg.details);
+  const price = priceParts(lg), range = price.range;
+  const listed = LEAGUES.find(l => l.id === lg.id);
+  const mine = listed ? myTeamIn(listed) : null;
+  const canStart = !mine && lg.joinOnline && !!listed;
+  const paras = (d.about || lg.description || '').split(/\n{2,}/).map(x => x.trim()).filter(Boolean);
+  const lede = paras.shift() || '';
+  const weeks = d.schedule.length;
+  const list = items => `<ul class="lp-list">${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+  let n = 0;
+  const cta = mine ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'}. See My Account</a>`
+    : canStart ? `<button class="btn btn-primary i-start">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>
+        ${SIGNED_IN ? '' : '<div class="fine">You need an account to start a team. It takes a minute, and we bring you straight back here.</div>'}`
+    : `<div class="note is-plain" style="margin-top:18px">Online sign-up is not open for this league. Call the shop at ${SHOP} to get your team in.</div>`;
+  return `
+  <article class="lp${canStart ? ' has-bar' : ''}">
+    ${back ? '<button class="lp-back" id="i-back">← All leagues</button>' : ''}
+    ${flash()}
+    <header class="lp-head">
+      <div class="eyebrow">Invictus Golf league</div>
+      <h1 class="lp-title">${esc(lg.name)}</h1>
+      ${lede ? `<p class="lp-lede">${esc(lede)}</p>` : ''}
+    </header>
+    <div class="lp-grid">
+      <div class="lp-main">
+        ${paras.length ? `<section class="lp-about">${paras.map(x => `<p>${esc(x)}</p>`).join('')}</section>` : ''}
+        ${(d.format.length || d.challenges.length) ? `<section class="lp-cols">
+          ${d.format.length ? `<div><h2>Format and rules</h2>${list(d.format)}</div>` : ''}
+          ${d.challenges.length ? `<div><h2>Featured challenges</h2>${list(d.challenges)}</div>` : ''}
+        </section>` : ''}
+        ${weeks ? `<section><h2>The season, week by week</h2>
+          <table class="sc">
+            <caption class="sr-only">Schedule: week, dates, course and event</caption>
+            <thead><tr><th scope="col">Wk</th><th scope="col">Dates</th><th scope="col">Course</th><th scope="col">Event</th></tr></thead>
+            ${L.schedulePhases(d.schedule).map(ph => `<tbody>
+              ${ph.phase ? `<tr class="sc-phase"><th colspan="4" scope="colgroup">${esc(ph.phase)}</th></tr>` : ''}
+              ${ph.weeks.map(w => `<tr>
+                <td class="sc-n">${++n}</td>
+                <td class="sc-d">${esc(L.dateRangeLabel(w.from, w.to) || 'To be announced')}</td>
+                <td class="sc-c"><b>${esc(w.course || 'To be announced')}</b>${w.location ? `<span>${esc(w.location)}</span>` : ''}</td>
+                <td class="sc-e">${esc(w.event)}</td></tr>`).join('')}
+            </tbody>`).join('')}
+          </table></section>` : ''}
+        ${d.awards.length ? `<section><h2>Team awards</h2><ul class="lp-honours">${d.awards.map(a => `<li>${esc(a)}</li>`).join('')}</ul></section>` : ''}
+        ${d.prize ? `<section><h2>Grand prize</h2><div class="lp-prize"><p>${esc(d.prize)}</p></div></section>` : ''}
+        <section><h2>How it works</h2>
+          <ol class="lp-how">
+            <li><div><b>Start the team</b>Name it${range && range.min < range.max ? ', choose how many golfers,' : ''} and ${lg.fee_cents > 0 ? 'pay your own share' : 'you are in'}. You are the captain.</div></li>
+            <li><div><b>Invite your players</b>Add them by mobile number from My Account. Each one taps the link${lg.fee_cents > 0 ? ' and pays their own share' : ''}.</div></li>
+            <li><div><b>Play once a week</b>Book a bay at a time that suits your team. Bay time is booked and paid at the regular rate.</div></li>
+          </ol></section>
+      </div>
+      <aside class="lp-panel" aria-label="Sign up">
+        <div class="lp-price">${esc(price.big)}</div>
+        <div class="lp-price-note">${esc(price.note)}</div>
+        <dl class="lp-facts">
+          <div><dt>Season</dt><dd>${esc(season(lg))}${weeks ? `<span>${weeks} week${weeks === 1 ? '' : 's'}</span>` : ''}</dd></div>
+          <div><dt>Team</dt><dd>${range ? (range.min === range.max ? `${range.max} golfers` : `${range.min} to ${range.max} golfers`) : 'Any size'}${lg.fee_cents > 0 && range ? `<span>${money(lg.fee_cents)} per team</span>` : ''}</dd></div>
+          <div><dt>Play</dt><dd>One round a week<span>At a time that suits your team</span></dd></div>
+          <div><dt>Bay time</dt><dd>Paid at the regular rate<span>Booked like any other session</span></dd></div>
+        </dl>
+        ${cta}
+      </aside>
+    </div>
+    ${canStart ? `<div class="lp-bar"><div class="lp-bar-p">${esc(price.big)}<span>${esc(price.note)}</span></div><button class="btn btn-primary i-start">${SIGNED_IN ? 'Start a team' : 'Sign in'}</button></div>` : ''}
+  </article>`;
 }
 function backToList(){ history.pushState({}, '', '/leagues'); listView(); window.scrollTo(0, 0); }
-// The browser's own back/forward buttons between the list and a league's details.
+// The browser's own back/forward buttons between the list and a league's page.
 window.addEventListener('popstate', () => {
   const id = new URLSearchParams(location.search).get('info');
-  id ? infoView(id, false) : listView();
+  id ? leaguePage(id, {}) : listView();
 });
-
-function planCard(l){
-  const mine = myTeamIn(l);
-  const size = l.team_size != null ? l.team_size : l.capacity;   // 0031 moves capacity → team_size
-  const hrs = Math.round(((l.weekly_min_mins || 180)/60)*10)/10;
-  const range = L.seatRange({ team_size: size, team_min: l.team_min });
-  // Per golfer: one figure for a fixed size, a from–to for a range (fewer golfers pay more each).
-  const each = !(l.fee_cents > 0) || !range ? ''
-    : range.min === range.max ? `${money(L.shareOf(l.fee_cents, range.max))} per golfer`
-    : `${money(L.shareOf(l.fee_cents, range.max))}–${money(L.shareOf(l.fee_cents, range.min))} per golfer`;
-  return `<div class="plan">
-    <div class="plan-name"><span class="cdot" style="background:${esc(l.color||'#4AA3FF')}"></span>${esc(l.name)}</div>
-    <div class="plan-when">${esc(L.scheduleLabel(l))}</div>
-    <div class="plan-price">${l.fee_cents>0 ? money(l.fee_cents)+'<span class="per">per team / season</span>' : 'Free<span class="per">per team</span>'}</div>
-    <ul class="facts">
-      ${each ? `<li><b>${each}</b> — everyone pays their own share</li>` : ''}
-      <li>${esc(season(l))}</li>
-      <li>${range ? (range.min === range.max ? `Teams of <b>${range.max} golfers</b>` : `Teams of <b>${range.min} to ${range.max} golfers</b> — you pick`) : 'As many players as you like on a team'}</li>
-      <li>One round a week, <b>any bay, any time</b> — about ${hrs} hour${hrs===1?'':'s'} is the usual</li>
-    </ul>
-    ${l.description?`<div class="plan-desc">${esc(l.description)}</div>`:''}
-    <span class="perk">Weekly rounds included</span>
-    ${mine
-      ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'} — see My Account</a>`
-      : `<button class="btn btn-line" data-start="${esc(l.id)}">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>`}
-    ${l.hasInfo ? `<button class="btn btn-ghost" data-info="${esc(l.id)}" style="margin-top:10px">Rules, schedule &amp; prizes ↓</button>` : ''}
-    ${mine || SIGNED_IN ? '' : '<div class="fine">You need an account to buy a team — it takes a minute, and we bring you straight back here.</div>'}
-  </div>`;
-}
 
 /* ---------- start a team: name it, pick its size, pay your share ---------- */
 function startView(league){
@@ -412,7 +464,7 @@ function startView(league){
         `You are the captain: you invite ${size ? `up to <b>${size-1} more player${size-1===1?'':'s'}</b>` : 'your players'} by mobile number from My Account.`,
       ]).concat([
         'Your team plays <b>once a week, whenever suits you</b> — there is no fixed league night.',
-        'Those weekly rounds are <b>free</b>, in any bay, and anyone on the team can book one.',
+        'Anyone on the team can book the round. <b>Bay time is paid at the regular rate</b>.',
       ]).map(x => `<li>${x}</li>`).join('');
     $('#t-go').textContent = goLabel();
     if(pickable){
@@ -490,7 +542,7 @@ function doneView(teamName, leagueName){
     <h1>${esc(teamName)} is in${leagueName ? ' ' + esc(leagueName) : ''}</h1>
     <div class="note is-ok" style="text-align:left;margin-top:16px">
       <b>Next: invite your players.</b> Open My Account, type a mobile number, and we give you a link to send them.
-      Then book your first round from the booking page any time this week — it is free.
+      Then book your round from the booking page once the season starts.
     </div>
     <a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">Go to My Account</a>
     <a class="btn btn-ghost" href="/?league-round=1" style="max-width:320px;margin:10px auto 0">Book this week's round</a>
@@ -569,7 +621,7 @@ async function inviteView(token){
     </div>
     <ul class="ck">
       <li>Your team plays <b>once a week, whenever suits you</b> — there is no fixed league night.</li>
-      <li>Rounds are <b>free</b>: any bay, any time, and anyone on the team can book them.</li>
+      <li>Any bay, any time, and anyone on the team can book the round. <b>Bay time is paid at the regular rate.</b></li>
       <li>You see the team, the weeks you have played and the standings on My Account.</li>
     </ul>
     <div class="err" id="i-err"></div>
@@ -601,7 +653,7 @@ function seatPaidView(leagueName){
     <h1>Payment received</h1>
     <div class="note is-ok" style="text-align:left;margin-top:16px">
       Your seat${leagueName ? ' in ' + esc(leagueName) : ''} is paid. Your team, its seats and the weeks you have played are on My Account —
-      and your weekly rounds are free, booked from the booking page any time.
+      and your weekly rounds are booked from the booking page, at the regular bay rate.
     </div>
     <a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">See my team</a>
     <a class="btn btn-ghost" href="/?league-round=1" style="max-width:320px;margin:10px auto 0">Book this week's round</a>
@@ -623,8 +675,8 @@ function joinedView(team, league, already){
     <div class="big ok">✓</div>
     <h1>You are on ${esc(team)}</h1>
     <div class="note is-ok" style="text-align:left;margin-top:16px">
-      ${already ? 'You were already on this team — nothing has changed, and you have not been added twice. ' : ''}You are playing in ${esc(league)}. Your team plays one round a week, whenever you like, and it is free —
-      any of you can book it from the booking page. Your team, the weeks you have played and the standings are on My Account.
+      ${already ? 'You were already on this team — nothing has changed, and you have not been added twice. ' : ''}You are playing in ${esc(league)}. Your team plays one round a week, whenever you like.
+      Any of you can book it from the booking page, at the regular bay rate. Your team, the weeks you have played and the standings are on My Account.
     </div>
     <a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">See my team</a>
     <a class="btn btn-ghost" href="/?league-round=1" style="max-width:320px;margin:10px auto 0">Book this week's round</a>
@@ -648,9 +700,13 @@ async function load(){
     return;
   }
   LEAGUES = list.leagues;
-  listView();
-  // Opened straight at a league's details (a link texted to a team, or the back button).
-  if(params.get('info')) infoView(params.get('info'), false);
+  // Back from a Stripe checkout they did not finish: say so once, on whichever screen comes next.
+  if(params.get('canceled')==='1'){
+    history.replaceState({}, '', '/leagues');
+    FLASH = 'Payment canceled. You have not been charged, and no team was created. You can try again below.';
+  }
+  // Opened straight at one league (a link texted to a team), or at the list.
+  if(params.get('info')) leaguePage(params.get('info'), {}); else listView();
 
   // Sent here to start a team, and signed in on the way: open that league's form.
   const start = params.get('start');
@@ -658,13 +714,6 @@ async function load(){
     const lg = LEAGUES.find(l => l.id === start);
     history.replaceState({}, '', '/leagues');
     if(lg && !myTeamIn(lg)) startView(lg);
-  }
-  if(params.get('canceled')==='1'){
-    history.replaceState({}, '', '/leagues');
-    const n = document.createElement('div');
-    n.className = 'note is-plain'; n.style.maxWidth='520px'; n.style.margin='18px auto 0';
-    n.textContent = 'Payment canceled — you have not been charged, and no team was created. Pick a league to try again.';
-    $('#content').prepend(n);
   }
 }
 load();
