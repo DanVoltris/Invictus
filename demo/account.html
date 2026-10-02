@@ -665,7 +665,7 @@ function teamCard(t, idx, opts){
   const lg = t.league || {}, team = t.team || {};
   const strokes = lg.scoring === 'strokes';
   const today = venueNow().date;
-  const thisMonday = L.weekOf(today);
+  const thisMonday = L.weekIn(lg, today);   // the first day of this league's current week (0040: not always a Monday)
   const money = c => '$' + (c/100).toFixed(c % 100 ? 2 : 0);
   const bayMap = { ...((opts && opts.bays) || {}), ...(t.bays || {}) };
   const bayName = id => bayMap[id] || id || 'a bay';

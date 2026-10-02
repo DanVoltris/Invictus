@@ -2255,14 +2255,15 @@ async function loadLeagueRound(){
     if(r.ok) j = await r.json();
   }catch(e){ /* offline or not deployed: the page carries on as an ordinary booking page */ }
   if(!(j && j.ok && Array.isArray(j.teams))) return;
-  const today = todayISO(), thisWeek = LEA.weekOf(today);
+  const today = todayISO();
   LG.teams = j.teams.map(t => {
     const lg = t.league || {}, team = t.team || {};
+    const thisWeek = LEA.weekIn(lg, today);   // each league says which day its week starts (0040)
     const weeks = (Array.isArray(t.weeks) && t.weeks.length ? t.weeks
       : LEA.teamWeeks({ league: lg, todayISO: today, rounds: t.rounds || team.rounds || [] }))
       .map(w => ({ ...w, round: w.round || null, current: w.start === thisWeek }));
     return { teamId: team.id, teamName: team.name || 'your team', leagueName: lg.name || 'the league',
-             minMins: lg.weekly_min_mins || 180, weeks };
+             minMins: lg.weekly_min_mins || 180, weeks, weekStart: LEA.weekStartOf(lg) };
   }).filter(t => t.teamId);
   renderLeagueBar();
   if(LG.intent) scrollToTimes();
@@ -2294,8 +2295,9 @@ function leagueChoices(){
   const out = { open: [], taken: [] };
   if(!LEA || !LG.teams.length || !state.date) return out;
   // The week the session really falls in: a 1 AM Monday start is next week's round (0038).
-  const wk = LEA.weekOf(state.startMin!=null ? realSlot().dateISO : isoDate(state.date));
+  const day = state.startMin!=null ? realSlot().dateISO : isoDate(state.date);
   for(const t of LG.teams){
+    const wk = LEA.weekOf(day, t.weekStart);   // that league's own week (0040)
     const w = (t.weeks || []).find(x => x.start === wk);
     if(!w) continue;
     const entry = { teamId:t.teamId, teamName:t.teamName, leagueName:t.leagueName, minMins:t.minMins,

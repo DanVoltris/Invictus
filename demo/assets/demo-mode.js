@@ -94,12 +94,12 @@
     season_start: plusDays(THIS_WEEK, -35), season_end: plusDays(THIS_WEEK, 48),
     bay_ids: ['B1', 'B2', 'B3', 'B4'], fee_cents: 40000, capacity: 16, team_size: 4, team_min: 3, weekly_min_mins: 180,
     team_mode: true, scoring: 'points', join_online: true,
-    is_active: true, series_id: null, color: '#F0523D', sort: 0, created_at: hoursAgo(1200), details: {} };
+    is_active: true, series_id: null, color: '#F0523D', sort: 0, created_at: hoursAgo(1200), details: {}, week_start: 1 };
   const LEAGUE_SUN = { id: uid('lg'), name: 'Sunday Stroke Play', description: 'Play your own round. Lowest average across the season takes the jacket.',
     day_of_week: null, start_min: null, end_min: null, season_start: dayOffset(-20), season_end: dayOffset(40),
     bay_ids: ['B3'], fee_cents: 0, capacity: null, team_size: null, weekly_min_mins: 120,
     team_mode: false, scoring: 'strokes', join_online: true,
-    is_active: true, series_id: null, color: '#4AA3FF', sort: 1, created_at: hoursAgo(700), details: {} };
+    is_active: true, series_id: null, color: '#4AA3FF', sort: 1, created_at: hoursAgo(700), details: {}, week_start: 1 };
 
   // Each team: its captain, what it paid, and the bay/day/time its round usually lands on.
   const TEAM_SEED = [
