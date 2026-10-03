@@ -628,7 +628,7 @@ function drawProfile(c, bks, justInherited, opts){
       <div class="sub">${[c.email, c.phone].filter(Boolean).map(esc).join(' · ')}</div>
       <div class="tiles">
         <div class="tile"><div class="t-k">Prepaid hours</div><div class="t-v">${fmtHrs(c.hours_balance_min)}</div><div class="t-s">Use on any bay</div></div>
-        <div class="tile"><div class="t-k">League team</div><div class="t-v" style="font-size:16px">${teams.length ? esc((teams[0].team||{}).name || (teams[0].league||{}).name || 'Your team') + (teams.length>1 ? ` <span style="color:var(--dim)">+${teams.length-1}</span>` : '') : '—'}</div><div class="t-s">${teams.length ? esc((teams[0].league||{}).name || 'One free round a week') : '<a href="/leagues" style="color:var(--orange)">Start a team</a>'}</div></div>
+        <div class="tile"><div class="t-k">League team</div><div class="t-v" style="font-size:16px">${teams.length ? esc((teams[0].team||{}).name || (teams[0].league||{}).name || 'Your team') + (teams.length>1 ? ` <span style="color:var(--dim)">+${teams.length-1}</span>` : '') : '—'}</div><div class="t-s">${teams.length ? esc((teams[0].league||{}).name || 'One league round a week') : '<a href="/leagues" style="color:var(--orange)">Start a team</a>'}</div></div>
         <div class="tile"><div class="t-k">Waiver</div><div class="t-v" style="font-size:16px">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span>'}</div><div class="t-s">${c.waiver_signed_at ? '' : 'Required before you play'}</div></div>
       </div>
       <div class="details" id="details"></div>
@@ -655,7 +655,7 @@ function drawProfile(c, bks, justInherited, opts){
 
 /* ---------- My team ----------
    A league is sold by the team and has no fixed night (migration 0031): the team plays one round a
-   week, whenever it likes, booked from the ordinary booking page and free. So this card answers, in
+   week, whenever it likes, booked and paid for on the ordinary booking page. So this card answers, in
    this order: who is on the team, have we played this week, when did we miss, and where are we.
 
    Every number comes from the server where the server sent one; where it did not, it is worked out
@@ -721,7 +721,7 @@ function teamCard(t, idx, opts){
     const r = cur.round;
     now = `<div class="week-now is-booked"><div class="t-k">This week's round · week ${cur.number} of ${weeks.length}</div>
       <div class="wn-main">${esc(fmtDate(r.booking_date))}${r.start_min!=null ? ' · ' + esc(hhmm(r.start_min)) + '–' + esc(hhmm(r.end_min)) : ''}</div>
-      <div class="wn-sub">${esc(bayName(r.bay_id))} · booked and free. Anyone on the team can turn up — you do not each need a booking.</div></div>`;
+      <div class="wn-sub">${esc(bayName(r.bay_id))} · booked. Anyone on the team can turn up — you do not each need a booking.</div></div>`;
   } else if(cur.off){
     // A break in the schedule (the holidays, say): no round is expected, and none is missed.
     now = `<div class="week-now"><div class="t-k">This week · week ${cur.number} of ${weeks.length}</div>
@@ -731,7 +731,7 @@ function teamCard(t, idx, opts){
   } else {
     now = `<div class="week-now is-open"><div class="t-k">This week's round · week ${cur.number} of ${weeks.length}</div>
       <div class="wn-main">Not booked yet</div>
-      <div class="wn-sub">Your team has until ${esc(dayName(cur.end))} ${esc(shortDate(cur.end))}. Any bay, any time${lg.weekly_min_mins ? `, about ${Math.round((lg.weekly_min_mins/60)*10)/10} hours` : ''} — and it costs nothing, because the season is paid.
+      <div class="wn-sub">Your team has until ${esc(dayName(cur.end))} ${esc(shortDate(cur.end))}. Any bay, any time${lg.weekly_min_mins ? `, about ${Math.round((lg.weekly_min_mins/60)*10)/10} hours` : ''}. You pay for the bay as usual, and the league discount comes off at checkout.
         Any player on the team can book it.</div>
       <a class="btn btn-primary" href="/?league-round=1">Book this week's round</a></div>`;
   }

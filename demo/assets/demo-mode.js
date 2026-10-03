@@ -529,7 +529,7 @@
 
   /* ---------- league rounds (migration 0031) ----------
      A team's weekly round is an ordinary booking with league_team_id on it, made by whoever on
-     the team got there first. It costs nothing: the team paid for the season up front. */
+     the team got there first. It is paid for at checkout like any booking, less the league discount. */
   LEAGUE_ROUNDS.forEach((r) => BOOKINGS.push({
     id: uid('bk'), bay_id: r.bay_id, booking_date: r.booking_date,
     start_min: r.start_min, end_min: r.end_min,

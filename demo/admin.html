@@ -3140,6 +3140,7 @@ async function loadLeaguesTab(){
 // How far ahead customers can book online. Staff bookings on the tee sheet are never limited.
 function renderBookingWindowCard(){
   const w=Object.assign({ regularDays:10, leagueDays:60 }, (SETTINGS && SETTINGS.booking_window) || {});
+  const offDollars=(leagueOffPerHourCents()/100).toFixed(2).replace(/\.00$/,'');
   const edit=can('config.write');
   $('#lea-window').innerHTML=`
     <h3 class="card-h">Online booking window</h3>
@@ -3148,13 +3149,17 @@ function renderBookingWindowCard(){
       <div class="field" style="margin:0"><label for="lea-wreg">Regular players (days)</label><input class="input" id="lea-wreg" type="number" min="0" max="365" step="1" value="${w.regularDays}" ${edit?'':'disabled'} /></div>
       <div class="field" style="margin:0"><label for="lea-wlg">League players (days)</label><input class="input" id="lea-wlg" type="number" min="0" max="365" step="1" value="${w.leagueDays}" ${edit?'':'disabled'} /></div>
     </div>
+    <div class="field" style="margin:14px 0 0"><label for="lea-woff">League round discount ($ off per hour)</label><input class="input" id="lea-woff" type="number" min="0" max="100" step="0.5" value="${offDollars}" ${edit?'':'disabled'} />
+      <div class="dim" style="font-size:12px;margin-top:6px">Taken off the bay price, before tax, when a team books its weekly league round. A league player’s other bookings are full price. Enter 0 for no discount.</div></div>
     ${edit?'<button class="btn btn-primary btn-sm" id="lea-wsave" style="margin-top:14px">Save booking window</button>':''}`;
   if(!edit) return;
   $('#lea-wsave').onclick=async()=>{
     const reg=Number($('#lea-wreg').value), lg=Number($('#lea-wlg').value);
     if(![reg,lg].every(n=>Number.isInteger(n) && n>=0 && n<=365)){ toast('Enter whole days between 0 and 365.','err'); return; }
     if(lg<reg){ toast('League players should be able to book at least as far ahead as everyone else.','err'); return; }
-    const { error } = await sb.from('settings').update({ booking_window:{ regularDays:reg, leagueDays:lg } }).eq('id',1);
+    const off=Number($('#lea-woff').value);
+    if($('#lea-woff').value.trim()==='' || !Number.isFinite(off) || off<0 || off>100){ toast('Enter the league round discount as dollars per hour, between 0 and 100.','err'); return; }
+    const { error } = await sb.from('settings').update({ booking_window:{ regularDays:reg, leagueDays:lg, leagueRoundOffPerHourCents:Math.round(off*100) } }).eq('id',1);
     if(error){ if(!isAuthError(error)) toast(missingSchema(error)?'Run supabase/setup.sql (migration 0028) first.':error.message,'err'); return; }
     await loadSettings(); toast('Booking window saved','ok');
   };
@@ -3407,6 +3412,12 @@ function roundText(r){
 // is recording a sale, not granting a discount. The employee on the desk takes that phone call.
 // Rewriting the PRICE of a booking is still money.write (see the tee sheet's charge fields).
 const canLeagueRound = () => can('booking.write');
+// The league discount on a round: so much an hour, before tax (settings.booking_window, $5 when
+// nothing is set). The same sum as leagueRoundDiscountCents() in lib/booking.js, which is the one
+// that actually prices a checkout.
+const leagueOffPerHourCents = () => { const v=((SETTINGS && SETTINGS.booking_window)||{}).leagueRoundOffPerHourCents;
+  return (v==null || !Number.isFinite(Number(v))) ? 500 : Math.min(10000, Math.max(0, Math.round(Number(v)))); };
+const leagueRoundOffCents = b => Math.round(leagueOffPerHourCents()*Math.max(0,(b.end_min-b.start_min))/60);
 const leagueTeamLabel = id => { const t=LG_TEAM_BY_ID[id]; return t ? `${t.league.name} · ${t.name}` : 'League round'; };
 
 // The league week dateISO falls in, as { start, end } — the same week the database files the
@@ -3485,7 +3496,7 @@ function leagueRoundFieldHTML(id, currentTeamId){
   if(cur && !known) opts.push(`<option value="${esc(cur)}" selected>Team from a finished league</option>`);
   return `<div class="field"><label for="${id}">League round</label>
     <select class="input" id="${id}">${opts.join('')}</select>
-    <div class="dim" style="font-size:12px;margin-top:6px">Mark this as a team’s round for the week. It costs nothing — the team paid for the season up front — and each team plays one round a week.</div></div>`;
+    <div class="dim" style="font-size:12px;margin-top:6px">Mark this as a team’s round for the week. The team pays for the bay as usual, less the league discount (${leagueOffPerHourCents()?'$'+(leagueOffPerHourCents()/100).toFixed(2)+' an hour':'none set'}). Each team plays one round a week.</div></div>`;
 }
 
 // A small form on top of whatever sheet is open (confirmSheet's overlay). confirmSheet empties itself
@@ -4493,7 +4504,7 @@ function cellMeta(b, maxTags){
   if(!b || b.status==='blocked') return '';
   maxTags = maxTags==null ? 2 : maxTags;
   let h=groupMeta(b);
-  // A team's weekly league round reads first: it is free bay time, not an ordinary booking.
+  // A team's weekly league round reads first, so staff see at a glance which booking is the round.
   if(isLeagueRound(b)) h+=`<span class="stl" style="background:rgba(74,163,255,.12);color:#1B62B5;border:1px solid rgba(74,163,255,.4)" title="League round — ${esc(leagueTeamLabel(b.league_team_id))}">${esc((LG_TEAM_BY_ID[b.league_team_id]||{}).name||'League round')}</span>`;
   if(b.status_label){ const c=statusColor(b.status_label); h+=`<span class="stl" style="background:${c}22;color:${c};border:1px solid ${c}66" title="${esc(b.status_label)}">${esc(b.status_label)}</span>`; }
   const tags=b.tags||[];
@@ -4863,7 +4874,7 @@ function openAdd(bayId,startMin,dateISO){
     if(teamId){
       const chk=await checkLeagueRound(teamId, date, null);
       if(!chk.ok){ leagueRoundRefused(chk, teamId); return; }
-      row.league_team_id=teamId; row.amount_cents=0;   // the team paid for the season, so the round is free
+      row.league_team_id=teamId;   // the tag only: a league round is paid for like any booking
     }
     $('#s-add').disabled=true;
     let r=await sb.from('bookings').insert(row);
@@ -4890,6 +4901,12 @@ function bookingPriceCents(b){
   for(let m=b.start_min;m<b.end_min;m+=step) c+=Math.round((rateForBay(b.bay_id,m<1440?wd:(wd+1)%7,Math.floor((m%1440)/60))||0)*100/(60/step));
   return c;
 }
+// What a stretch of a booking is worth at its bay's rate, before tax. A league round carries its
+// per-hour league discount on every hour, added or removed.
+function segmentPriceCents(b, fromMin, toMin){
+  const seg={ ...b, start_min:fromMin, end_min:toMin }, price=bookingPriceCents(seg);
+  return isLeagueRound(b) ? Math.max(0, price-leagueRoundOffCents(seg)) : price;
+}
 // How far a booking can be extended in its own bay: up to the next booking or cart hold, a block,
 // a closed status, or closing time — whichever comes first. In minutes.
 function extendRoom(b){
@@ -4900,7 +4917,7 @@ const EXTEND_STEPS=[[30,'+30 min'],[60,'+1 hr'],[90,'+1½ hr']];
 // the counter — nothing is charged to a card from here (a card hold cannot be raised after the fact).
 function extendBookingFlow(b, mins){
   const newEnd=b.end_min+mins;
-  const extra=isLeagueRound(b) ? 0 : bookingPriceCents({ ...b, start_min:b.end_min, end_min:newEnd });
+  const extra=segmentPriceCents(b, b.end_min, newEnd);
   const pay=(SETTINGS.pay)||{}, taxPct=Number(pay.taxPct)||0, cur=pay.currency||'CAD';
   const withTax=Math.round(extra*(1+taxPct/100));
   const card = b.payment_state==='held'
@@ -4910,8 +4927,7 @@ function extendBookingFlow(b, mins){
     title:`Extend by ${mins<60?mins+' minutes':mins===60?'1 hour':'1½ hours'}?`,
     body:`${esc(b.customer_name||'This booking')} · ${esc(bayName(b.bay_id))}<br />
       <b>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}${b.end_min>1440?` (${nextDow(b.booking_date)})`:''}</b> becomes <b>${fmtMin(b.start_min)} – ${fmtMin(newEnd)}${newEnd>1440?` (${nextDow(b.booking_date)})`:''}</b>.<br /><br />
-      ${isLeagueRound(b) ? 'League round — the extra time is not priced.'
-        : `Extra time: <b>${cur} $${(withTax/100).toFixed(2)}</b>${taxPct?` (incl. ${taxPct}% tax)`:''} at this bay's rate.`}${card}`,
+      Extra time: <b>${cur} $${(withTax/100).toFixed(2)}</b>${taxPct?` (incl. ${taxPct}% tax)`:''} at this bay's rate.${card}`,
     okLabel:'Extend booking',
     onOk: async ()=>{
       const { error } = await sb.from('bookings').update({ end_min:newEnd }).eq('id',b.id);
@@ -4938,7 +4954,7 @@ const mins2words = m => m<60 ? m+' minutes' : m===60 ? '1 hour' : '1½ hours';
 // Without the Money permission the time is still cut and the sheet says who settles the money.
 function shortenBookingFlow(b, mins){
   const newEnd=b.end_min-mins;
-  const removed=isLeagueRound(b) ? 0 : bookingPriceCents({ ...b, start_min:newEnd, end_min:b.end_min });
+  const removed=segmentPriceCents(b, newEnd, b.end_min);
   const pay=SETTINGS.pay||{}, taxPct=Number(pay.taxPct)||0, cur=pay.currency||'CAD';
   const back=Math.round(removed*(1+taxPct/100));
   const held=isHeld(b) && holdUrgency(b).key!=='expired', saved=hasSavedCard(b);
@@ -4952,8 +4968,7 @@ function shortenBookingFlow(b, mins){
   const mayMoney=can('money.write');
   const $$ = c => `${cur} $${(c/100).toFixed(2)}`;
   const times=`<b>${fmtMin(b.start_min)} – ${fmtMin(b.end_min)}${b.end_min>1440?` (${nextDow(b.booking_date)})`:''}</b> becomes <b>${fmtMin(b.start_min)} – ${fmtMin(newEnd)}${newEnd>1440?` (${nextDow(b.booking_date)})`:''}</b>.`;
-  const priced = isLeagueRound(b) ? 'League round — the time is not priced.'
-    : `The removed time is worth <b>${$$(back)}</b>${taxPct?` (incl. ${taxPct}% tax)`:''} at this bay's rate.`;
+  const priced = `The removed time is worth <b>${$$(back)}</b>${taxPct?` (incl. ${taxPct}% tax)`:''} at this bay's rate.`;
   let note='', field=null, autoTarget=null;
   if(money==='hold' || money==='target'){
     const target=Math.max(0,base-back);
@@ -5090,13 +5105,16 @@ function openManage(id){
   const pay=(SETTINGS.pay)||{}; const taxPct=pay.taxPct||0; const cur=pay.currency||'CAD';
   const fmt=c=>cur+' $'+((c||0)/100).toFixed(2);
   const onlinePaid=(b.amount_cents||0)>0;
-  // A team's league round costs nothing: the season was paid for up front, so the rate card
-  // doesn't apply to it and the charges below must not invent a price.
+  // A team's league round is paid for like any booking, less the league discount (so much an hour,
+  // before tax). The tag is what makes it the week's round, never a price of zero.
   const lgRound=isLeagueRound(b);
+  const lgOff = lgRound ? Math.min(bookingPriceCents(b), leagueRoundOffCents(b)) : 0;
   // An online payment's amount_cents is what the card was charged, and checkout adds tax on top —
-  // so it is the TOTAL, with the tax inside it. Anything else is priced from the rate, tax added.
-  const total = lgRound ? 0 : (onlinePaid ? b.amount_cents : Math.round(bookingPriceCents(b)*(1+taxPct/100)));
-  const sub = lgRound ? 0 : (onlinePaid ? Math.round(total*100/(100+taxPct)) : bookingPriceCents(b));
+  // so it is the TOTAL, with the tax (and any league discount) inside it. Anything else is priced
+  // from the rate, league discount off, tax added.
+  const rateSub = bookingPriceCents(b) - lgOff;
+  const total = onlinePaid ? b.amount_cents : Math.round(rateSub*(1+taxPct/100));
+  const sub = onlinePaid ? Math.round(total*100/(100+taxPct)) : rateSub;
   const taxAmt = total - sub;
   const acceptDep = pay.acceptDeposit!==false && pay.captureMethod!=='No Payment';
   const held = pay.chargeAmount ? Math.round(pay.chargeAmount*100) : Math.round(sub*(pay.chargePercent||0)/100);
@@ -5132,9 +5150,9 @@ function openManage(id){
     return;
   }
 
-  const payLine = lgRound
-    ? `<div class="kv"><span class="k">League round</span><span><span class="pill info">Free</span> <span class="dim">included in ${esc((LG_TEAM_BY_ID[b.league_team_id]||{}).league?LG_TEAM_BY_ID[b.league_team_id].league.name:'the league')}’s team fee</span></span></div>`
-    : isHeld(b)
+  const payLine = (lgRound && lgOff>0
+    ? `<div class="kv"><span class="k">League discount</span><span>−${fmt(lgOff)} <span class="dim">(${fmt(leagueOffPerHourCents())} an hour, before tax)</span></span></div>`
+    : '') + (isHeld(b)
     ? `<div class="kv"><span class="k">On hold</span><span><b>${fmt(heldCents(b))}</b> <span class="dim">— not taken</span></span></div>`
     : isCaptured(b)
     ? `<div class="kv"><span class="k">Charged</span><span class="pill confirmed">Paid ${fmt(b.amount_cents||0)}</span></div>`
@@ -5142,15 +5160,13 @@ function openManage(id){
     ? `<div class="kv"><span class="k">Paid online</span><span class="pill confirmed">Paid ${fmt(total)}</span></div>`
     : acceptDep
       ? `<div class="kv"><span class="k">Deposit held</span><span>${fmt(held)} <span class="dim">(${pay.chargeAmount?'flat':((pay.chargePercent||0)+'%')})</span></span></div>`
-      : `<div class="kv"><span class="k">Payment</span><span class="dim">No payment collected</span></div>`;
+      : `<div class="kv"><span class="k">Payment</span><span class="dim">No payment collected</span></div>`);
   const cardLine = `<div class="kv" style="border:none"><span class="k">Card</span><span class="dim">${
     isHeld(b) ? 'Authorised · nothing charged'
     : isCaptured(b) ? 'On file · charged'
     : payState(b)==='released' ? 'Hold released · never charged'
     : onlinePaid ? 'On file · charged' : 'No card on file'}</span></div>`;
-  const txn = lgRound
-    ? `<div class="dim" style="font-size:13px;padding:6px 0">Nothing to collect — the team paid for the season.</div>`
-    : isHeld(b)
+  const txn = isHeld(b)
     ? `<div class="txn-row"><span>Card authorised</span><span class="dim">${fmt(heldCents(b))} · ${fmtTs(b.created_at)}</span></div>`
     : isCaptured(b)
     ? `<div class="txn-row"><span>Card authorised</span><span class="dim">${fmt(heldCents(b)||b.amount_cents||0)} · ${fmtTs(b.created_at)}</span></div>
@@ -5308,7 +5324,7 @@ function openManage(id){
         if(nowTeam){
           const chk=await checkLeagueRound(nowTeam, b.booking_date, b.id);
           if(!chk.ok){ leagueRoundRefused(chk, nowTeam); return; }
-          patch.league_team_id=nowTeam; patch.amount_cents=0;   // free: the team paid for the season
+          patch.league_team_id=nowTeam;                          // the tag only: what was paid stays as it is
         } else {
           patch.league_team_id=null;                             // back to an ordinary reservation
         }
