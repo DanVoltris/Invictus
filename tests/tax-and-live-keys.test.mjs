@@ -10,7 +10,7 @@
 //   node --test tests/tax-and-live-keys.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripeStatus, taxPctOf, quoteBooking } from '../lib/booking.js';
+import { stripeStatus, taxPctOf, quoteBooking, leagueRoundDiscountCents, bookingWindowDays } from '../lib/booking.js';
 
 // ---- live keys ------------------------------------------------------------------------------
 
@@ -74,6 +74,25 @@ test('tax is added on top: a $40 session at 12% charges $44.80', () => {
   assert.equal(q.taxCents, 480);
   assert.equal(q.totalCents, 4480);
   assert.equal(q.charge, 4480);
+});
+
+test('a league round: $5 an hour comes off before tax, and never more than the price', () => {
+  // Settings as the server reads them: booking_window normalised, $5 an hour when nothing is set.
+  const withWindow = (raw) => ({ bookingWindow: bookingWindowDays(raw) });
+  const off = leagueRoundDiscountCents({ settings: withWindow(undefined), startMin: 600, endMin: 780 });
+  assert.equal(off, 1500, 'three hours at the default $5 an hour');
+  const q = quoteBooking({ ...base, amountCents: 6000, taxPct: 12, leagueDiscountCents: off });
+  assert.equal(q.leagueDiscountCents, 1500);
+  assert.equal(q.subtotalCents, 4500);
+  assert.equal(q.taxCents, 540);
+  assert.equal(q.totalCents, 5040);
+  assert.equal(quoteBooking({ ...base, amountCents: 1000, taxPct: 12, leagueDiscountCents: 5000 }).totalCents, 0);
+  // Half hours count, the manager's own figure wins, and nonsense falls back to the default.
+  assert.equal(leagueRoundDiscountCents({ settings: withWindow({}), startMin: 600, endMin: 690 }), 750);
+  assert.equal(leagueRoundDiscountCents({ settings: withWindow({ leagueRoundOffPerHourCents: 0 }), startMin: 600, endMin: 780 }), 0);
+  assert.equal(bookingWindowDays({ leagueRoundOffPerHourCents: 800 }).leagueRoundOffPerHourCents, 800);
+  assert.equal(bookingWindowDays({ leagueRoundOffPerHourCents: 'lots' }).leagueRoundOffPerHourCents, 500);
+  assert.equal(bookingWindowDays({ leagueRoundOffPerHourCents: -5 }).leagueRoundOffPerHourCents, 0);
 });
 
 test('tax is on the DISCOUNTED price — a $10-off code saves the tax on $10 too', () => {

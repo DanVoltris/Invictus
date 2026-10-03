@@ -1,8 +1,8 @@
-import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, taxPctOf, winnipegTodayISO, bookingWindowError, holdPlan, holdChangesEnabled, HOLD_KEEPS_CARD_MESSAGE } from '../lib/booking.js';
+import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSettings, bayName, overrideEffects, overrideConflicts, weeklyStatusConflicts, quoteBooking, taxPctOf, winnipegTodayISO, bookingWindowError, holdPlan, leagueRoundDiscountCents, leagueRoundTaken, holdChangesEnabled, HOLD_KEEPS_CARD_MESSAGE } from '../lib/booking.js';
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
          confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
          releaseHold, deferredHoldsReady, bookingExistsForSetupIntent, stripeCustomerForContact,
-         rememberStripeCustomer, crossDayProblem } from '../lib/db.js';
+         rememberStripeCustomer, crossDayProblem, accountCustomerForRequest, teamMembershipFor, teamRoundForWeek } from '../lib/db.js';
 import { paymentPatchFor, releaseUnbookedHold, savedCardPatchFor, forgetSavedCard } from '../lib/holds.js';
 
 // One customer checkout, start to finish. Dispatch on ?action=, the same shape as
@@ -58,7 +58,7 @@ export async function createPaymentIntent(req, res) {
   try {
     const stripe = stripeClient(process.env);
     const { dateISO, bayId, startMin, endMin, party, hold, email, phone,
-            promoCode, giftCode, promoReservationId } = req.body || {};
+            promoCode, giftCode, promoReservationId, teamId } = req.body || {};
 
     const settings = normalizeSettings(await getSettings());
     // How far ahead this customer may book: further for league players (migration 0028).
@@ -85,6 +85,29 @@ export async function createPaymentIntent(req, res) {
     // Past midnight (0038): the next day's closures, and last night's late sessions still in the bay.
     const spill = await crossDayProblem({ settings, dateISO, bayId, startMin, endMin });
     if (spill) return res.status(409).json({ error: spill.error });
+
+    // A TEAM'S LEAGUE ROUND (teamId). League teams pay for their bay time like anyone else; what
+    // makes this booking the team's round for the week is the tag, and what it earns is so much an
+    // hour off. Everything is proven here, before the slot is held and before Stripe is asked for
+    // anything — who is asking (the signed-in account, never a name in the body), that they are on
+    // the team, that the date is in the season, and that the team has not already played this week
+    // — so nobody pays for a round the database would then refuse to count.
+    let leagueRound = null;
+    if (teamId) {
+      const me = await accountCustomerForRequest(req);
+      if (!me) return res.status(401).json({ error: 'Sign in to book your team’s league round.', code: 'sign_in' });
+      const m = await teamMembershipFor({ teamId: String(teamId), customerId: me.id });
+      if (!m || !m.team || !m.league) return res.status(404).json({ error: 'That team isn’t in a league any more.', code: 'no_team' });
+      if (!m.member) return res.status(403).json({ error: 'You’re not on that team, so you can’t book its league round.', code: 'not_on_team' });
+      const lg = m.league;
+      if ((lg.season_start && dateISO < lg.season_start) || (lg.season_end && dateISO > lg.season_end)) {
+        return res.status(400).json({ code: 'outside_season',
+          error: `${lg.name} runs ${lg.season_start || '…'} to ${lg.season_end || '…'}, so that date can’t be a league round. Book it as an ordinary session, or pick a date in the season.` });
+      }
+      const existing = await teamRoundForWeek(m.team.id, dateISO, lg);
+      if (existing) return res.status(409).json(leagueRoundTaken(settings, m.team, existing));
+      leagueRound = { team: m.team, league: lg, discountCents: leagueRoundDiscountCents({ settings, startMin, endMin }) };
+    }
 
     // Cart hold: lock the slot for ~5 min while the customer checks out (see lib/db.js createHold).
     let expiresAt = null;
@@ -119,6 +142,7 @@ export async function createPaymentIntent(req, res) {
       },
       giftBalanceCents, applyGift: !!giftCard,
       taxPct: taxPctOf(settings),                  // sales tax on top, from Payment Settings
+      leagueDiscountCents: leagueRound ? leagueRound.discountCents : 0,
     });
     const charge = q.charge;
 
@@ -160,6 +184,10 @@ export async function createPaymentIntent(req, res) {
       giftUsedCents: String(q.giftUsedCents || 0),
       memberDiscountPct: String(q.memberPct),
       memberDiscountCents: String(q.memberDiscountCents),
+      // The team this booking is the league round for. paymentPatchFor / savedCardPatchFor
+      // (lib/holds.js) read it, so the client-side confirm and the webhook write the same row.
+      leagueTeamId: leagueRound ? String(leagueRound.team.id) : '',
+      leagueDiscountCents: String(q.leagueDiscountCents || 0),
       subtotalCents: String(q.subtotalCents),
       taxPct: String(q.taxPct),
       taxCents: String(q.taxCents),
@@ -217,6 +245,8 @@ export async function createPaymentIntent(req, res) {
     res.status(200).json({ clientSecret: intent.client_secret, amount: charge, fullAmount: amount,
       memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
       promoDiscountCents: q.promoDiscountCents || 0, promoBlocked: q.promoBlocked || null,
+      leagueDiscountCents: q.leagueDiscountCents || 0,
+      leagueRound: leagueRound ? { teamId: leagueRound.team.id, teamName: leagueRound.team.name, leagueName: leagueRound.league.name } : null,
       giftUsedCents: q.giftUsedCents || 0, expiresAt,
       subtotalCents: q.subtotalCents, taxPct: q.taxPct, taxCents: q.taxCents, totalCents: q.totalCents,
       // WHAT THE CUSTOMER MUST BE TOLD BEFORE THEY CONFIRM. `mode` is 'hold', 'save' or 'charge';
@@ -341,9 +371,10 @@ export async function confirmBooking(req, res) {
   };
 
   const flip = await confirmHold({ ...slot, patch });
-  let bookingId = flip.id;
+  let bookingId = flip.id, roundDropped = !!flip.leagueRoundDropped;
   if (!flip.updated) {
     const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
+    roundDropped = roundDropped || !!ins.leagueRoundDropped;
     if (ins.error) {
       if (!held) {
         return res.status(409).json({ ok: false, error: 'That slot is no longer available — please contact the shop; your payment went through.' });
@@ -371,6 +402,7 @@ export async function confirmBooking(req, res) {
     paymentState: held ? 'held' : 'paid',
     holdExpiresAt: held ? (patch.hold_expires_at || null) : null,
     amountCents: held ? (patch.authorized_cents || 0) : (patch.amount_cents || 0),
+    leagueRound: leagueRoundOutcome(patch, roundDropped),
   });
 }
 
@@ -412,9 +444,10 @@ async function confirmSavedCard(req, res, stripe) {
   };
 
   const flip = await confirmHold({ ...slot, patch });
-  let bookingId = flip.id;
+  let bookingId = flip.id, roundDropped = !!flip.leagueRoundDropped;
   if (!flip.updated) {
     const ins = await insertBooking({ bay_id: slot.bayId, booking_date: slot.dateISO, start_min: slot.startMin, end_min: slot.endMin, status: 'confirmed', ...patch });
+    roundDropped = roundDropped || !!ins.leagueRoundDropped;
     if (ins.error) {
       // "Taken" by the webhook's own row for this very SetupIntent is not taken at all.
       if (ins.conflict && await bookingExistsForSetupIntent(si.id)) return res.status(200).json({ ok: true, already: true });
@@ -437,7 +470,16 @@ async function confirmSavedCard(req, res, stripe) {
     paymentState: 'card_saved',
     holdDueAt: saved.hold_due_at,
     amountCents: saved.deferred_cents,
+    leagueRound: leagueRoundOutcome(patch, roundDropped),
   });
+}
+
+// Was this booking a team's league round, and did it count? `counted: false` is the rare race: a
+// teammate booked the week's round while this one was being paid for. The booking still stands as
+// an ordinary session — nobody loses a slot they paid for — and the page says so.
+function leagueRoundOutcome(patch, dropped) {
+  if (!patch || !patch.league_team_id) return null;
+  return { counted: !dropped };
 }
 
 // The consent tick, written where lib/notify.js looks for it. Three rules, all of them here:

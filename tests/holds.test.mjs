@@ -224,7 +224,7 @@ const { createPaymentIntent: createPI, confirmBooking } = await import(url('api'
 const { default: seriesApi } = await import(url('api', 'booking-series.js'));
 const { default: bookingApi } = await import(url('api', 'booking.js'));
 const { default: webhookApi } = await import(url('api', 'webhook.js'));
-const { placeDueHolds, retrieveCheckoutIntent, releaseOverdueHolds, paymentPatchFor } = await import(url('lib', 'holds.js'));
+const { placeDueHolds, retrieveCheckoutIntent, releaseOverdueHolds, paymentPatchFor, savedCardPatchFor } = await import(url('lib', 'holds.js'));
 
 // ---------------------------------------------------------------------------------------------
 // World
@@ -1184,6 +1184,16 @@ test('a checkout hold that kept the card records it on the booking; one that did
   assert.equal(kept.stripe_payment_method, 'pm_k');
   const plain = paymentPatchFor({ pi: { status: 'requires_capture', amount: 2500, amount_capturable: 2500, metadata: {} } });
   assert.equal('stripe_customer' in plain, false, 'no card columns written for a hold that kept no card');
+});
+
+test('a league round keeps its team tag however the card was taken: held, charged or saved', () => {
+  const md = { leagueTeamId: 'team-9' };
+  assert.equal(paymentPatchFor({ pi: { status: 'requires_capture', amount: 5040, metadata: md } }).league_team_id, 'team-9');
+  assert.equal(paymentPatchFor({ pi: { status: 'succeeded', amount: 5040, metadata: md } }).league_team_id, 'team-9');
+  assert.equal(savedCardPatchFor({ si: { id: 'seti_1', metadata: { ...md, chargeCents: '5040' } } }).league_team_id, 'team-9');
+  // An ordinary booking writes no team column at all (an empty string would not be a valid id).
+  assert.equal('league_team_id' in paymentPatchFor({ pi: { status: 'succeeded', amount: 5040, metadata: { leagueTeamId: '' } } }), false);
+  assert.equal('league_team_id' in savedCardPatchFor({ si: { id: 'seti_1', metadata: {} } }), false);
 });
 
 test('raising a hold: a new hold on the kept card first, then the old one is let go', async () => {

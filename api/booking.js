@@ -1,16 +1,13 @@
-import { admin, getSettings, getBookingsForDate, getOverridesForDate, accountCustomerForRequest,
-         teamMembershipFor, teamRoundForWeek, insertLeagueRound, crossDayProblem } from '../lib/db.js';
+import { admin, getSettings } from '../lib/db.js';
 import { normalizeSettings, bayName, fmtMin, hoursUntilBooking, winnipegTodayISO,
-         bookingWindowError, overrideEffects, overrideConflicts, weeklyStatusConflicts,
          stripeStatus, stripeClient } from '../lib/booking.js';
 import { issueRefund } from '../lib/refunds.js';
 import { releaseHold as releaseAuthorisation } from '../lib/holds.js';
-import '../demo/assets/leagues.js';   // side effect: globalThis.InvictusLeagues (the week maths)
 
 // Customer self-service, one function (keeps the deployment under Vercel's function cap):
 //   GET  ?id=…                    → read-only lookup of a booking (customer-safe fields only)
 //   POST {id}                     → cancel the booking AND refund it (24-hour policy, server-side)
-//   POST ?action=league-round     → a team's free weekly league round (migration 0031)
+//   POST ?action=league-round     → retired: league rounds are paid bookings made at checkout
 // The old GET ?phone=… account summary is gone: it handed out a customer's name, balances and
 // bookings to anyone who typed their number. My Account (migration 0025) needs a sign-in instead.
 // Payment states in which the customer has not been charged a cent — cancelling releases, never refunds.
@@ -223,114 +220,13 @@ async function refundOnSelfCancel(bookingId) {
   };
 }
 
-// ----- A team's weekly league round (migration 0031) -----------------------------------
+// ----- A team's weekly league round: no longer booked here -----------------------------
 //
-// The team paid for the season, so the round itself is free: any bay, any time, any day of the
-// week, booked by whichever member gets to it first. What this has to be sure of, in order:
-//
-//   1. the caller really is on that team          (never a team id alone — that is not a password)
-//   2. the season actually covers the date
-//   3. the date is inside their booking window    (league players get the longer one, 0028)
-//   4. the slot is genuinely free                 (same checks as a paid booking)
-//   5. the team has not already played this week  (the database's own partial unique index)
-//
-// Nothing here charges anything, so every one of those is the only thing standing between a team
-// and unlimited free bay time.
-const L = () => globalThis.InvictusLeagues;
-
+// This used to book a team's round for nothing. League teams pay for their bay time, so a league
+// round is now an ordinary paid booking made through checkout (api/checkout.js, `teamId`), where it
+// is tagged as the team's round and gets the league discount. This action only says so — a page
+// still open from before the change must not be able to book free bay time.
 async function leagueRound(req, res) {
-  const db = admin();
-  if (!db) return res.status(503).json({ ok: false, error: 'Not configured.' });
-
-  // 1. Who is asking. A My Account session, or the localhost dev account the dev server marks —
-  // never a phone number or a customer id out of the body.
-  const me = await accountCustomerForRequest(req);
-  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to book your team’s round.' });
-
-  const b = req.body || {};
-  const dateISO = String(b.dateISO || '');
-  const bayId = String(b.bayId || '');
-  const startMin = Math.round(Number(b.startMin));
-  const endMin = Math.round(Number(b.endMin));
-  if (!b.teamId) return res.status(400).json({ ok: false, error: 'Which team is this round for?' });
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return res.status(400).json({ ok: false, error: 'Pick a date on the calendar first.' });
-  if (!bayId) return res.status(400).json({ ok: false, error: 'Pick a bay.' });
-  if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin <= startMin) {
-    return res.status(400).json({ ok: false, error: 'Pick a start and end time.' });
-  }
-
-  // 2. On the team, and the team's league is still running.
-  const m = await teamMembershipFor({ teamId: b.teamId, customerId: me.id });
-  if (!m || !m.team) return res.status(404).json({ ok: false, error: 'That team no longer exists.' });
-  if (!m.member) return res.status(403).json({ ok: false, error: 'You’re not on that team, so you can’t book its round.' });
-  const { team, league } = m;
-  if (!league) return res.status(404).json({ ok: false, error: 'That league no longer exists.' });
-  if ((league.season_start && dateISO < league.season_start) || (league.season_end && dateISO > league.season_end)) {
-    const from = league.season_start || '—', to = league.season_end || 'further notice';
-    return res.status(400).json({ ok: false, code: 'outside_season',
-      error: `${league.name} runs ${from} to ${to}. Pick a date inside the season.` });
-  }
-
-  const settings = normalizeSettings(await getSettings());
-
-  // 3. How far ahead they may book. They are on a current league roster by definition here, so
-  // the longer league window applies (settings.bookingWindow.leagueDays).
-  const tooFar = bookingWindowError({ settings, dateISO, league: true });
-  if (tooFar) return res.status(400).json({ ok: false, code: 'booking_window', error: tooFar });
-
-  // 4. Is the slot free? Exactly the checks api/checkout.js ?action=create-payment-intent makes
-  // before charging a card: a real booking or manager block, a schedule override, or a closed
-  // weekly band.
-  const overrides = await getOverridesForDate(dateISO);
-  const fx = overrideEffects(overrides, settings, dateISO);
-  const taken = (await getBookingsForDate(dateISO))
-    .some((x) => x.bay_id === bayId && startMin < x.end_min && endMin > x.start_min);
-  if (taken) return res.status(409).json({ ok: false, code: 'slot_taken', error: 'That time was just taken — pick another slot.' });
-  if (overrideConflicts(fx, settings, dateISO, bayId, startMin, endMin) ||
-      weeklyStatusConflicts(settings, overrides, dateISO, bayId, startMin, endMin)) {
-    return res.status(409).json({ ok: false, code: 'slot_taken', error: 'That time is unavailable — pick another slot.' });
-  }
-  // Past midnight (0038): the next day's closures, and last night's late sessions still in the bay.
-  const spill = await crossDayProblem({ settings, dateISO, bayId, startMin, endMin });
-  if (spill) return res.status(409).json({ ok: false, code: 'slot_taken', error: spill.error });
-
-  // 5. One round per team per week. Checked here so the answer can name the round they already
-  // have, and enforced by the database's partial unique index so two members booking at the same
-  // moment cannot both win.
-  const existing = await teamRoundForWeek(team.id, dateISO, league);
-  if (existing) return res.status(409).json(alreadyBooked(settings, team, existing));
-
-  const round = await insertLeagueRound({
-    bay_id: bayId, booking_date: dateISO, start_min: startMin, end_min: endMin,
-    status: 'confirmed', status_label: settings.onlineStatusLabel || null,
-    customer_name: me.name || null, customer_email: me.email || null, customer_phone: me.phone || null,
-    amount_cents: 0, source: 'online', league_team_id: team.id,
-  });
-  if (round.unsupported) return res.status(503).json({ ok: false, error: round.error });
-  if (round.conflict === 'slot') return res.status(409).json({ ok: false, code: 'slot_taken', error: 'That time was just taken — pick another slot.' });
-  if (round.conflict === 'week') {
-    const again = await teamRoundForWeek(team.id, dateISO, league);
-    return res.status(409).json(again ? alreadyBooked(settings, team, again)
-      : { ok: false, code: 'round_booked', error: 'Your team has already booked its round for this week.' });
-  }
-  if (round.error) return res.status(round.code || 500).json({ ok: false, error: round.error });
-
-  return res.status(200).json({
-    ok: true, bookingId: round.id,
-    round: { id: round.id, teamId: team.id, booking_date: dateISO, bay: bayName(settings, bayId) || bayId,
-      start: fmtMin(startMin), end: fmtMin(endMin), week: L().weekIn(league, dateISO) },
-  });
-}
-
-// The "you already played this week" answer, with enough detail that the team can find the round
-// rather than going looking for it.
-function alreadyBooked(settings, team, round) {
-  return {
-    ok: false, code: 'round_booked',
-    error: `${team.name} has already booked its round for this week — ${round.booking_date}, `
-      + `${fmtMin(round.start_min)}–${fmtMin(round.end_min)} in ${bayName(settings, round.bay_id) || round.bay_id}. `
-      + 'Cancel that one first if you want to move it.',
-    existing: { id: round.id, booking_date: round.booking_date, bay: bayName(settings, round.bay_id) || round.bay_id,
-      start: fmtMin(round.start_min), end: fmtMin(round.end_min), week: round.league_week },
-  };
+  return res.status(410).json({ ok: false, code: 'league_round_moved',
+    error: 'League rounds are now booked and paid for at checkout. Refresh this page, pick your time, and choose your team at checkout to count it as your league round.' });
 }

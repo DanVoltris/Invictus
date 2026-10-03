@@ -1,7 +1,8 @@
 // Leagues sold by the team (migration 0031): buying a team, inviting friends by phone number, and
-// the free weekly round any member can book.
+// the weekly round any member can book — paid for at checkout like any session, less the league
+// discount, and tagged as the team's round for that week.
 //
-// The real lib/db.js, lib/booking.js, api/leagues.js, api/booking.js and api/webhook.js run end to
+// The real lib/db.js, lib/booking.js, api/leagues.js, api/booking.js, api/checkout.js and api/webhook.js run end to
 // end; only the Supabase client and the Stripe SDK underneath are fake. The fake database enforces
 // the three unique indexes 0031 adds — one team name per league, one Stripe session per team, one
 // live round per team per week — and generates bookings.league_week the way Postgres does, because
@@ -78,6 +79,11 @@ function builder(table) {
     // Used by one test to make the "already played this week" pre-check miss, so the database's
     // own unique index is the thing that catches it.
     if (S.hideTeamRounds && table === 'bookings' && st.f.some(([, c]) => c === 'league_team_id')) return { data: [], error: null };
+    // PostgREST's embed — select('league_id, leagues(…)') — which is how lib/db.js decides a
+    // customer is a current league player (and so gets the longer booking window).
+    if (table === 'league_members' && st.cols.includes('leagues(')) {
+      return { data: rows.filter(match).map((r) => ({ ...r, leagues: (S.db.leagues || []).find((l) => l.id === r.league_id) || null })), error: null };
+    }
     return { data: rows.filter(match), error: null };
   };
   const q = {};
@@ -110,7 +116,19 @@ class FakeStripe {
       },
       retrieve: async (id) => { S.stripe.push(['checkout.sessions.retrieve', id]); const s = S.sessions[id]; if (!s) throw new Error('No such session'); return s; },
     } };
-    this.paymentIntents = { create: async (p) => { S.stripe.push(['paymentIntents.create', p]); return { id: 'pi_1', client_secret: 'x' }; } };
+    // A hold (capture_method manual) comes back authorised, anything else paid, and a SetupIntent
+    // with its card saved — what Stripe reports once the customer has finished the payment form.
+    const intent = (kind, p) => {
+      S.stripe.push([`${kind === 'pi' ? 'paymentIntents' : 'setupIntents'}.create`, p]);
+      const id = `${kind}_${++seq}`;
+      return (S.intents[id] = { id, client_secret: `${id}_secret`, amount: p.amount, metadata: p.metadata, customer: p.customer || null,
+        status: kind === 'pi' && p.capture_method === 'manual' ? 'requires_capture' : 'succeeded',
+        payment_method: kind === 'seti' ? 'pm_1' : null });
+    };
+    const read = async (id) => { if (!S.intents[id]) throw new Error('No such intent'); return S.intents[id]; };
+    this.paymentIntents = { create: async (p) => intent('pi', p), retrieve: read };
+    this.setupIntents = { create: async (p) => intent('seti', p), retrieve: read };
+    this.paymentMethods = { retrieve: async () => ({ billing_details: {} }), detach: async () => ({}) };
     this.customers = { create: async () => ({ id: `cus_${++seq}` }), del: async () => ({}) };
     this.refunds = { create: async (p, o) => { S.stripe.push(['refunds.create', p, o]); return { id: `re_${++seq}`, status: 'succeeded' }; } };
     this.webhooks = { constructEvent: (buf) => JSON.parse(String(buf)) };
@@ -121,6 +139,7 @@ mock.module(ROOT + 'node_modules/stripe/esm/stripe.esm.node.js', { defaultExport
 const db = await import(ROOT + 'lib/db.js');
 const { default: leaguesApi } = await import(ROOT + 'api/leagues.js');
 const { default: bookingApi } = await import(ROOT + 'api/booking.js');
+const { default: checkoutApi } = await import(ROOT + 'api/checkout.js');
 const { default: webhookApi } = await import(ROOT + 'api/webhook.js');
 const { default: seriesApi } = await import(ROOT + 'api/booking-series.js');
 const { winnipegTodayISO } = await import(ROOT + 'lib/booking.js');
@@ -136,7 +155,7 @@ const BAYS = [{ id: 'B1', name: 'Bay One' }, { id: 'B2', name: 'Bay Two' }];
 function world(extra = {}) {
   seq = 0;
   Object.assign(S, {
-    stripe: [], sessions: {}, fail: {}, missing0031: null, hideTeamRounds: false,
+    stripe: [], sessions: {}, intents: {}, fail: {}, missing0031: null, hideTeamRounds: false,
     tokens: { 'tok-cap': 'user-cap', 'tok-friend': 'user-friend', 'tok-other': 'user-other', 'tok-admin': 'u-admin', 'tok-emp': 'u-emp' },
     db: {
       customers: [
@@ -446,133 +465,204 @@ test('my-teams: the team, the roster by public name, the season week by week, th
 });
 
 // ---------------------------------------------------------------- the weekly round
+// A league round is an ordinary paid booking made at checkout with the team named on it. The team
+// tag is what makes it the week's round; the league discount is what the team gets for it.
 
 const round = (over = {}) => ({ teamId: over.teamId, dateISO: over.dateISO || nextWeek(), bayId: over.bayId || 'B1',
   startMin: over.startMin ?? 600, endMin: over.endMin ?? 780 });
+const quote = (over, who = {}) => run(checkoutApi, { query: { action: 'create-payment-intent' }, body: round(over), ...who });
+const intentsMade = () => S.stripe.filter(([call]) => call === 'paymentIntents.create' || call === 'setupIntents.create');
+// Whatever the card ended up as for this booking: held, saved for later, or charged.
+const moneyOn = (b) => b.authorized_cents || b.deferred_cents || b.amount_cents;
 
-test('league-round: any member books the week’s round, free, in any bay', async () => {
+// The whole checkout: the quote (which creates the payment), then the confirm the page sends once
+// Stripe says the customer has finished. A refused quote comes straight back.
+async function payRound(over, who = {}, name = 'Murad Cheway') {
+  const q = await quote(over, who);
+  if (q.code !== 200) return q;
+  const id = Object.keys(S.intents).at(-1);
+  const done = await run(checkoutApi, { query: { action: 'confirm-booking' }, body: { paymentIntentId: id, name, phone: '2045550100' } });
+  return { code: done.code, out: done.out, quote: q.out, booking: S.db.bookings.find((x) => x.id === (done.out && done.out.bookingId)) };
+}
+
+test('league round: any member books it at checkout, pays the bay less $5 an hour, and it counts for the week', async () => {
   world();
   const teamId = await ownTeam();
   await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '2045550116' }, ...cap });
   await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: S.db.league_team_invites[0].token }, ...friend });
 
-  const r = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }), ...friend });
+  const r = await payRound({ teamId }, friend, 'Sam Okafor');
   assert.equal(r.code, 200, JSON.stringify(r.out));
-  const b = S.db.bookings.find((x) => x.id === r.out.bookingId);
+  // Three hours on a weekday at $20: $60, less $5 an hour = $45, plus 12% tax = $50.40.
+  assert.equal(r.quote.fullAmount, 6000);
+  assert.equal(r.quote.leagueDiscountCents, 1500);
+  assert.equal(r.quote.subtotalCents, 4500, 'the discount comes off before tax');
+  assert.equal(r.quote.totalCents, 5040);
+  assert.equal(r.quote.amount, 5040);
+  assert.deepEqual(r.quote.leagueRound, { teamId, teamName: 'Aces', leagueName: 'Winter Team League' });
+  assert.equal(intentsMade()[0][1].metadata.leagueTeamId, teamId);
+
+  const b = r.booking;
   assert.equal(b.league_team_id, teamId);
-  assert.equal(b.amount_cents, 0, 'the team paid for the season — the round is free');
+  assert.equal(moneyOn(b), 5040, 'the team pays for its bay time — a league round is not free');
   assert.equal(b.status, 'confirmed');
   assert.equal(b.customer_name, 'Sam Okafor', 'booked by whoever got to it');
   assert.equal(b.league_week, mondayOf(nextWeek()));
-  assert.equal(r.out.round.bay, 'Bay One');
+  assert.deepEqual(r.out.leagueRound, { counted: true });
 
   // And the whole team sees it.
   const seen = await run(leaguesApi, { query: { action: 'my-teams' }, ...cap });
   assert.equal(seen.out.teams[0].weeks.find((w) => w.start === mondayOf(nextWeek())).round.id, b.id);
 });
 
-test('league-round: somebody who is not on the team cannot book for it', async () => {
+test('league round: the discount is the manager’s setting, and an ordinary booking never gets it', async () => {
   world();
   const teamId = await ownTeam();
-  const r = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }), ...other });
+  S.db.settings[0].booking_window = { regularDays: 10, leagueDays: 60, leagueRoundOffPerHourCents: 1000 };
+  assert.equal((await quote({ teamId }, cap)).out.leagueDiscountCents, 3000, '$10 an hour for three hours');
+  S.db.settings[0].booking_window.leagueRoundOffPerHourCents = 0;
+  const none = await quote({ teamId }, cap);
+  assert.equal(none.out.leagueDiscountCents, 0);
+  assert.equal(none.out.subtotalCents, 6000);
+
+  // The same member booking the same slot WITHOUT naming the team: full price, no tag.
+  S.db.settings[0].booking_window.leagueRoundOffPerHourCents = 500;
+  const plain = await payRound({}, cap);
+  assert.equal(plain.code, 200, JSON.stringify(plain.out));
+  assert.equal(plain.quote.leagueDiscountCents, 0);
+  assert.equal(plain.quote.subtotalCents, 6000);
+  assert.equal(plain.quote.leagueRound, null);
+  assert.equal(plain.booking.league_team_id ?? null, null);
+  assert.equal(plain.out.leagueRound, null);
+});
+
+test('league round: somebody who is not on the team cannot book for it', async () => {
+  world();
+  const teamId = await ownTeam();
+  const r = await quote({ teamId }, other);
   assert.equal(r.code, 403);
+  assert.equal(r.out.code, 'not_on_team');
   assert.match(r.out.error, /not on that team/);
-  assert.equal((await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }) })).code, 401, 'signed out');
-  // A team id is not a password: knowing it changes nothing.
+  const out = await quote({ teamId });
+  assert.equal(out.code, 401, 'signed out');
+  assert.equal(out.out.code, 'sign_in');
+  assert.equal((await quote({ teamId: 'no-such-team' }, cap)).code, 404);
+  // A team id is not a password: knowing it changes nothing, and Stripe is never asked for a cent.
+  assert.equal(intentsMade().length, 0);
   assert.equal(S.db.bookings.length, 0);
 });
 
-test('league-round: a second round in the same week is refused, and names the one they have', async () => {
+test('league round: a second round in the same week is refused before any payment, and names the one they have', async () => {
   world();
   const teamId = await ownTeam();
-  const first = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }), ...cap });
+  const first = await payRound({ teamId }, cap);
   assert.equal(first.code, 200, JSON.stringify(first.out));
 
-  const second = await run(bookingApi, { query: { action: 'league-round' },
-    body: round({ teamId, dateISO: addDays(2, nextWeek()), bayId: 'B2' }), ...cap });
+  const second = await quote({ teamId, dateISO: addDays(2, nextWeek()), bayId: 'B2' }, cap);
   assert.equal(second.code, 409);
   assert.equal(second.out.code, 'round_booked');
-  assert.match(second.out.error, /already booked its round for this week/);
-  assert.equal(second.out.existing.id, first.out.bookingId);
+  assert.match(second.out.error, /already booked its league round for this week/);
+  assert.match(second.out.error, /ordinary session/);
+  assert.equal(second.out.existing.id, first.booking.id);
   assert.equal(second.out.existing.bay, 'Bay One');
+  assert.equal(intentsMade().length, 1, 'nothing was held or charged for the refused round');
   assert.equal(S.db.bookings.length, 1);
 
   // The week after is fine.
-  const later = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: addDays(7, nextWeek()) }), ...cap });
+  const later = await payRound({ teamId, dateISO: addDays(7, nextWeek()) }, cap);
   assert.equal(later.code, 200, JSON.stringify(later.out));
+  assert.deepEqual(later.out.leagueRound, { counted: true });
 
   // Cancelling frees the week again (the index only counts live rounds).
   S.db.bookings[0].status = 'cancelled';
-  const again = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, bayId: 'B2' }), ...cap });
+  const again = await payRound({ teamId, bayId: 'B2' }, cap);
   assert.equal(again.code, 200, JSON.stringify(again.out));
+  assert.deepEqual(again.out.leagueRound, { counted: true });
 });
 
-test('league-round: when two members book at once, the database index is what refuses the second', async () => {
+test('league round: two members paying at once — the second keeps the booking, as an ordinary session', async () => {
   world();
   const teamId = await ownTeam();
-  assert.equal((await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }), ...cap })).code, 200);
+  assert.equal((await payRound({ teamId }, cap)).code, 200);
   S.hideTeamRounds = true;    // the pre-check cannot see the round — as if it landed a moment ago
-  const racer = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, bayId: 'B2' }), ...cap });
+  const q = await quote({ teamId, bayId: 'B2' }, cap);
   S.hideTeamRounds = false;
-  assert.equal(racer.code, 409);
-  assert.equal(racer.out.code, 'round_booked');
-  assert.match(racer.out.error, /already booked its round for this week/);
-  assert.ok(!/duplicate key|constraint/i.test(racer.out.error), 'never a raw database message');
-  assert.equal(S.db.bookings.length, 1);
+  assert.equal(q.code, 200, JSON.stringify(q.out));
+  const racer = await run(checkoutApi, { query: { action: 'confirm-booking' },
+    body: { paymentIntentId: Object.keys(S.intents).at(-1), name: 'Murad Cheway', phone: '2045550100' } });
+  // They have paid, so they are never left without the slot. It just is not the week's round.
+  assert.equal(racer.code, 200, JSON.stringify(racer.out));
+  assert.deepEqual(racer.out.leagueRound, { counted: false });
+  assert.equal(S.db.bookings.length, 2);
+  const kept = S.db.bookings.find((x) => x.id === racer.out.bookingId);
+  assert.equal(kept.league_team_id ?? null, null);
+  assert.equal(kept.bay_id, 'B2');
+  assert.equal(S.db.bookings.filter((x) => x.league_team_id === teamId).length, 1, 'still one round for the week');
 });
 
-test('league-round: outside the season', async () => {
+test('league round: outside the season', async () => {
   world();
   const teamId = await ownTeam();
-  const early = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: addDays(-20) }), ...cap });
-  assert.equal(early.code, 400);
-  assert.equal(early.out.code, 'outside_season');
-  assert.match(early.out.error, /Winter Team League runs/);
-  const late = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: addDays(43) }), ...cap });
+  const late = await quote({ teamId, dateISO: addDays(43) }, cap);
   assert.equal(late.code, 400);
   assert.equal(late.out.code, 'outside_season');
+  assert.match(late.out.error, /Winter Team League runs/);
+  S.db.leagues[0].season_start = addDays(20);
+  const early = await quote({ teamId, dateISO: addDays(10) }, cap);
+  assert.equal(early.code, 400);
+  assert.equal(early.out.code, 'outside_season');
+  assert.equal(intentsMade().length, 0);
   assert.equal(S.db.bookings.length, 0);
 });
 
-test('league-round: a slot somebody else already has', async () => {
+test('league round: a slot somebody else already has', async () => {
   world();
   const teamId = await ownTeam();
   S.db.bookings.push({ id: 'bk-taken', bay_id: 'B1', booking_date: nextWeek(), start_min: 660, end_min: 720, status: 'confirmed' });
-  const clash = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }), ...cap });
+  const clash = await quote({ teamId }, cap);
   assert.equal(clash.code, 409);
-  assert.equal(clash.out.code, 'slot_taken');
-  assert.equal(S.db.bookings.length, 1);
+  assert.match(clash.out.error, /just booked/);
+  assert.equal(intentsMade().length, 0);
 
-  const elsewhere = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, bayId: 'B2' }), ...cap });
+  const elsewhere = await payRound({ teamId, bayId: 'B2' }, cap);
   assert.equal(elsewhere.code, 200, JSON.stringify(elsewhere.out));
 });
 
-test('league-round: past the booking window, and the nonsense a form can send', async () => {
+test('league round: past the booking window, and the nonsense a form can send', async () => {
   world();
   S.db.leagues[0].season_end = addDays(400);
   const teamId = await ownTeam();
-  const far = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: addDays(90) }), ...cap });
+  const far = await quote({ teamId, dateISO: addDays(90) }, cap);
   assert.equal(far.code, 400);
   assert.equal(far.out.code, 'booking_window');
   assert.match(far.out.error, /League players can book up to 60 days ahead/);
 
   // 59 days ahead is inside the league window (a regular booking would stop at 10).
-  assert.equal((await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: addDays(59) }), ...cap })).code, 200);
+  assert.equal((await payRound({ teamId, dateISO: addDays(59) }, cap)).code, 200);
 
   for (const bad of [{ dateISO: 'tomorrow' }, { dateISO: '2026-13' }, { bayId: '' }, { startMin: 600, endMin: 600 }, { startMin: 'x' }]) {
-    const r = await run(bookingApi, { query: { action: 'league-round' }, body: { ...round({ teamId }), ...bad }, ...cap });
+    const r = await run(checkoutApi, { query: { action: 'create-payment-intent' }, body: { ...round({ teamId }), ...bad }, ...cap });
     assert.equal(r.code, 400, JSON.stringify(bad));
   }
-  assert.equal((await run(bookingApi, { query: { action: 'league-round' }, body: { ...round({ teamId }), teamId: null }, ...cap })).code, 400);
 });
 
-test('league-round: the localhost dev account books like anybody else', async () => {
+test('league round: the localhost dev account books like anybody else', async () => {
   world();
   const teamId = await ownTeam();
-  const r = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }), dev: '2049906530' });
+  const r = await payRound({ teamId }, { dev: '2049906530' });
   assert.equal(r.code, 200, JSON.stringify(r.out));
-  assert.equal(S.db.bookings[0].league_team_id, teamId);
+  assert.equal(r.booking.league_team_id, teamId);
   assert.equal((await run(leaguesApi, { query: { action: 'my-teams' }, dev: '2049906530' })).out.teams.length, 1);
+});
+
+test('the old free league-round address is closed, and says where rounds are booked now', async () => {
+  world();
+  const teamId = await ownTeam();
+  const r = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }), ...cap });
+  assert.equal(r.code, 410);
+  assert.equal(r.out.code, 'league_round_moved');
+  assert.match(r.out.error, /paid for at checkout/);
+  assert.equal(S.db.bookings.length, 0, 'nothing is booked for free');
 });
 
 // ---------------------------------------------------------------- migration 0031 not applied yet
@@ -593,13 +683,6 @@ test('before migration 0031: a sentence telling the operator what to run, never 
   assert.ok([404, 503].includes(claim.code));
   assert.match(claim.out.error, /migration 0031|invite link isn’t valid/);
 
-  S.missing0031 = null;
-  const teamId = await ownTeam();
-  S.missing0031 = ['league_team_id'];
-  const r = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId }), ...cap });
-  assert.equal(r.code, 503);
-  assert.match(r.out.error, /0031_league_teams\.sql/);
-  assert.equal(S.db.bookings.length, 0);
 });
 
 // ---------------------------------------------------------------- paying seat by seat (0036)
@@ -883,12 +966,12 @@ test('a Sunday-start league: Tuesday then the following Sunday are two weeks; th
   S.db.leagues[0].week_start = 0;
   const teamId = await ownTeam();
   const { tue, sun, sat } = tueSunSat();
-  const a = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: tue }), ...cap });
+  const a = await payRound({ teamId, dateISO: tue }, cap);
   assert.equal(a.code, 200, JSON.stringify(a.out));
-  const b = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: sun }), ...cap });
+  const b = await payRound({ teamId, dateISO: sun }, cap);
   assert.equal(b.code, 200, 'the Sunday starts a new week — Monday weeks refused this: ' + JSON.stringify(b.out));
-  assert.equal(b.out.round.week, sun);
-  const c = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: sat }), ...cap });
+  assert.equal(b.booking.league_week, sun);
+  const c = await payRound({ teamId, dateISO: sat }, cap);
   assert.equal(c.code, 409, 'the Saturday closes the week that Sunday opened');
   assert.equal(c.out.code, 'round_booked');
   // The team's own page files both rounds under the right weeks.
@@ -902,8 +985,8 @@ test('a league that says nothing still counts Monday to Sunday: Tuesday then Sun
   world();
   const teamId = await ownTeam();
   const { tue, sun } = tueSunSat();
-  assert.equal((await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: tue }), ...cap })).code, 200);
-  const b = await run(bookingApi, { query: { action: 'league-round' }, body: round({ teamId, dateISO: sun }), ...cap });
+  assert.equal((await payRound({ teamId, dateISO: tue }, cap)).code, 200);
+  const b = await payRound({ teamId, dateISO: sun }, cap);
   assert.equal(b.code, 409);
   assert.equal(b.out.code, 'round_booked');
 });
