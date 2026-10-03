@@ -338,7 +338,7 @@
   .gift-opt .ho-txt b { color: var(--white); }
   .gift-opt .btn { width: 100%; }
 
-  /* League round (migration 0031): a team's one free round a week, booked from this page.
+  /* League round (migration 0031): a team's one round a week, booked and paid for from this page.
      The banner sits under the hero; the panel is the first thing inside checkout. */
   .lg-bar { display: none; margin: 20px 0 0; background: rgba(240,82,61,.08); border: 1px solid rgba(240,82,61,.4);
     border-left: 4px solid var(--orange); border-radius: var(--radius); padding: 16px 18px; }
@@ -368,7 +368,6 @@
   .lg-panel .btn + .btn { margin-top: 8px; }
   .lg-panel .lg-off { display: block; text-align: center; margin-top: 10px; font-size: 12.5px; color: var(--dim);
     cursor: pointer; text-decoration: underline; }
-  .lg-panel .lg-err { color: var(--danger); font-size: 13px; margin-top: 10px; line-height: 1.5; }
 
   /* THE applied-credit strip. One block, one row per credit the server reported — member %,
      promo, gift card. Adding a fourth credit is a new entry in the CREDIT_ROWS loop in
@@ -576,8 +575,8 @@
 
     <div class="mini-recap" id="pay-recap"></div>
 
-    <!-- League round: outside both payment modes on purpose, because claiming the team's weekly
-         round replaces paying rather than being one way of doing it. -->
+    <!-- League round: "count this booking as our team's round". It is paid for like any other
+         session, so the payment form below stays exactly where it is. -->
     <div id="league-round"></div>
 
     <!-- Real Stripe (Payment Element, dark theme) — used when the server is running with keys -->
@@ -1253,10 +1252,8 @@ function recapHTML(){
     <div class="row"><span class="k">Date</span><span class="v">${dateStr}</span></div>
     <div class="row"><span class="k">Time</span><span class="v">${pageTime(state.date, state.startMin)} – ${pageTime(state.date, state.endMin)} · ${durLabel}</span></div>
     <div class="row"><span class="k">Group</span><span class="v">${state.party} ${state.party>1?'players':'player'}</span></div>
-    ${LG.armed
-      ? `<div class="row"><span class="k">League round</span><span class="v">${escHtml(LG.armed.teamName)} · week ${LG.armed.week.number} of ${LG.armed.weeksTotal}</span></div>
-         <div class="row tot"><span class="k">Total</span><span class="v">Free — $0.00</span></div>`
-      : priceRowsHTML(price)}`;
+    ${LG.armed ? `<div class="row"><span class="k">League round</span><span class="v">${escHtml(LG.armed.teamName)} · week ${LG.armed.week.number} of ${LG.armed.weeksTotal}</span></div>` : ''}
+    ${priceRowsHTML(price)}`;
 }
 // Subtotal / discounts / tax / total. Before checkout starts this is worked out here from the rate;
 // once the server has priced this exact booking (piCache), its figures are shown instead, so the
@@ -1265,7 +1262,7 @@ function recapHTML(){
 function priceRowsHTML(price){
   const q=(piCache && piCache.key===bookingKey() && piCache.subtotalCents!=null) ? piCache : null;
   const full=q ? q.fullAmount/100 : price;
-  const off=q ? ((q.memberDiscountCents||0)+(q.promoDiscountCents||0))/100 : 0;
+  const off=q ? ((q.memberDiscountCents||0)+(q.leagueDiscountCents||0)+(q.promoDiscountCents||0))/100 : 0;
   const pct=q ? q.taxPct : CONFIG.taxPct;
   const tax=q ? q.taxCents/100 : taxOn(price);
   const total=q ? q.totalCents/100 : price+tax;
@@ -1329,7 +1326,7 @@ let GIFT_CODE=null, GIFT_RESERVED=false, GIFT_LAST4=null;
 // Every input that changes the price is in the key, so a repriced booking can never reuse a
 // PaymentIntent built for the old total.
 const bookingKey = () => [realSlot().dateISO, state.bay, state.startMin, state.endMin,
-                          PROMO_CODE||'', GIFT_CODE||''].join('|');
+                          PROMO_CODE||'', GIFT_CODE||'', (LG.armed && LG.armed.teamId)||''].join('|');
 // A PaymentIntent's id is the part of its client secret before "_secret".
 const piIdOf = cs => String(cs||'').split('_secret')[0] || null;
 
@@ -1415,8 +1412,14 @@ async function createPI(){
   // webhook can redeem it server-side. Without it, a tab that dies after payment leaves the
   // reservation to lapse and the customer keeps the discount AND the unused code.
   if(PROMO_RESERVATION) body.promoReservationId=PROMO_RESERVATION;
+  // The team this booking is the league round for. The server checks the team, the season and the
+  // week before it holds the slot or touches a card, and takes the league discount off itself.
+  if(LG.armed) body.teamId=LG.armed.teamId;
   const r=await fetch('/api/create-payment-intent',{method:'POST',headers:{'Content-Type':'application/json', ...authHeaders()},body:JSON.stringify(body)});
   const data=await r.json();
+  // The slot is fine but it cannot be this team's round (already played that week, not on the team,
+  // signed out, outside the season). mountStripe carries on with it as an ordinary session.
+  if(LEAGUE_REFUSALS.includes(data.code)){ const e=new Error(data.error||'This booking cannot be counted as your league round.'); e.league=true; throw e; }
   if(r.status===409){ const e=new Error(data.error||'That time was just taken — pick another slot.'); e.taken=true; throw e; }
   if(!r.ok) throw new Error(data.error||'error');
   piCache={ key, clientSecret:data.clientSecret, paymentIntentId:piIdOf(data.clientSecret),
@@ -1431,13 +1434,15 @@ async function createPI(){
             // not, they stay 0 — so nothing is displayed and nothing is reserved. See applyPromo
             // and applyGift, which refuse to claim a code the charge does not reflect.
             promoDiscountCents:data.promoDiscountCents||0,
+            leagueDiscountCents:data.leagueDiscountCents||0,
             giftUsedCents:data.giftUsedCents||0,
             // Tax as the server charged it (undefined from an older server — the recap then keeps
             // its own estimate).
             subtotalCents:data.subtotalCents, taxPct:data.taxPct, taxCents:data.taxCents, totalCents:data.totalCents };
   if(needHold) HELD={ ...slot };
   renderCredits();
-  if($('#pay-recap') && !LG.armed) $('#pay-recap').innerHTML=recapHTML();
+  if($('#pay-recap')) $('#pay-recap').innerHTML=recapHTML();
+  renderLeaguePanel();   // it shows the league discount the server just worked out
   if(data.expiresAt) startHoldTimer(data.expiresAt);
   return piCache;
 }
@@ -1455,6 +1460,8 @@ function creditRows(){
   return [
     { key:'member', label:`Member discount (${q.memberPct}% off)`, amountCents:q.memberDiscountCents,
       show:q.memberDiscountCents>0 },
+    { key:'league', label:'League round discount', amountCents:q.leagueDiscountCents,
+      show:q.leagueDiscountCents>0 },
     { key:'promo',  label:`Promo code ${PROMO_CODE||''}`.trim(), amountCents:q.promoDiscountCents,
       show:q.promoDiscountCents>0, onRemove:removePromo },
     { key:'gift',   label:`Gift card${GIFT_LAST4?' ••'+GIFT_LAST4:''}`, amountCents:q.giftUsedCents,
@@ -1581,7 +1588,8 @@ function showGiftCover(code, q){
   const host=$('#gift-cover'); if(!host) return;
   host.style.display='block';
   host.innerHTML=`<div class="gift-opt"><div class="ho-txt">This gift card covers the whole session — `
-    + `<b>${escHtml(money((q.giftUsedCents||0)/100))}</b>. No card payment needed.</div>`
+    + `<b>${escHtml(money((q.giftUsedCents||0)/100))}</b>. No card payment needed.`
+    + (LG.armed ? ' Booked this way it is an ordinary session: ask us at the desk to mark it as your league round.' : '') + `</div>`
     + `<button type="button" class="btn btn-line" id="gift-book">Book with this gift card</button></div>`;
   $('#gift-book').onclick=()=>bookWithGiftNow(code);
 }
@@ -1700,6 +1708,12 @@ async function mountStripe(){
     data=(piCache && piCache.key===bookingKey()) ? piCache : await createPI();
   }catch(err){
     if(err.taken){ stopHoldTimer(); $('#pay-overlay').classList.remove('show'); setStep(2); await loadAvailability(); renderAll(); toast(err.message); return; }
+    // Not a league round after all: say why, and price it again as an ordinary session.
+    if(err.league && LG.armed){
+      LG.armed=null; LG.note=err.message; piCache=null;
+      $('#pay-recap').innerHTML=recapHTML(); renderLeaguePanel(); loadLeagueRound();
+      return mountStripe();
+    }
     peEl.innerHTML='<div class="loading">Could not start checkout: '+err.message+'</div>'; return;
   }
   renderPayMode(data.payMode, data.amount, data.payMessage);
@@ -1714,16 +1728,18 @@ async function mountStripe(){
 }
 
 async function openPayment(){
+  // They came here from "Book this week's round", so the answer to "is this your league round?"
+  // is already yes. Decided before anything is priced, so the first quote carries the discount.
+  LG.note=null;
+  if(LG.intent && !LG.armed){
+    const { open } = leagueChoices();
+    if(open.length === 1){ LG.armed = open[0]; LG.intent = false; }
+  }
   $('#pay-recap').innerHTML=recapHTML();
   $('#pay-overlay').classList.add('show');
   setStep(3);
   const modal=$('#pay-modal');
-  // The team's weekly round is not a way of paying, it is a booking that costs nothing — so when
-  // it is claimed, the whole payment side of this modal goes away rather than sitting there
-  // showing a price nobody is being asked for.
   renderLeaguePanel();
-  if(LG.armed){ showLeagueOnly(true); return; }
-  showLeagueOnly(false);   // put the payment side back if a previous checkout hid it
   if(stripeReady){
     modal.classList.add('stripe');
     $('#stripe-mode').style.display='block';
@@ -1766,9 +1782,8 @@ function closePayment(){
   setCodeMsg($('#promo-msg'),'',''); setCodeMsg($('#gift-msg'),'','');
   hideGiftCover();
   renderCredits();
-  LG.armed=null; LG.intent=false;
+  LG.armed=null; LG.intent=false; LG.note=null;
   const lgh=$('#league-round'); if(lgh) lgh.innerHTML='';
-  showLeagueOnly(false);
   $('#pay-overlay').classList.remove('show');
   setStep(2);
   loadAvailability().then(renderAll);   // reflect the released slot
@@ -1855,17 +1870,19 @@ $('#sc-pay').onclick=async ()=>{
     if(setupIntent && setupIntent.status==='succeeded'){
       btn.textContent='Confirming…';
       const amountCents = piCache.amount;
+      let conf=null;
       try{
-        await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        conf=await (await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
           paymentIntentId: setupIntent.id,
           name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim(),
           note:($('#sc-note')?.value||'').trim(),
           sms: $('#sc-sms') ? $('#sc-sms').checked : undefined,
-          smsConsent: smsConsentGiven() }) });
+          smsConsent: smsConsentGiven() }) })).json();
       }catch(e){ /* the card is saved; the webhook backup can still write the booking */ }
       await settleCredits(setupIntent.id);
       $('#pay-overlay').classList.remove('show');
       showConfirmation($('#sc-name').value.trim()||'Guest', amountCents, 'save');
+      noteLeagueRound(conf);
     }else{ btn.innerHTML=label; btn.disabled=false; }
     return;
   }
@@ -1887,17 +1904,19 @@ $('#sc-pay').onclick=async ()=>{
   if(paymentIntent && (paymentIntent.status==='succeeded' || paymentIntent.status==='requires_capture')){
     // Turn the paid hold into a real booking + save the customer (works without a Stripe webhook).
     btn.textContent='Confirming…';
+    let conf=null;
     try{
-      await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      conf=await (await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         paymentIntentId: paymentIntent.id,
         name:($('#sc-name').value||'').trim(), email:($('#sc-email').value||'').trim(), phone:($('#sc-phone').value||'').trim(),
         note:($('#sc-note')?.value||'').trim(),
         sms: $('#sc-sms') ? $('#sc-sms').checked : undefined,
-        smsConsent: smsConsentGiven() }) });
+        smsConsent: smsConsentGiven() }) })).json();
     }catch(e){ /* payment already succeeded; the webhook backup can still catch it */ }
     await settleCredits(paymentIntent.id);
     $('#pay-overlay').classList.remove('show');
     showConfirmation($('#sc-name').value.trim()||'Guest', paymentIntent.amount, payModeOfPI(paymentIntent));
+    noteLeagueRound(conf);
   }else{ btn.innerHTML=label; btn.disabled=false; }
 };
 
@@ -1924,6 +1943,12 @@ async function checkHoursOption(){
   const email=($('#sc-email')?.value||'').trim(), phone=($('#sc-phone')?.value||'').trim();
   const dur=(state.endMin!=null && state.startMin!=null) ? (state.endMin-state.startMin) : 0;
   if((!validPhone(phone) && !validEmail(email)) || !(dur>0)){ host.style.display='none'; host.innerHTML=''; return; }
+  // A league round is counted when it is paid for by card here. Prepaid hours book without one.
+  if(LG.armed){
+    host.style.display='block';
+    host.innerHTML='<div class="hours-opt"><div class="ho-txt">Want to use prepaid hours? Choose "book this as an ordinary session" above, then ask us at the desk to mark it as your league round.</div></div>';
+    return;
+  }
   // Balances are only shown to a signed-in account: a typed number is not proof of whose they are.
   if(!BOOK_WINDOW.signedIn){
     host.style.display='block';
@@ -2221,21 +2246,24 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape' && $('#wl-overlay'
 
 /* ---------- The league round (migration 0031) ----------
    A league is sold by the team and has no fixed night: each team plays once a week, whenever it
-   likes, in whichever bay is free — booked HERE, from the ordinary booking page, and free, because
-   the team paid for the season up front.
+   likes, in whichever bay is free. The round is booked HERE, from the ordinary booking page, and
+   paid for like any other session: the season fee covers the league, not the bay time. What a
+   league round gets is so much an hour off (the manager's setting; the server works it out).
 
    So this page has to do two things for a customer who is on a team:
      · say, before they pick anything, whether their team has played this week;
-     · at checkout, let them say "this one is our round" and make it unmistakable what that means —
-       what it costs (nothing), which team it is for, and which week it counts as.
+     · at checkout, let them say "this one is our round" and make it plain what that means: which
+       team it is for, which week it counts as, and the discount that comes off.
 
-   POST /api/booking?action=league-round { teamId, dateISO, bayId, startMin, endMin } → { ok, bookingId }
-   The week is the server's to decide (bookings.league_week is generated from the date), so nothing
-   here sends one; the week shown is worked out with the same shared maths, for the customer's sake.
+   Saying yes sends teamId with POST /api/create-payment-intent. The server proves the team, the
+   season and the week, prices the booking with the league discount, and the booking that payment
+   becomes is tagged as the team's round. The week is the server's to decide (bookings.league_week
+   is worked out from the date), so nothing here sends one.
 
-   Migration 0031 may not be applied and neither action may exist yet. Everything below is skipped
-   silently in that case: no banner, no panel, and the page books exactly as it did before. */
-let LG = { teams: [], armed: null, intent: false };
+   Migration 0031 may not be applied. Everything below is skipped silently in that case: no banner,
+   no panel, and the page books exactly as it did before. */
+const LEAGUE_REFUSALS = ['round_booked', 'not_on_team', 'no_team', 'sign_in', 'outside_season'];
+let LG = { teams: [], armed: null, intent: false, note: null };
 
 const todayISO = () => { const w = winnipegNow(); return `${w.y}-${pad(w.mo)}-${pad(w.d)}`; };
 const bayLabel = id => { const b = CONFIG.bays.find(x => x.id === id); return (b && b.name) || id || 'a bay'; };
@@ -2276,16 +2304,16 @@ function renderLeagueBar(){
   const open = LG.teams.filter(t => { const c = t.weeks.find(w => w.current); return c && !c.round; });
   const lines = LG.teams.map(t => {
     const c = t.weeks.find(w => w.current);
-    if(!c) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> — ${escHtml(t.leagueName)} is not running this week, so a booking now is an ordinary paid session.</div>`;
-    if(c.round) return `<div class="lg-line">✓ <b>${escHtml(t.teamName)}</b> has this week's round booked — <b>${escHtml(roundLine(c.round))}</b>. That is week ${c.number} of ${t.weeks.length} done; anything you book here now is a normal paid session.</div>`;
-    return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> has not played week ${c.number} of ${t.weeks.length} yet — you have until Sunday ${escHtml(shortDate(c.end))}. Pick any open time below and claim it at checkout: it costs <b>nothing</b>, and any player on the team can book it.</div>`;
+    if(!c) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> — ${escHtml(t.leagueName)} is not running this week, so a booking now is an ordinary session.</div>`;
+    if(c.round) return `<div class="lg-line">✓ <b>${escHtml(t.teamName)}</b> has this week's round booked — <b>${escHtml(roundLine(c.round))}</b>. That is week ${c.number} of ${t.weeks.length} done; anything else you book here is an ordinary session.</div>`;
+    return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> has not played week ${c.number} of ${t.weeks.length} yet. You have until ${escHtml(longDate(c.end))}. Pick any open time below and choose your team at checkout: it counts as your round and the <b>league discount</b> comes off the price. Any player on the team can book it.</div>`;
   });
   host.className = 'lg-bar' + (open.length ? '' : ' is-booked');
   host.style.display = 'block';
   host.innerHTML = `<div class="lg-k">${open.length ? "Your league round this week" : "Your league round"}</div>${lines.join('')}`
     + (open.length ? '<button class="btn btn-primary" id="lg-pick">Pick a time for our round</button>' : '');
   const pick = $('#lg-pick');
-  if(pick) pick.onclick = () => { LG.intent = true; scrollToTimes(); toast('Pick any open start time — we make it free at checkout.'); };
+  if(pick) pick.onclick = () => { LG.intent = true; scrollToTimes(); toast('Pick any open start time. You choose your team at checkout.'); };
 }
 
 // Which teams could this booking's week belong to? A team already has a round that week, or it
@@ -2311,39 +2339,42 @@ function renderLeaguePanel(){
   const host = $('#league-round'); if(!host) return;
   if(!LG.teams.length || !selectionValid()){ host.innerHTML=''; return; }
 
+  // The server would not count this booking as the round, and said why.
+  if(LG.note){
+    host.innerHTML = `<div class="lg-panel is-note">
+      <div class="lg-t" style="font-size:14px">Not counted as a league round</div>
+      <div class="lg-d">${escHtml(LG.note)}</div>
+    </div>`;
+    return;
+  }
+
   if(LG.armed){
     const a = LG.armed;
+    const off = (piCache && piCache.key===bookingKey()) ? (piCache.leagueDiscountCents||0) : 0;
     host.innerHTML = `<div class="lg-panel is-armed">
-      <div class="lg-t">League round — nothing to pay</div>
-      <div class="lg-d">This booking is <b>${escHtml(a.teamName)}</b>'s round for the week. Everyone on the team sees it, and any of you can turn up.</div>
+      <div class="lg-t">League round</div>
+      <div class="lg-d">This booking counts as <b>${escHtml(a.teamName)}</b>'s round for the week. You pay for the bay as usual, less the league discount. Everyone on the team sees it, and any of you can turn up.</div>
       <ul class="lg-facts">
         <li><span class="k">Team</span><span class="v">${escHtml(a.teamName)} · ${escHtml(a.leagueName)}</span></li>
         <li><span class="k">Counts as</span><span class="v">Week ${a.week.number} of ${a.weeksTotal} · ${escHtml(weekLabel(a.week))}</span></li>
-        <li><span class="k">When</span><span class="v">${escHtml(longDate(isoDate(state.date)))} · ${escHtml(pageTime(state.date, state.startMin))}–${escHtml(pageTime(state.date, state.endMin))}</span></li>
-        <li><span class="k">Bay</span><span class="v">${escHtml(bayLabel(state.bay))}</span></li>
-        <li><span class="k">You pay</span><span class="v" style="color:#067647">Nothing — the season is paid</span></li>
+        ${off>0 ? `<li><span class="k">League discount</span><span class="v" style="color:#067647">−${escHtml(money(off/100))}</span></li>` : ''}
       </ul>
-      <button class="btn btn-primary" id="lg-confirm">Confirm our free league round</button>
-      <a class="lg-off" id="lg-off">No — book this as a normal paid session</a>
-      <div class="lg-err" id="lg-err"></div>
+      <a class="lg-off" id="lg-off">No, book this as an ordinary session</a>
     </div>`;
-    $('#lg-confirm').onclick = confirmLeagueRound;
     $('#lg-off').onclick = disarmLeague;
     return;
   }
 
   const { open, taken } = leagueChoices();
   if(open.length){
-    // They came here from "Book this week's round", so the answer is already yes.
-    if(LG.intent && open.length === 1){ armLeague(open[0]); return; }
     const one = open.length === 1;
     host.innerHTML = `<div class="lg-panel is-offer">
       <div class="lg-t">Is this your league round?</div>
       <div class="lg-d">${one
-        ? `<b>${escHtml(open[0].teamName)}</b> has not played week ${open[0].week.number} of ${escHtml(open[0].leagueName)} (${escHtml(weekLabel(open[0].week))}) yet. Claim it here and <b>this booking is free</b> — your team paid for the season up front.`
-        : 'You are on more than one team with a round still to play that week. Say which team this booking is for and it is <b>free</b>.'}</div>
+        ? `<b>${escHtml(open[0].teamName)}</b> has not played week ${open[0].week.number} of ${escHtml(open[0].leagueName)} (${escHtml(weekLabel(open[0].week))}) yet. Count this booking as the round and the <b>league discount</b> comes off the price.`
+        : 'You are on more than one team with a round still to play that week. Say which team this booking is for and the <b>league discount</b> comes off the price.'}</div>
       ${open.map((o,i) => `<button type="button" class="btn btn-line" data-arm="${i}">${one
-        ? 'Yes — this is our league round' : `${escHtml(o.teamName)} · week ${o.week.number}`}</button>`).join('')}
+        ? 'Yes, this is our league round' : `${escHtml(o.teamName)} · week ${o.week.number}`}</button>`).join('')}
     </div>`;
     host.querySelectorAll('[data-arm]').forEach(b => { b.onclick = () => armLeague(open[+b.dataset.arm]); });
     return;
@@ -2351,91 +2382,56 @@ function renderLeaguePanel(){
   if(taken.length){
     host.innerHTML = taken.map(t => `<div class="lg-panel is-note">
       <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)} has already played that week</div>
-      <div class="lg-d">Week ${t.week.number} is booked: <b>${escHtml(roundLine(t.round))}</b>. A team gets one free round a week, so this one is an ordinary session and is charged as one.</div>
+      <div class="lg-d">Week ${t.week.number} is booked: <b>${escHtml(roundLine(t.round))}</b>. A team plays one league round a week, so this one is an ordinary session at the normal price.</div>
     </div>`).join('');
     return;
   }
   host.innerHTML = '';
 }
 
-// When the round is claimed, the payment side of the modal goes away entirely: there is no price
-// to show and nothing to type. Restoring it puts back whichever mode this page is running in.
-function showLeagueOnly(on){
-  const modal = $('#pay-modal');
-  $('#stripe-mode').style.display      = on ? 'none' : (stripeReady ? 'block' : 'none');
-  $('#pay-unavailable').style.display  = on ? 'none' : (stripeReady ? 'none'  : 'block');
-  $('#pay-note').style.display         = on ? 'none' : '';
-  modal.classList.toggle('stripe', !on && stripeReady);
-}
+function armLeague(choice){ LG.armed = choice; LG.intent = false; LG.note = null; return repriceForLeague(); }
+function disarmLeague(){ LG.armed = null; LG.intent = false; return repriceForLeague(); }
 
-function armLeague(choice){
-  LG.armed = choice; LG.intent = false;
+// A league round and an ordinary session are priced differently, so saying yes or no rebuilds the
+// payment. A promo code or gift card belongs to the payment it was applied to: it is given back
+// and asked for again, never carried over quietly onto a different price.
+async function repriceForLeague(){
+  const hadCode = !!(PROMO_CODE || GIFT_CODE);
+  await releaseCredits();
+  PROMO_CODE=null; GIFT_CODE=null; GIFT_LAST4=null;
+  ['#promo-code','#gift-code'].forEach(s=>{ const i=$(s); if(i){ i.value=''; i.disabled=false; } });
+  ['#promo-apply','#gift-apply'].forEach(s=>{ const b=$(s); if(b){ b.disabled=false; b.style.display=''; } });
+  setCodeMsg($('#promo-msg'),'',''); setCodeMsg($('#gift-msg'),'','');
+  hideGiftCover();
+  piCache=null;
+  renderCredits();
   $('#pay-recap').innerHTML = recapHTML();
   renderLeaguePanel();
-  showLeagueOnly(true);
-}
-async function disarmLeague(){
-  LG.armed = null; LG.intent = false;
-  $('#pay-recap').innerHTML = recapHTML();
-  renderLeaguePanel();
-  showLeagueOnly(false);
-  if(stripeReady) await mountStripe();
+  if(hadCode) toast('The price changed, so enter your promo code or gift card again.');
+  if(stripeReady){ await mountStripe(); checkHoursOption(); }
   else showCheckoutUnavailable();
 }
 
-async function confirmLeagueRound(){
-  if(paying || !LG.armed) return;
-  const a = LG.armed, btn = $('#lg-confirm'), err = $('#lg-err');
-  paying = true; btn.disabled = true; btn.textContent = 'Booking…'; err.textContent = '';
-  // Give our own cart hold back first and wait for it: the server re-checks this slot against every
-  // live booking row, and a hold this checkout is holding would clash with itself.
-  await releaseHeldSlot();
-  await releaseCredits();
-  const r = await post('/api/booking?action=league-round', { teamId:a.teamId, ...realSlot() });
-  paying = false;
-  if(r.data && r.data.ok){
-    $('#pay-overlay').classList.remove('show');
-    showLeagueConfirmation(a, r.data.bookingId);
-    LG.armed = null;
-    loadAvailability().then(renderAll);
-    loadLeagueRound();
-    return;
-  }
-  btn.disabled = false; btn.textContent = 'Confirm our free league round';
-  const d = r.data || {};
-  err.textContent = r.status === 409 ? (d.error || 'Somebody took that time while you were deciding. Close this, pick another open slot, and claim the round there.')
-    : r.status === 404 ? (d.error || 'Booking a league round online is not switched on yet. Call the shop at 204-488-6177 and we will book it for you — it is still free.')
-    : r.status === 503 ? 'Leagues are still being set up here, so we cannot book the round for you yet. Call the shop at 204-488-6177 — it is still free.'
-    : (r.status === 401 || r.status === 403) ? (d.error || 'Your sign-in has expired, so we cannot tell this is your team. Open My Account, sign in again, then come back and try once more.')
-    : (d.error || 'We could not book your league round. Try again in a moment, or call the shop at 204-488-6177.');
-  // The server names the round they already have; the banner and the panel should stop offering
-  // one the moment we learn that.
-  if(d.code === 'round_booked'){ loadLeagueRound(); }
-}
-
-function showLeagueConfirmation(a, bookingId){
-  HELD=null; holdActive=false; stopHoldTimer(); piCache=null;
-  const seed = String(bookingId || (a.teamId + isoDate(state.date) + state.startMin));
-  const code = 'JH-'+Math.abs([...seed].reduce((x,c)=>x*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
-  $('#conf-code').textContent = code;
-  $('#conf-msg').textContent = `${a.teamName} is booked in for week ${a.week.number} — nothing to pay. Everyone on the team can see it on My Account.`;
-  $('#conf-recap').innerHTML = `
-    <div class="row"><span class="k">Team</span><span>${escHtml(a.teamName)}</span></div>
-    <div class="row"><span class="k">League week</span><span>Week ${a.week.number} of ${a.weeksTotal} · ${escHtml(weekLabel(a.week))}</span></div>
-    <div class="row"><span class="k">Bay</span><span>${escHtml(bayLabel(state.bay))}</span></div>
-    <div class="row"><span class="k">Date</span><span>${escHtml(longDate(isoDate(state.date)))}</span></div>
-    <div class="row"><span class="k">Time</span><span>${escHtml(pageTime(state.date, state.startMin))} – ${escHtml(pageTime(state.date, state.endMin))}</span></div>
-    <div class="row"><span class="k">Paid</span><span>Free — the season is paid for</span></div>`;
-  $('#conf-waiver').innerHTML = '';
-  $('#conf-overlay').classList.add('show');
-  setStep(4);
+// After a paid checkout: say on the confirmation whether this booking is the team's league round.
+// `conf` is confirm-booking's answer, or null when that call failed (the webhook still tags it).
+// counted:false is the rare race where a teammate booked the week's round while this was being paid.
+function noteLeagueRound(conf){
+  const a = LG.armed; if(!a) return;
+  LG.armed = null;
+  const counted = !(conf && conf.leagueRound && conf.leagueRound.counted === false);
+  $('#conf-msg').textContent += counted
+    ? ` This is ${a.teamName}'s league round for week ${a.week.number}. Everyone on the team can see it on My Account.`
+    : ` A teammate booked ${a.teamName}'s league round for that week just before you, so this one is an ordinary session, not a second round.`;
+  if(counted) $('#conf-recap').insertAdjacentHTML('afterbegin',
+    `<div class="row"><span class="k">League round</span><span>${escHtml(a.teamName)} · week ${a.week.number} of ${a.weeksTotal}</span></div>`);
+  loadLeagueRound();
 }
 
 /* ---------- Init ---------- */
 { const w = winnipegNow(); state.calMonth = new Date(w.y, w.mo-1, 1); }
 renderAll();
 // "Book this week's round" on My Account or the leagues page lands here: the customer has already
-// said this booking is their team's round, so checkout claims it without asking them twice.
+// said this booking is their team's round, so checkout counts it without asking them twice.
 if(new URLSearchParams(location.search).get('league-round')==='1'){
   LG.intent = true;
   history.replaceState({}, '', location.pathname);
