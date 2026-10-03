@@ -59,7 +59,16 @@
   .sc .sc-d{width:132px;white-space:nowrap;color:var(--muted);font-weight:600}
   .sc .sc-c b{display:block;font-weight:700;color:var(--white)}
   .sc .sc-c span{display:block;color:var(--muted);font-size:13.5px;margin-top:2px}
-  .sc .sc-e{width:190px;font-family:'Space Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--orange-ink);padding-top:15px}
+  .sc .sc-n{white-space:nowrap}
+  .sc .sc-e{width:236px}
+  .sc .sc-e b{display:block;font-family:'Space Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--orange-ink);padding-top:2px}
+  .sc .sc-e span{display:block;color:var(--muted);font-size:13px;line-height:1.45;margin-top:3px}
+  .lp-notice{font-size:13px;line-height:1.55;color:var(--muted);margin-top:14px;max-width:70ch}
+  /* The settings table: label and value, ruled like the lists. */
+  .lp-settings{border-top:1px solid var(--border)}
+  .lp-settings div{display:grid;grid-template-columns:minmax(150px,34%) 1fr;gap:14px;padding:11px 0;border-bottom:1px solid var(--border);font-size:15px;line-height:1.45}
+  .lp-settings dt{color:var(--muted);font-weight:600}
+  .lp-settings dd{color:var(--white);font-weight:600}
 
   /* The honours: a ruled list in columns, like names on a clubhouse board. */
   .lp-honours{list-style:none;columns:3;column-gap:36px}
@@ -113,13 +122,14 @@
     /* The scorecard folds: week and dates on one line, the course under them, the event last. */
     .sc thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
     .sc,.sc tbody,.sc tr,.sc td,.sc .sc-phase th{display:block}
-    .sc tbody tr:not(.sc-phase){display:grid;grid-template-columns:34px 1fr;gap:2px 8px;padding:13px 14px;border-top:1px solid var(--border)}
+    .sc tbody tr:not(.sc-phase){display:grid;grid-template-columns:46px 1fr;gap:2px 8px;padding:13px 14px;border-top:1px solid var(--border)}
     .sc tbody tr + tr td{border-top:none}
     .sc td{padding:0}
     .sc .sc-n{width:auto;grid-row:1 / span 3;font-size:20px}
     .sc .sc-d{width:auto;font-size:13px}
     .sc .sc-c,.sc .sc-e{grid-column:2}
     .sc .sc-e{width:auto;padding-top:3px}
+    .lp-settings div{grid-template-columns:1fr;gap:2px}
     .sc .sc-e:empty{display:none}
   }
   .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
@@ -350,7 +360,11 @@ function leaguePageHTML(lg, { back }){
   const lede = paras.shift() || '';
   const weeks = d.schedule.length;
   const list = items => `<ul class="lp-list">${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
-  let n = 0;
+  // A row's week number is its place in the calendar, counted from the first week — not its place
+  // in the list. A holiday break that covers two weeks is one row and reads "7–8".
+  const day0 = (d.schedule.find(w => w.from) || {}).from;
+  const weekAt = iso => Math.floor((Date.parse(iso + 'T00:00:00Z') - Date.parse(day0 + 'T00:00:00Z')) / 6048e5) + 1;
+  const weekNo = w => { if(!day0 || !w.from) return ''; const a = weekAt(w.from), b = w.to ? weekAt(w.to) : a; return b > a ? `${a}–${b}` : String(a); };
   const cta = mine ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'}. See My Account</a>`
     : canStart ? `<button class="btn btn-primary i-start">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>
         ${SIGNED_IN ? '' : '<div class="fine">You need an account to start a team. It takes a minute, and we bring you straight back here.</div>'}`
@@ -366,23 +380,27 @@ function leaguePageHTML(lg, { back }){
     <div class="lp-grid">
       <div class="lp-main">
         ${paras.length ? `<section class="lp-about">${paras.map(x => `<p>${esc(x)}</p>`).join('')}</section>` : ''}
+        ${d.perks.length ? `<section><h2>Member perks</h2>${list(d.perks)}</section>` : ''}
         ${(d.format.length || d.challenges.length) ? `<section class="lp-cols">
           ${d.format.length ? `<div><h2>Format and rules</h2>${list(d.format)}</div>` : ''}
           ${d.challenges.length ? `<div><h2>Featured challenges</h2>${list(d.challenges)}</div>` : ''}
         </section>` : ''}
+        ${d.settings.length ? `<section><h2>League settings</h2>
+          <dl class="lp-settings">${d.settings.map(r => `<div><dt>${esc(r.label)}</dt><dd>${esc(r.value)}</dd></div>`).join('')}</dl></section>` : ''}
         ${weeks ? `<section><h2>The season, week by week</h2>
           <table class="sc">
             <caption class="sr-only">Schedule: week, dates, course and event</caption>
-            <thead><tr><th scope="col">Wk</th><th scope="col">Dates</th><th scope="col">Course</th><th scope="col">Event</th></tr></thead>
+            <thead><tr><th scope="col">Wk</th><th scope="col">Dates</th><th scope="col">Course</th><th scope="col">Event and notes</th></tr></thead>
             ${L.schedulePhases(d.schedule).map(ph => `<tbody>
               ${ph.phase ? `<tr class="sc-phase"><th colspan="4" scope="colgroup">${esc(ph.phase)}</th></tr>` : ''}
               ${ph.weeks.map(w => `<tr>
-                <td class="sc-n">${++n}</td>
+                <td class="sc-n">${esc(weekNo(w))}</td>
                 <td class="sc-d">${esc(L.dateRangeLabel(w.from, w.to) || 'To be announced')}</td>
                 <td class="sc-c"><b>${esc(w.course || 'To be announced')}</b>${w.location ? `<span>${esc(w.location)}</span>` : ''}</td>
-                <td class="sc-e">${esc(w.event)}</td></tr>`).join('')}
+                <td class="sc-e">${w.event ? `<b>${esc(w.event)}</b>` : ''}${w.note ? `<span>${esc(w.note)}</span>` : ''}</td></tr>`).join('')}
             </tbody>`).join('')}
-          </table></section>` : ''}
+          </table>
+          ${d.notice ? `<p class="lp-notice">${esc(d.notice)}</p>` : ''}</section>` : ''}
         ${d.awards.length ? `<section><h2>Team awards</h2><ul class="lp-honours">${d.awards.map(a => `<li>${esc(a)}</li>`).join('')}</ul></section>` : ''}
         ${d.prize ? `<section><h2>Grand prize</h2><div class="lp-prize"><p>${esc(d.prize)}</p></div></section>` : ''}
         <section><h2>How it works</h2>
@@ -396,7 +414,7 @@ function leaguePageHTML(lg, { back }){
         <div class="lp-price">${esc(price.big)}</div>
         <div class="lp-price-note">${esc(price.note)}</div>
         <dl class="lp-facts">
-          <div><dt>Season</dt><dd>${esc(season(lg))}${weeks ? `<span>${weeks} week${weeks === 1 ? '' : 's'}</span>` : ''}</dd></div>
+          <div><dt>Season</dt><dd>${esc(season(lg))}</dd></div>
           <div><dt>Team</dt><dd>${range ? (range.min === range.max ? `${range.max} golfers` : `${range.min} to ${range.max} golfers`) : 'Any size'}${lg.fee_cents > 0 && range ? `<span>${money(lg.fee_cents)} per team</span>` : ''}</dd></div>
           <div><dt>Play</dt><dd>One round a week<span>At a time that suits your team</span></dd></div>
           <div><dt>Bay time</dt><dd>Paid at the regular rate<span>Booked like any other session</span></dd></div>

@@ -227,30 +227,40 @@
   }
 
   /* ----- League info: what the printed brochure says (migration 0039, leagues.details) -----
-     About, format & rules, featured challenges, the week-by-week schedule, team awards and the
-     grand prize. One shape and one clean-up, used by the manager's form, the customer page and the
+     About, member perks, format & rules, the league settings table, featured challenges, the
+     week-by-week schedule with a note per week, a notice under it, team awards and the grand prize. One shape and one clean-up, used by the manager's form, the customer page and the
      server — so nothing oversized or malformed is ever saved or shown. Lists come in as arrays or
      as text with one item per line; a leading bullet is dropped, so a pasted brochure line works. */
-  const INFO_LIMITS = { about: 2000, prize: 2000, items: 60, item: 200, weeks: 60 };
+  const INFO_LIMITS = { about: 2000, prize: 2000, notice: 800, items: 60, item: 200, weeks: 60, note: 240 };
   function normalizeDetails(raw) {
     const d = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     const line = (v, max) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, max);
     const para = (v, max) => String(v == null ? '' : v).replace(/\r/g, '').replace(/[ \t]+\n/g, '\n').trim().slice(0, max);
     const list = (v) => (Array.isArray(v) ? v : String(v == null ? '' : v).split('\n'))
       .map((x) => line(String(x == null ? '' : x).replace(/^\s*[•·\-*–—]+\s*/, ''), INFO_LIMITS.item)).filter(Boolean).slice(0, INFO_LIMITS.items);
+    // "Setting: value" rows — the league settings table. Given as [{ label, value }] or as text,
+    // one per line, split at the first colon. A line with no colon is a row with a label only.
+    const settings = (Array.isArray(d.settings) ? d.settings : String(d.settings == null ? '' : d.settings).split('\n')).map((x) => {
+      if (x && typeof x === 'object') return { label: line(x.label, 60), value: line(x.value, INFO_LIMITS.item) };
+      const t = String(x == null ? '' : x).replace(/^\s*[•·\-*–—]+\s*/, ''), i = t.indexOf(':');
+      return i < 0 ? { label: line(t, 60), value: '' } : { label: line(t.slice(0, i), 60), value: line(t.slice(i + 1), INFO_LIMITS.item) };
+    }).filter((r) => r.label).slice(0, INFO_LIMITS.items);
     const date = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(Date.parse(`${v}T00:00:00Z`)) ? String(v) : null);
     const schedule = (Array.isArray(d.schedule) ? d.schedule : []).map((w) => {
       const x = w && typeof w === 'object' ? w : {};
       let from = date(x.from), to = date(x.to);
       if (from && to && to < from) to = from;
-      return { from, to, phase: line(x.phase, 60), event: line(x.event, 80), course: line(x.course, 120), location: line(x.location, 120) };
-    }).filter((w) => w.from || w.event || w.course).slice(0, INFO_LIMITS.weeks);
-    return { about: para(d.about, INFO_LIMITS.about), format: list(d.format), challenges: list(d.challenges),
-      schedule, awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize) };
+      return { from, to, phase: line(x.phase, 60), event: line(x.event, 80), course: line(x.course, 120), location: line(x.location, 120),
+        note: line(x.note, INFO_LIMITS.note) };
+    }).filter((w) => w.from || w.event || w.course || w.note).slice(0, INFO_LIMITS.weeks);
+    return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), format: list(d.format), settings,
+      challenges: list(d.challenges), schedule, notice: para(d.notice, INFO_LIMITS.notice),
+      awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize) };
   }
   function hasDetails(raw) {
     const d = normalizeDetails(raw);
-    return !!(d.about || d.prize || d.format.length || d.challenges.length || d.schedule.length || d.awards.length);
+    return !!(d.about || d.prize || d.notice || d.perks.length || d.format.length || d.settings.length
+      || d.challenges.length || d.schedule.length || d.awards.length);
   }
   // "Nov 1 – 7", "Nov 29 – Dec 5", "Dec 27 – Jan 2". Dates are plain calendar days, never shifted
   // by a time zone.

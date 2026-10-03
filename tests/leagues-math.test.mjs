@@ -129,7 +129,7 @@ test('league info: lists take one item per line or an array, and lose bullets an
   const d = L.normalizeDetails({ format: '• Four-person scramble\n- 2-foot concede\n\n  * No mulligans  ', awards: ['Cup Winner', '', '  Most   Honest '] });
   assert.deepEqual(d.format, ['Four-person scramble', '2-foot concede', 'No mulligans']);
   assert.deepEqual(d.awards, ['Cup Winner', 'Most Honest']);
-  assert.deepEqual(L.normalizeDetails(null), { about: '', format: [], challenges: [], schedule: [], awards: [], prize: '' });
+  assert.deepEqual(L.normalizeDetails(null), { about: '', perks: [], format: [], settings: [], challenges: [], schedule: [], notice: '', awards: [], prize: '' });
   assert.deepEqual(L.normalizeDetails('nonsense'), L.normalizeDetails({}));
 });
 
@@ -190,4 +190,28 @@ test('week start: a round is filed by the day it was played, whatever week was s
   const w = L.teamWeeks({ league: winter, todayISO: '2026-11-20', rounds });
   assert.equal(w[0].round, null); assert.equal(w[0].missed, true);
   assert.equal(w[1].round.booking_date, '2026-11-08');
+});
+
+test('league info: the settings table, member perks, a note per week and the notice under the schedule', () => {
+  const d = L.normalizeDetails({
+    perks: '• Priority booking up to 3 months in advance\n$5 off booking fees',
+    settings: 'Green firmness: Firm\nGreen speed: November Slow, December Normal: then Fast\nNo colon here\n: no label',
+    notice: '  All scheduled courses are subject to change.  ',
+    schedule: [{ from: '2026-11-08', to: '2026-11-14', course: 'Deer Ridge Golf Club', event: 'Mini Tournament 1', note: 'Sign ups for the branded event: Nov 17th' },
+      { note: 'A note on its own still makes a row' }],
+  });
+  assert.deepEqual(d.perks, ['Priority booking up to 3 months in advance', '$5 off booking fees']);
+  assert.deepEqual(d.settings, [
+    { label: 'Green firmness', value: 'Firm' },
+    { label: 'Green speed', value: 'November Slow, December Normal: then Fast' },   // only the FIRST colon splits
+    { label: 'No colon here', value: '' },
+  ]);
+  assert.equal(d.notice, 'All scheduled courses are subject to change.');
+  assert.equal(d.schedule[0].note, 'Sign ups for the branded event: Nov 17th');
+  assert.equal(d.schedule.length, 2);
+  // Saved once, read back: the same thing.
+  assert.deepEqual(L.normalizeDetails(d), d);
+  assert.deepEqual(L.normalizeDetails({ settings: [{ label: ' Mulligans ', value: 0 }, { label: '', value: 'x' }] }).settings, [{ label: 'Mulligans', value: '0' }]);
+  assert.equal(L.hasDetails({ notice: 'x' }), true);
+  assert.equal(L.hasDetails({ settings: 'Wind speed: Fast' }), true);
 });

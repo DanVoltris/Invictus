@@ -554,6 +554,7 @@
   .li-week-h{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;margin-bottom:8px}
   .li-week-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px}
   .li-week-grid label{margin-bottom:4px}
+  .li-week-grid .li-week-note{grid-column:1 / -1}
   .li-week-grid .input{background:var(--surface)}
   .li-week-grid .datepick{display:block}.li-week-grid .dp-trigger{width:100%;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   @media(max-width:700px){ .li-week-grid{grid-template-columns:1fr} }
@@ -3232,16 +3233,19 @@ function openLeagueEditor(x){
     ${switchRow('le-online','Online sign-up','Listed on the Leagues page, where a captain can buy a team and invite their friends.',x.join_online)}
     ${switchRow('le-active','Active','Turn off to hide the league everywhere without deleting its history.',x.is_active)}
     <div class="sec-h" style="margin-top:22px">League info</div>
-    <div class="sub" style="margin-bottom:12px">Everything on the brochure. Customers see it under “Full details” on the Leagues page. All of it is optional.</div>
+    <div class="sub" style="margin-bottom:12px">Everything on the brochure. Customers see it on the league’s page. All of it is optional, and you can change any of it later.</div>
     ${cols39 ? `
     <div class="field"><label for="li-about">About the league</label><textarea class="input" id="li-about" rows="4" maxlength="2000" placeholder="What the league is, who it is for, what the champions win.">${esc(info.about)}</textarea></div>
+    <div class="field"><label for="li-perks">Member perks <span class="dim">(one per line — what a league member gets)</span></label><textarea class="input" id="li-perks" rows="4" placeholder="Priority booking up to 3 months in advance&#10;$5 off booking fees">${esc(info.perks.join('\n'))}</textarea></div>
     <div class="field"><label for="li-format">Format &amp; rules <span class="dim">(one per line)</span></label><textarea class="input" id="li-format" rows="6" placeholder="Four-person scramble&#10;2-foot concede&#10;No mulligans">${esc(info.format.join('\n'))}</textarea></div>
+    <div class="field"><label for="li-settings">League settings <span class="dim">(one per line, written as Setting: value — shown as a table)</span></label><textarea class="input" id="li-settings" rows="7" placeholder="Green firmness: Firm&#10;Tee boxes: Blue (Men) / White (Ladies)&#10;Mulligans: 0">${esc(info.settings.map(r=>r.value?`${r.label}: ${r.value}`:r.label).join('\n'))}</textarea></div>
     <div class="field"><label for="li-challenges">Featured challenges <span class="dim">(one per line)</span></label><textarea class="input" id="li-challenges" rows="4" placeholder="Mega Putt Challenge&#10;Closest to the Pin Challenge">${esc(info.challenges.join('\n'))}</textarea></div>
     <div class="field" style="margin-bottom:6px"><label>Schedule <span class="dim">(one row per week — dates, course and where it is)</span></label>
       <div id="li-weeks"></div>
       <button type="button" class="btn btn-ghost btn-sm" id="li-week-add">+ Add week</button>
       <span class="dim" style="font-size:12px;margin-left:8px">Adds the next 7 days and keeps the phase, so you only type the course.</span></div>
-    <div class="field" style="margin-top:14px"><label for="li-awards">Team awards <span class="dim">(one per line)</span></label><textarea class="input" id="li-awards" rows="5" placeholder="Cup Winner&#10;Second Place&#10;Most Birdies">${esc(info.awards.join('\n'))}</textarea></div>
+    <div class="field" style="margin-top:14px"><label for="li-notice">Notice under the schedule <span class="dim">(optional)</span></label><textarea class="input" id="li-notice" rows="2" maxlength="800" placeholder="All scheduled courses are subject to change…">${esc(info.notice)}</textarea></div>
+    <div class="field"><label for="li-awards">Team awards <span class="dim">(one per line)</span></label><textarea class="input" id="li-awards" rows="5" placeholder="Cup Winner&#10;Second Place&#10;Most Birdies">${esc(info.awards.join('\n'))}</textarea></div>
     <div class="field"><label for="li-prize">Grand prize</label><textarea class="input" id="li-prize" rows="3" maxlength="2000" placeholder="What the winners get, and how they are chosen.">${esc(info.prize)}</textarea></div>`
     : `<div class="note-flag"><span>Run supabase/migrations/0039_league_details.sql in Supabase to add the brochure details here (about, rules, schedule, awards, grand prize). Everything above can be saved without it.</span></div>`}
     ${cols31?'':`<div class="note-flag" style="margin-top:10px"><span>${esc(MIG31_NOTE)} Until then the team size and the round length can’t be saved — everything else can.</span></div>`}
@@ -3264,7 +3268,7 @@ function openLeagueEditor(x){
   // when a week is added or removed and again at save, so nothing typed is lost to a re-draw.
   let weeks=info.schedule.map(w=>({ ...w }));
   const readWeeks=()=>[...sheet.querySelectorAll('.li-week')].map(r=>Object.fromEntries(
-    ['from','to','phase','event','course','location'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])));
+    ['from','to','phase','event','course','location','note'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])));
   const drawWeeks=()=>{
     const host=$('#li-weeks'); if(!host) return;
     host.innerHTML=weeks.map((w,i)=>`<div class="li-week">
@@ -3276,6 +3280,7 @@ function openLeagueEditor(x){
         <div><label>Event <span class="dim">(optional)</span></label><input class="input" data-k="event" maxlength="80" value="${esc(w.event||'')}" placeholder="e.g. Mini Tournament 1" /></div>
         <div><label>Course</label><input class="input" data-k="course" maxlength="120" value="${esc(w.course||'')}" placeholder="e.g. Deer Ridge Golf Club" /></div>
         <div><label>Location</label><input class="input" data-k="location" maxlength="120" value="${esc(w.location||'')}" placeholder="e.g. Kitchener, Ontario" /></div>
+        <div class="li-week-note"><label>Notes <span class="dim">(optional)</span></label><input class="input" data-k="note" maxlength="240" value="${esc(w.note||'')}" placeholder="e.g. Sign-ups for the branded event on Nov 17th" /></div>
       </div></div>`).join('') || '<div class="dim" style="font-size:12.5px;margin-bottom:8px">No weeks yet.</div>';
     host.querySelectorAll('input[type="date"]').forEach(buildDatePicker);
     host.querySelectorAll('.li-week-del').forEach(b=>b.onclick=()=>{ weeks=readWeeks(); weeks.splice(+b.dataset.i,1); drawWeeks(); });
@@ -3286,7 +3291,7 @@ function openLeagueEditor(x){
       weeks=readWeeks();
       const last=weeks[weeks.length-1];
       const from = last ? (last.to ? addDaysISO(last.to,1) : last.from ? addDaysISO(last.from,7) : '') : ($('#le-from').value||'');
-      weeks.push({ from, to: from ? addDaysISO(from,6) : '', phase: last ? last.phase : '', event:'', course:'', location:'' });
+      weeks.push({ from, to: from ? addDaysISO(from,6) : '', phase: last ? last.phase : '', event:'', course:'', location:'', note:'' });
       drawWeeks();
       const rows=sheet.querySelectorAll('.li-week'); rows[rows.length-1].querySelector('[data-k="course"]').focus();
     };
@@ -3313,8 +3318,9 @@ function openLeagueEditor(x){
       const sched=readWeeks();
       const bad=sched.findIndex(w=>w.from && w.to && w.to<w.from);
       if(bad>=0) return err(`Week ${bad+1} in the schedule ends before it starts.`);
-      details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, format:$('#li-format').value, challenges:$('#li-challenges').value,
-        schedule:sched, awards:$('#li-awards').value, prize:$('#li-prize').value });
+      details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, format:$('#li-format').value,
+        settings:$('#li-settings').value, challenges:$('#li-challenges').value,
+        schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value });
     }
     const row={ name, description:$('#le-desc').value.trim()||null,
       season_start:from, season_end:to, bay_ids:[...bays], fee_cents:fee, scoring:$('#le-scoring').value,

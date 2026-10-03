@@ -2,7 +2,7 @@
   "name": "Invictus Winter League 2026-2027",
   "description": "A 16-week, four-person scramble on championship courses, with a trip for the champions.",
   "season_start": "2026-11-01",
-  "season_end": "2027-01-23",
+  "season_end": "2027-03-06",
   "fee_cents": 114000,
   "team_size": 4,
   "team_min": 4,
@@ -11,39 +11,227 @@
     "format": [
       "16 weeks of league play",
       "Four-person scramble",
-      "Different championship course each week",
-      "Blue Tees (Men) / White Tees (Ladies)",
-      "Semi-Tour difficulty",
-      "2-foot concede",
-      "No mulligans",
-      "Firm greens / Normal green speed",
-      "Fast wind / Fixed pin positions"
+      "Different championship course each week"
     ],
     "challenges": [
-      "6 Mini Tournaments",
+      "4 Mini Tournaments / Branded Events",
       "Mega Putt Challenge",
       "Closest to the Pin Challenge",
       "Hole-in-One Challenge",
       "Longest Drive Challenge"
     ],
     "schedule": [
-      { "from": "2026-11-01", "to": "2026-11-07", "phase": "Phase 1", "event": "", "course": "Marco Simone Golf & Country Club", "location": "Italy" },
-      { "from": "2026-11-08", "to": "2026-11-14", "phase": "Phase 1", "event": "Mini Tournament 1", "course": "Deer Ridge Golf Club", "location": "Kitchener, Ontario" },
-      { "from": "2026-11-15", "to": "2026-11-21", "phase": "Phase 1", "event": "Mini Tournament 2", "course": "Mission Hills Golf Club", "location": "Haikou, China" },
-      { "from": "2026-11-22", "to": "2026-11-28", "phase": "Phase 2", "event": "", "course": "Troon North – Pinnacle Course", "location": "Scottsdale, Arizona" },
-      { "from": "2026-11-29", "to": "2026-12-05", "phase": "Phase 2", "event": "Mini Tournament 3", "course": "Kawana Hotel – Fuji Course", "location": "Japan" },
-      { "from": "2026-12-06", "to": "2026-12-12", "phase": "Phase 2", "event": "Mini Tournament 4", "course": "Casa de Campo – Teeth of the Dog", "location": "Dominican Republic" },
-      { "from": "2026-12-13", "to": "2026-12-19", "phase": "Phase 3", "event": "Mini Tournament 5", "course": "Phoenix Golf Resort – Dragon Course", "location": "Vietnam" },
-      { "from": "2026-12-20", "to": "2026-12-26", "phase": "Phase 3", "event": "Mini Tournament 6", "course": "Old Head Golf Links", "location": "Ireland" },
-      { "from": "2026-12-27", "to": "2027-01-02", "phase": "Phase 3", "event": "Mega Putt Challenge", "course": "Vidanta Vallarta – Nuevo Nayarit", "location": "Puerto Vallarta, Mexico" },
-      { "from": "2027-01-03", "to": "2027-01-09", "phase": "Phase 4 · Playoff Qualifiers", "event": "Closest to the Pin", "course": "The 58 Golf Club", "location": "Japan" },
-      { "from": "2027-01-10", "to": "2027-01-16", "phase": "Phase 4 · Playoff Qualifiers", "event": "Hole-in-One Challenge", "course": "Kiawah Island Golf Resort", "location": "Kiawah Island, South Carolina" },
-      { "from": "2027-01-17", "to": "2027-01-23", "phase": "Phase 4 · Playoff Qualifiers", "event": "Longest Drive Challenge", "course": "Amber Hills Golf Resort", "location": "China" }
+      {
+        "from": "2026-11-01",
+        "to": "2026-11-07",
+        "phase": "November · 4 ft concede · Slow greens",
+        "event": "",
+        "course": "Marco Simone Golf and Country Club",
+        "location": "Italy",
+        "note": ""
+      },
+      {
+        "from": "2026-11-08",
+        "to": "2026-11-14",
+        "phase": "November · 4 ft concede · Slow greens",
+        "event": "Mini Tournament 1 / Branded Event",
+        "course": "Deer Ridge Golf Club",
+        "location": "Kitchener, Ontario",
+        "note": "Sign ups for anyone in the league who is interested about the brand, Nov 17th."
+      },
+      {
+        "from": "2026-11-15",
+        "to": "2026-11-21",
+        "phase": "November · 4 ft concede · Slow greens",
+        "event": "",
+        "course": "Mission Hills Golf Club",
+        "location": "Haikou, China",
+        "note": ""
+      },
+      {
+        "from": "2026-11-22",
+        "to": "2026-11-28",
+        "phase": "November · 4 ft concede · Slow greens",
+        "event": "",
+        "course": "Troon North Golf Club - Pinnacle Course",
+        "location": "Scottsdale, Arizona",
+        "note": ""
+      },
+      {
+        "from": "2026-11-29",
+        "to": "2026-12-05",
+        "phase": "December · 4 ft concede · Normal greens",
+        "event": "",
+        "course": "Kawana Hotel Golf Course - Fuji Course",
+        "location": "Japan",
+        "note": ""
+      },
+      {
+        "from": "2026-12-06",
+        "to": "2026-12-12",
+        "phase": "December · 4 ft concede · Normal greens",
+        "event": "Mini Tournament 2 / Branded Event",
+        "course": "Casa de Campo - Teeth of the Dog",
+        "location": "Dominican Republic",
+        "note": "Sign ups for anyone in the league who is interested about the brand, Dec 15th."
+      },
+      {
+        "from": "2026-12-13",
+        "to": "2026-12-26",
+        "phase": "December · 4 ft concede · Normal greens",
+        "event": "Break for the holidays",
+        "course": "No league play required",
+        "location": "At home!",
+        "note": "Option to play the course. Your team may be out of town."
+      },
+      {
+        "from": "2026-12-27",
+        "to": "2027-01-02",
+        "phase": "December · 4 ft concede · Normal greens",
+        "event": "",
+        "course": "Phoenix Golf Resort",
+        "location": "Vietnam",
+        "note": ""
+      },
+      {
+        "from": "2027-01-03",
+        "to": "2027-01-09",
+        "phase": "January · 2 ft concede · Fast greens",
+        "event": "Mini Tournament 3 / Branded Event",
+        "course": "Old Head Golf Links",
+        "location": "Republic of Ireland",
+        "note": "Sign ups for anyone in the league who is interested about the brand, Jan 12th."
+      },
+      {
+        "from": "2027-01-10",
+        "to": "2027-01-16",
+        "phase": "January · 2 ft concede · Fast greens",
+        "event": "",
+        "course": "Vidanta Vallarta",
+        "location": "Puerto Rico",
+        "note": ""
+      },
+      {
+        "from": "2027-01-17",
+        "to": "2027-01-23",
+        "phase": "January · 2 ft concede · Fast greens",
+        "event": "",
+        "course": "58 GC",
+        "location": "Japan",
+        "note": ""
+      },
+      {
+        "from": "2027-01-24",
+        "to": "2027-01-30",
+        "phase": "January · 2 ft concede · Fast greens",
+        "event": "",
+        "course": "Kiawah Island Golf Resort",
+        "location": "Kiawah Island",
+        "note": ""
+      },
+      {
+        "from": "2027-01-31",
+        "to": "2027-02-06",
+        "phase": "February · 2 ft concede · Fast greens",
+        "event": "Mini Tournament 4 / Branded Event",
+        "course": "Colorado Golf Club",
+        "location": "Parker, Colorado",
+        "note": "Sign ups for anyone in the league who is interested about the brand, Feb 9th."
+      },
+      {
+        "from": "2027-02-07",
+        "to": "2027-02-13",
+        "phase": "February · 2 ft concede · Fast greens",
+        "event": "Mega Putt Challenge",
+        "course": "Pinehurst No.10",
+        "location": "Aberdeen, North Carolina",
+        "note": ""
+      },
+      {
+        "from": "2027-02-14",
+        "to": "2027-02-20",
+        "phase": "February · 2 ft concede · Fast greens",
+        "event": "Closest to the Pin Challenge",
+        "course": "Pebble Beach",
+        "location": "Monterey County, California",
+        "note": ""
+      },
+      {
+        "from": "2027-02-21",
+        "to": "2027-02-27",
+        "phase": "February · 2 ft concede · Fast greens",
+        "event": "Hole-in-One Challenge",
+        "course": "Shinnecock Hills Golf Club",
+        "location": "Suffolk County, New York",
+        "note": ""
+      },
+      {
+        "from": "2027-02-28",
+        "to": "2027-03-06",
+        "phase": "Playoffs week · 0 ft concede · Fast greens",
+        "event": "Longest Drive",
+        "course": "Amber Hills Golf",
+        "location": "Vietnam",
+        "note": ""
+      }
     ],
     "awards": [
-      "Cup Winner", "Second Place", "Third Place", "Most Birdies", "Most Pars", "Most Eagles", "Most Bogeys",
-      "Longest Drive", "Closest to the Pin", "Most Honest", "Ladies Category", "Oldest Participant", "Bottom 20 Draw"
+      "Cup Winner",
+      "Second Place",
+      "Third Place",
+      "Most Birdies",
+      "Most Pars",
+      "Most Eagles",
+      "Most Bogeys",
+      "Longest Drive",
+      "Closest to the Pin",
+      "Most Honest",
+      "Ladies Category",
+      "Oldest Participant",
+      "Bottom 20 Draw"
     ],
-    "prize": "3 teams (guaranteed) going to the trip: 1 champions and 2 random draw.\n\nThe participant or team with the highest hour booked during the league season will also receive a spot on the trip. (4 person max)\n\nMore details will be announced closer to the tournament date."
+    "prize": "3 teams (guaranteed) going to the trip: 1 champions and 2 random draw.\n\nThe participant or team with the highest hour booked during the league season will also receive a spot on the trip. (4 person max)\n\nMore details will be announced closer to the tournament date.",
+    "perks": [
+      "Priority booking up to 3 months in advance",
+      "$5 off booking fees",
+      "First round for the group: $4 beers and $6 cocktails",
+      "A complimentary end of season gift box",
+      "Food and drinks during the closing ceremony, included in the sign up fee"
+    ],
+    "settings": [
+      {
+        "label": "Green firmness",
+        "value": "Firm"
+      },
+      {
+        "label": "Pin and green position",
+        "value": "Fixed"
+      },
+      {
+        "label": "Wind speed",
+        "value": "Fast"
+      },
+      {
+        "label": "Green speed",
+        "value": "November Slow, December Normal, January and February Fast"
+      },
+      {
+        "label": "Difficulty",
+        "value": "Semi-Tour"
+      },
+      {
+        "label": "Tee boxes",
+        "value": "Blue (Men) / White (Ladies)"
+      },
+      {
+        "label": "Concede distance",
+        "value": "November and December 4 ft, January and February 2 ft, Playoffs 0 ft"
+      },
+      {
+        "label": "Mulligans",
+        "value": "0"
+      }
+    ],
+    "notice": "Course notice: All scheduled courses are subject to change based on availability, simulator updates, or league requirements. Any changes will be communicated to participants in advance whenever possible."
   }
 }

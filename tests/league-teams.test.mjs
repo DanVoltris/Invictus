@@ -851,7 +851,7 @@ test('info: a league with nothing filled in gives an empty brochure, never an er
   world();
   const r = await run(leaguesApi, { query: { action: 'info' }, body: { leagueId: 'L-free' } });
   assert.equal(r.code, 200);
-  assert.deepEqual(r.out.league.details, { about: '', format: [], challenges: [], schedule: [], awards: [], prize: '' });
+  assert.deepEqual(r.out.league.details, { about: '', perks: [], format: [], settings: [], challenges: [], schedule: [], notice: '', awards: [], prize: '' });
 });
 
 test('before migration 0039 is pasted in: leagues list and open as before, with no brochure yet', async () => {
