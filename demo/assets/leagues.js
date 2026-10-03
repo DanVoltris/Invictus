@@ -50,14 +50,24 @@
 
   const weekEnd = (weekISO) => { const d = dateOf(weekISO); d.setUTCDate(d.getUTCDate() + 6); return isoOf(d); };
 
-  // Every week of the season: { start, end, number }. A season that runs Wed–Wed counts the part
-  // weeks at each end, because a team can play in them.
+  // Breaks: schedule rows marked "no league play required" (leagues.details.schedule[].optional —
+  // a holiday fortnight, say). A league week that falls wholly inside one is `off`: a team may
+  // still play it, but not playing is never a missed week and nobody is chased for it.
+  function breakRanges(league) {
+    const rows = league && league.details && Array.isArray(league.details.schedule) ? league.details.schedule : [];
+    return rows.filter((r) => r && r.optional && r.from).map((r) => ({ from: String(r.from), to: String(r.to || r.from) }));
+  }
+
+  // Every week of the season: { start, end, number } (+ off: true on a break). A season that runs Wed–Wed counts the
+  // part weeks at each end, because a team can play in them.
   function weeks(league) {
     if (!league || !league.season_start || !league.season_end) return [];
-    const out = [], last = weekIn(league, league.season_end);
+    const out = [], last = weekIn(league, league.season_end), breaks = breakRanges(league);
     let w = weekIn(league, league.season_start);
     for (let i = 0; w <= last && i < MAX_WEEKS; i++) {
-      out.push({ start: w, end: weekEnd(w), number: i + 1 });
+      const end = weekEnd(w);
+      // `off` is only present on a break week, so a league with no breaks reads exactly as before.
+      out.push({ start: w, end, number: i + 1, ...(breaks.some((b) => w >= b.from && end <= b.to) ? { off: true } : {}) });
       const d = dateOf(w); d.setUTCDate(d.getUTCDate() + 7); w = isoOf(d);
     }
     return out;
@@ -90,7 +100,7 @@
     return weeks(league).map((w) => {
       const round = byWeek.get(w.start) || null;
       const past = w.end < todayISO;
-      return { ...w, current: w.start === thisWeek, past, round, missed: past && !round };
+      return { ...w, current: w.start === thisWeek, past, round, missed: past && !round && !w.off };
     });
   }
 
@@ -100,7 +110,7 @@
   //   rounds  every league booking in the league: [{ league_team_id, league_week, status }]
   function teamsWithoutRound({ league, todayISO, teams = [], rounds = [] }) {
     const week = currentWeek(league, todayISO);
-    if (!week) return [];
+    if (!week || week.off) return [];                       // a break: nobody is behind
     const booked = new Set(rounds.filter((r) => r && r.status !== 'cancelled'
       && (r.booking_date ? weekIn(league, r.booking_date) : r.league_week) === week.start)
       .map((r) => r.league_team_id));
@@ -251,7 +261,7 @@
       let from = date(x.from), to = date(x.to);
       if (from && to && to < from) to = from;
       return { from, to, phase: line(x.phase, 60), event: line(x.event, 80), course: line(x.course, 120), location: line(x.location, 120),
-        note: line(x.note, INFO_LIMITS.note) };
+        note: line(x.note, INFO_LIMITS.note), ...(x.optional === true || x.optional === 'true' ? { optional: true } : {}) };
     }).filter((w) => w.from || w.event || w.course || w.note).slice(0, INFO_LIMITS.weeks);
     return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), format: list(d.format), settings,
       challenges: list(d.challenges), schedule, notice: para(d.notice, INFO_LIMITS.notice),

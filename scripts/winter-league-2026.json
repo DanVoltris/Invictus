@@ -82,7 +82,8 @@
         "event": "Break for the holidays",
         "course": "No league play required",
         "location": "At home!",
-        "note": "Option to play the course. Your team may be out of town."
+        "note": "Option to play the course. Your team may be out of town.",
+        "optional": true
       },
       {
         "from": "2026-12-27",

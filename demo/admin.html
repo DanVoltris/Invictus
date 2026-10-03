@@ -555,6 +555,7 @@
   .li-week-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px}
   .li-week-grid label{margin-bottom:4px}
   .li-week-grid .li-week-note{grid-column:1 / -1}
+  .li-week-off{margin:10px 0 0}
   .li-week-grid .input{background:var(--surface)}
   .li-week-grid .datepick{display:block}.li-week-grid .dp-trigger{width:100%;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   @media(max-width:700px){ .li-week-grid{grid-template-columns:1fr} }
@@ -3267,8 +3268,9 @@ function openLeagueEditor(x){
   // The schedule: one card per week. The inputs themselves are the record — they are read back
   // when a week is added or removed and again at save, so nothing typed is lost to a re-draw.
   let weeks=info.schedule.map(w=>({ ...w }));
-  const readWeeks=()=>[...sheet.querySelectorAll('.li-week')].map(r=>Object.fromEntries(
-    ['from','to','phase','event','course','location','note'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])));
+  const readWeeks=()=>[...sheet.querySelectorAll('.li-week')].map(r=>({ ...Object.fromEntries(
+    ['from','to','phase','event','course','location','note'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])),
+    optional: r.querySelector('[data-k="optional"]').checked }));
   const drawWeeks=()=>{
     const host=$('#li-weeks'); if(!host) return;
     host.innerHTML=weeks.map((w,i)=>`<div class="li-week">
@@ -3281,7 +3283,11 @@ function openLeagueEditor(x){
         <div><label>Course</label><input class="input" data-k="course" maxlength="120" value="${esc(w.course||'')}" placeholder="e.g. Deer Ridge Golf Club" /></div>
         <div><label>Location</label><input class="input" data-k="location" maxlength="120" value="${esc(w.location||'')}" placeholder="e.g. Kitchener, Ontario" /></div>
         <div class="li-week-note"><label>Notes <span class="dim">(optional)</span></label><input class="input" data-k="note" maxlength="240" value="${esc(w.note||'')}" placeholder="e.g. Sign-ups for the branded event on Nov 17th" /></div>
-      </div></div>`).join('') || '<div class="dim" style="font-size:12.5px;margin-bottom:8px">No weeks yet.</div>';
+      </div>
+      <label class="row lea-switch li-week-off">
+        <span class="switch"><input type="checkbox" data-k="optional" ${w.optional?'checked':''} /><span class="track"></span></span>
+        <span><b>No league play required</b><span class="dim" style="display:block;font-size:12px">A break. Teams can still play, but not playing is not a missed week and nobody is chased.</span></span></label>
+      </div>`).join('') || '<div class="dim" style="font-size:12.5px;margin-bottom:8px">No weeks yet.</div>';
     host.querySelectorAll('input[type="date"]').forEach(buildDatePicker);
     host.querySelectorAll('.li-week-del').forEach(b=>b.onclick=()=>{ weeks=readWeeks(); weeks.splice(+b.dataset.i,1); drawWeeks(); });
   };
@@ -3957,13 +3963,15 @@ function leagueWeeks(ctx){
         return `<tr class="${past&&mig31.rounds&&!played.length?'lo-off':''}">
           <td><b>${w.number}</b></td>
           <td style="white-space:nowrap">${esc(weekLabel(w))}</td>
-          <td>${isNow?'<span class="pill info">This week</span>'
+          <td>${w.off?`<span class="pill">Break</span>${isNow?' <span class="pill info">This week</span>':''}`
+            : isNow?'<span class="pill info">This week</span>'
             : past?(scored.has(w.start)?'<span class="pill confirmed">Results entered</span>':'<span class="pill warn">No results yet</span>')
             : '<span class="dim">Upcoming</span>'}</td>
           <td>${!mig31.rounds?'<span class="dim">—</span>'
             : !league.team_mode?(scored.has(w.start)?'<span class="dim">Scores entered</span>':'<span class="dim">—</span>')
             : played.length?`${played.length} of ${teams.length} · ${names(played)}`:'<span class="dim">nobody yet</span>'}</td>
           <td>${!mig31.rounds||!league.team_mode||!missed.length?'<span class="dim">—</span>'
+            : w.off?'<span class="dim">No play required</span>'
             : past?`<span class="pill cancelled">Missed</span> ${names(missed)}`
             : isNow?`<span class="pill warn">Not booked yet</span> ${names(missed)}`
             : '<span class="dim">—</span>'}</td>

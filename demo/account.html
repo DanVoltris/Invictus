@@ -672,6 +672,8 @@ function teamCard(t, idx, opts){
   const hhmm = m => { if(m==null) return ''; if(m===1440) return 'Midnight'; m%=1440; const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
   const shortDay = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ weekday:'short', month:'short', day:'numeric' }); } catch(e){ return iso; } };
   const shortDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ month:'short', day:'numeric' }); } catch(e){ return iso; } };
+  // The league week does not always end on a Sunday (migration 0040), so the day is read off the date.
+  const dayName = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ weekday:'long' }); } catch(e){ return ''; } };
 
   // The season week by week. The server sends this; if it did not, the shared maths builds it.
   const weeks = (Array.isArray(t.weeks) && t.weeks.length ? t.weeks
@@ -720,10 +722,16 @@ function teamCard(t, idx, opts){
     now = `<div class="week-now is-booked"><div class="t-k">This week's round · week ${cur.number} of ${weeks.length}</div>
       <div class="wn-main">${esc(fmtDate(r.booking_date))}${r.start_min!=null ? ' · ' + esc(hhmm(r.start_min)) + '–' + esc(hhmm(r.end_min)) : ''}</div>
       <div class="wn-sub">${esc(bayName(r.bay_id))} · booked and free. Anyone on the team can turn up — you do not each need a booking.</div></div>`;
+  } else if(cur.off){
+    // A break in the schedule (the holidays, say): no round is expected, and none is missed.
+    now = `<div class="week-now"><div class="t-k">This week · week ${cur.number} of ${weeks.length}</div>
+      <div class="wn-main">A break: no round needed</div>
+      <div class="wn-sub">There is no league play required this week, so nothing counts as missed. Your team can still book a round if it wants one.</div>
+      <a class="btn btn-ghost" href="/?league-round=1">Book a round anyway</a></div>`;
   } else {
     now = `<div class="week-now is-open"><div class="t-k">This week's round · week ${cur.number} of ${weeks.length}</div>
       <div class="wn-main">Not booked yet</div>
-      <div class="wn-sub">Your team has until Sunday ${esc(shortDate(cur.end))}. Any bay, any time${lg.weekly_min_mins ? `, about ${Math.round((lg.weekly_min_mins/60)*10)/10} hours` : ''} — and it costs nothing, because the season is paid.
+      <div class="wn-sub">Your team has until ${esc(dayName(cur.end))} ${esc(shortDate(cur.end))}. Any bay, any time${lg.weekly_min_mins ? `, about ${Math.round((lg.weekly_min_mins/60)*10)/10} hours` : ''} — and it costs nothing, because the season is paid.
         Any player on the team can book it.</div>
       <a class="btn btn-primary" href="/?league-round=1">Book this week's round</a></div>`;
   }
@@ -731,6 +739,7 @@ function teamCard(t, idx, opts){
   const weekRows = weeks.map(w => {
     const what = w.round
       ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${w.score!=null ? ` · <b>${esc(w.score)}</b>` : ''}`
+      : w.off ? 'Break: no round needed'
       : w.missed ? 'Missed — not played'
       : w.current ? 'Not booked yet'
       : 'To come';

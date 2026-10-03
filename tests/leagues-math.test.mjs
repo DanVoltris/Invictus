@@ -215,3 +215,42 @@ test('league info: the settings table, member perks, a note per week and the not
   assert.equal(L.hasDetails({ notice: 'x' }), true);
   assert.equal(L.hasDetails({ settings: 'Wind speed: Fast' }), true);
 });
+
+// ---- Breaks: schedule weeks marked "no league play required" -----------------------------------
+const WINTER = { season_start: '2026-11-01', season_end: '2027-03-06', week_start: 0,
+  details: { schedule: [
+    { from: '2026-12-06', to: '2026-12-12', course: 'Casa de Campo' },
+    { from: '2026-12-13', to: '2026-12-26', course: 'No league play required', event: 'Break for the holidays', optional: true },
+    { from: '2026-12-27', to: '2027-01-02', course: 'Phoenix Golf Resort' },
+  ] } };
+
+test('breaks: the two holiday weeks are off, their neighbours are not, and the count is unchanged', () => {
+  const w = L.weeks(WINTER);
+  assert.equal(w.length, 18);
+  assert.deepEqual(w.filter((x) => x.off).map((x) => [x.number, x.start, x.end]), [[7, '2026-12-13', '2026-12-19'], [8, '2026-12-20', '2026-12-26']]);
+  assert.equal('off' in w[5], false, 'a normal week carries no flag at all');
+  // A row that only partly covers a week does not switch it off.
+  const partial = { ...WINTER, details: { schedule: [{ from: '2026-12-15', to: '2026-12-19', optional: true }] } };
+  assert.equal(L.weeks(partial).some((x) => x.off), false);
+});
+
+test('breaks: not playing a break is not a missed week, and playing one still counts', () => {
+  const rounds = [{ booking_date: '2026-12-08', status: 'confirmed' }, { booking_date: '2026-12-22', status: 'confirmed' }];
+  const w = L.teamWeeks({ league: WINTER, todayISO: '2027-01-05', rounds });
+  const at = (n) => w.find((x) => x.number === n);
+  assert.equal(at(7).missed, false, 'week 7 (Dec 13–19): no round, but it is a break');
+  assert.equal(at(8).round.booking_date, '2026-12-22', 'week 8: they played anyway');
+  assert.equal(at(9).missed, true, 'week 9 (Dec 27 – Jan 2) is a normal week and was missed');
+  assert.equal(L.missedWeeks({ league: WINTER, todayISO: '2027-01-05', rounds }), 6, 'weeks 1–5 and 9; not the break');
+});
+
+test('breaks: nobody is chased during a break', () => {
+  const teams = [{ id: 'T1', name: 'Aces' }];
+  assert.deepEqual(L.teamsWithoutRound({ league: WINTER, todayISO: '2026-12-16', teams, rounds: [] }), []);
+  assert.deepEqual(L.teamsWithoutRound({ league: WINTER, todayISO: '2026-12-29', teams, rounds: [] }), teams);
+});
+
+test('breaks: the flag survives the clean-up as a real true, and nothing else turns it on', () => {
+  const d = L.normalizeDetails({ schedule: [{ from: '2026-12-13', to: '2026-12-26', course: 'x', optional: true }, { course: 'y', optional: 'yes' }, { course: 'z' }] });
+  assert.deepEqual(d.schedule.map((r) => r.optional), [true, undefined, undefined]);
+});
