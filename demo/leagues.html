@@ -416,7 +416,7 @@ function leaguePageHTML(lg, { back }){
         <div class="lp-price-note">${esc(price.note)}</div>
         <dl class="lp-facts">
           <div><dt>Season</dt><dd>${esc(season(lg))}</dd></div>
-          <div><dt>Team</dt><dd>${range ? (range.min === range.max ? `${range.max} golfers` : `${range.min} to ${range.max} golfers`) : 'Any size'}${lg.fee_cents > 0 && range ? `<span>${money(lg.fee_cents)} per team</span>` : ''}</dd></div>
+          <div><dt>Team</dt><dd>${range ? (range.min === range.max ? `${range.max} golfers` : `${range.min} to ${range.max} golfers`) : 'Any size'}</dd></div>
           <div><dt>Play</dt><dd>One round a week<span>At a time that suits your team</span></dd></div>
           <div><dt>Bay time</dt><dd>Paid at the regular rate<span>Booked like any other session</span></dd></div>
         </dl>
