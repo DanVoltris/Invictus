@@ -140,7 +140,17 @@
   .swatch.buf { background: repeating-linear-gradient(45deg,#E4E7EC,#E4E7EC 3px,#F5F7FA 3px,#F5F7FA 6px); border-color: var(--border); }
   .swatch.bk { background: rgba(229,57,53,.12); border-color: #E53935; border-style: dashed; }
 
-  .grid-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px; -webkit-overflow-scrolling: touch; }
+  /* The time grid scrolls inside its own box, both ways, so the bay names can stay pinned to the
+     top and the times to the left however far down or across somebody goes. (A header cannot
+     stick to the page while its table sits in a sideways-scrolling box, which this one must.) */
+  .grid-scroll { overflow: auto; max-height: calc(100vh - 150px); max-height: calc(100dvh - 150px);
+    margin: 0 -4px; padding: 0 4px; -webkit-overflow-scrolling: touch; }
+  /* The shadows paint over the 6px gaps between cells, so rows do not show through beside a name. */
+  .grid thead th { position: sticky; top: 0; z-index: 3; background: var(--surface);
+    box-shadow: -6px 0 0 var(--surface), 6px 0 0 var(--surface), 0 -6px 0 var(--surface), 0 1px 0 var(--border); }
+  .grid td.time, .grid thead th.timehead { position: sticky; left: 0; z-index: 2; background: var(--surface);
+    box-shadow: -10px 0 0 var(--surface), 6px 0 0 var(--surface); }
+  .grid thead th.timehead { z-index: 4; box-shadow: -10px 0 0 var(--surface), 6px 0 0 var(--surface), 0 -6px 0 var(--surface), 0 1px 0 var(--border); }
   .promo-note { background: rgba(240,82,61,.09); border: 1px solid rgba(240,82,61,.38); color: #A8321F;
     border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 14.5px; font-weight: 500; }
   /* table-layout:fixed so every bay column is the same width. With the default (auto) the
