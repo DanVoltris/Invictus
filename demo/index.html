@@ -64,7 +64,8 @@
   @media (max-width: 520px){ .nav-mem { padding: 7px 12px; font-size: 12px; } .nav-links { gap: 7px; } }
 
   /* Hero / progress */
-  .hero { padding: 34px 0 4px; }
+  /* Top and bottom only: .hero and .stack sit on .wrap, whose side padding is the page gutter. */
+  .hero { padding-top: 34px; padding-bottom: 4px; }
   .eyebrow { color: var(--green); font-weight: 700; font-size: 12px; letter-spacing: .18em; text-transform: uppercase; }
   .hero h1 { font-size: 32px; margin: 10px 0 6px; }
   .hero p { color: var(--muted); max-width: 580px; font-size: 15px; }
@@ -83,7 +84,7 @@
   .panel-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
   .panel h2 { font-size: 18px; margin-bottom: 4px; }
   .panel .sub { color: var(--dim); font-size: 13px; }
-  .stack { padding: 22px 0 150px; }
+  .stack { padding-top: 22px; padding-bottom: 150px; }
   #times-panel { scroll-margin-top: 90px; }
 
   /* Date: split layout — calendar + day summary */
@@ -438,12 +439,12 @@
     .nav { height: 68px; }
     .brand img { height: 50px; }
     .nav-cta { display: none; }
-    .hero { padding: 24px 0 4px; }
+    .hero { padding-top: 24px; padding-bottom: 4px; }
     .hero h1 { font-size: 26px; }
     .hero p { font-size: 14px; }
     .panel { padding: 16px; }
     .panel-head { gap: 10px; }
-    .stack { padding: 16px 0 220px; }
+    .stack { padding-top: 16px; padding-bottom: 220px; }
     .cal-grid { gap: 6px; }
     .cal-day { height: 46px; font-size: 15px; }
     .date-layout.full .cal-day { height: 52px; font-size: 16px; }
