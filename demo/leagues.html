@@ -91,6 +91,10 @@
   .lp-facts dd{color:var(--white);font-weight:600}
   .lp-facts dd span{display:block;color:var(--muted);font-weight:500}
   .lp-panel .fine{text-align:left;margin-top:12px;color:var(--muted)}
+  /* "No team?" — the solo sign-up, set apart under the main button. */
+  .lp-solo{margin-top:18px;padding-top:16px;border-top:1px solid var(--border)}
+  .lp-solo-k{font-family:'Space Grotesk';font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange-ink)}
+  .lp-solo p{font-size:13.5px;line-height:1.55;color:var(--muted);margin:6px 0 12px}
   /* On a phone the panel sits first in the page, and this bar keeps the button within reach. */
   .lp-bar{display:none}
 
@@ -252,6 +256,8 @@ const signInHref = back => '/account?next=' + encodeURIComponent(back);
       invite-info   (public)     { token } → { ok, leagueName, teamName, invitedBy, teamFull, claimed,
                                              payToJoin, shareCents, seats }
       invite-claim  (signed in)  { token } → { ok, teamId } | { ok, payRequired, url }
+      join-solo     (signed in)  { leagueId } → { ok, url } | { ok, solo, free }   one golfer, no team:
+                                 they pay one share and the manager places them on a team (0041)
       my-teams      (signed in)  → { ok, teams:[…] }
     A 404 means the action is not deployed yet; 401/403 means "not signed in". Both get words, never
     a blank screen. */
@@ -347,6 +353,10 @@ async function leaguePage(id, { solo = false, push = false } = {}){
     if(!SIGNED_IN){ location.href = signInHref('/leagues?start=' + encodeURIComponent(lg.id)); return; }
     history.replaceState({}, '', '/leagues'); startView(listed); window.scrollTo(0, 0);
   });
+  document.querySelectorAll('.i-solo').forEach(btn => btn.onclick = () => {
+    if(!SIGNED_IN){ location.href = signInHref('/leagues?solo=' + encodeURIComponent(lg.id)); return; }
+    history.replaceState({}, '', '/leagues'); soloView(listed); window.scrollTo(0, 0);
+  });
 }
 // Kept under its old name too: the address ?info=<id> and the back button call it.
 const infoView = (id, push) => leaguePage(id, { push });
@@ -356,7 +366,10 @@ function leaguePageHTML(lg, { back }){
   const price = priceParts(lg), range = price.range;
   const listed = LEAGUES.find(l => l.id === lg.id);
   const mine = listed ? myTeamIn(listed) : null;
-  const canStart = !mine && lg.joinOnline && !!listed;
+  // Signed up on their own and not placed yet (0041): nothing more to buy, only to wait.
+  const waiting = !mine && !!(listed && listed.mySolo);
+  const canStart = !mine && !waiting && lg.joinOnline && !!listed;
+  const canSolo = canStart && listed.soloCents != null;
   const paras = (d.about || lg.description || '').split(/\n{2,}/).map(x => x.trim()).filter(Boolean);
   const lede = paras.shift() || '';
   const weeks = d.schedule.length;
@@ -367,8 +380,14 @@ function leaguePageHTML(lg, { back }){
   const weekAt = iso => Math.floor((Date.parse(iso + 'T00:00:00Z') - Date.parse(day0 + 'T00:00:00Z')) / 6048e5) + 1;
   const weekNo = w => { if(!day0 || !w.from) return ''; const a = weekAt(w.from), b = w.to ? weekAt(w.to) : a; return b > a ? `${a}–${b}` : String(a); };
   const cta = mine ? `<a class="btn btn-line" href="/account">${mine.name ? `Your team: ${esc(mine.name)}` : 'You are on a team'}. See My Account</a>`
+    : waiting ? `<div class="note is-ok" style="margin-top:18px">You are signed up as a solo player. We will place you with a team and text you when it is done.</div>`
     : canStart ? `<button class="btn btn-primary i-start">${SIGNED_IN ? 'Start a team' : 'Sign in to start a team'}</button>
-        ${SIGNED_IN ? '' : '<div class="fine">You need an account to start a team. It takes a minute, and we bring you straight back here.</div>'}`
+        ${SIGNED_IN ? '' : '<div class="fine">You need an account to start a team. It takes a minute, and we bring you straight back here.</div>'}
+        ${canSolo ? `<div class="lp-solo">
+          <div class="lp-solo-k">No team?</div>
+          <p>Join on your own${listed.soloCents > 0 ? ` for ${esc(money(listed.soloCents))}` : ''} and we will pair you with a group.</p>
+          <button class="btn btn-line i-solo">${SIGNED_IN ? 'Join as a solo player' : 'Sign in to join solo'}</button>
+        </div>` : ''}`
     : `<div class="note is-plain" style="margin-top:18px">Online sign-up is not open for this league. Call the shop at ${SHOP} to get your team in.</div>`;
   return `
   <article class="lp${canStart ? ' has-bar' : ''}">
@@ -555,6 +574,49 @@ function wireDropdown(root, get, set){
   document.addEventListener('mousedown', e => { if(!list.hidden && !root.contains(e.target)) close(false); });
 }
 
+/* ---------- join without a team (0041): pay one golfer's share, the manager places you ---------- */
+function soloView(league){
+  if(!league) return;
+  const cents = league.soloCents || 0, label = cents > 0 ? `Pay ${money(cents)} and join` : 'Join the league';
+  render(`<div class="card">
+    <h2>Join ${esc(league.name)} as a solo player</h2>
+    <div class="sub">${esc(season(league))}</div>
+    <div class="summary"><span class="s-name">One golfer, no team needed</span><span class="s-price">${cents > 0 ? esc(money(cents)) : 'Free'}</span></div>
+    <ul class="ck">
+      <li>You sign up on your own and <b>we pair you with a group</b>. You are comfortable playing with people you may not know yet.</li>
+      <li>We text you as soon as you are placed, and your team then shows on My Account.</li>
+      <li>Your team plays <b>once a week, whenever suits you</b>. Bay time is paid at the regular rate.</li>
+    </ul>
+    <div class="err" id="so-err"></div>
+    <button class="btn btn-primary" id="so-go">${esc(label)}</button>
+    <button class="btn btn-ghost" id="so-back">Back</button>
+    ${cents > 0 ? '<div class="fine">You pay on Stripe’s secure page. Nothing is charged until you confirm there.</div>' : ''}
+  </div>`);
+  $('#so-back').onclick = () => leaguePage(league.id, {});
+  $('#so-go').onclick = async () => {
+    const btn = $('#so-go'), err = $('#so-err');
+    btn.disabled = true; btn.textContent = cents > 0 ? 'Opening secure payment…' : 'Joining…'; err.textContent = '';
+    const r = await leaguesApi('join-solo', { leagueId: league.id });
+    if(r.ok && r.url){ location.href = r.url; return; }
+    if(r.ok){ soloDoneView(r.leagueName || league.name); return; }
+    btn.disabled = false; btn.textContent = label;
+    if(r.status===401){ err.innerHTML = `Your sign-in has expired. <a href="${esc(signInHref('/leagues?solo=' + encodeURIComponent(league.id)))}">Sign in again</a> and we will bring you back here.`; return; }
+    err.textContent = r.error || `We could not sign you up just now. Please try again, or call the shop at ${SHOP}.`;
+  };
+}
+function soloDoneView(leagueName){
+  render(`<div class="center">
+    <div class="big ok">✓</div>
+    <h1>You are in${leagueName ? ' ' + esc(leagueName) : ''}</h1>
+    <div class="note is-ok" style="text-align:left;margin-top:16px">
+      <b>Next: we place you with a team.</b> You do not need to do anything. We will text you when it is done, and your team will show on My Account.
+    </div>
+    <a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">Go to My Account</a>
+    <a class="btn btn-ghost" href="/leagues" style="max-width:320px;margin:10px auto 0">Back to the league</a>
+  </div>`);
+  history.replaceState({}, '', '/leagues');
+}
+
 function doneView(teamName, leagueName){
   render(`<div class="center">
     <div class="big ok">✓</div>
@@ -580,6 +642,7 @@ async function successView(sessionId){
     const c = await leaguesApi('confirm', { sessionId });
     // A seat payment: a friend who just paid to join, or a captain who covered seats.
     if(c.ok && c.seat){ seatPaidView(c.leagueName); return; }
+    if(c.ok && c.solo){ soloDoneView(c.leagueName); return; }
     if(c.ok){ doneView(c.teamName || 'Your team', c.leagueName); return; }
     if(c.refunded){ inviteProblem('Refunded — no seat left', c.error || 'The team filled up while you were paying, so your payment has been refunded in full.'); return; }
   }
@@ -626,22 +689,27 @@ async function inviteView(token){
     return;
   }
 
+  // A designated substitute (0041): no seat, nothing to pay, and none of a league member's perks.
+  const sub = r.role === 'sub';
   // Seat by seat (0036): either a paid seat is waiting (join free) or they pay their own share.
-  const pay = !!r.payToJoin && r.shareCents > 0;
-  const joinLabel = pay ? `Pay my share — ${money(r.shareCents)} — and join` : `Join ${team}`;
+  const pay = !sub && !!r.payToJoin && r.shareCents > 0;
+  const joinLabel = sub ? `Be a substitute for ${team}` : pay ? `Pay my share — ${money(r.shareCents)} — and join` : `Join ${team}`;
   render(`<div class="card">
     <h2>You are invited</h2>
-    <div class="sub">${pay ? `Your share of the team is <b>${esc(money(r.shareCents))}</b>${r.seats ? ` — the team price split ${r.seats} ways` : ''}. You pay it on the next screen, then you are on the team.`
+    <div class="sub">${sub ? 'You fill in when one of the team is away. There is no league fee to pay.' : pay ? `Your share of the team is <b>${esc(money(r.shareCents))}</b>${r.seats ? ` — the team price split ${r.seats} ways` : ''}. You pay it on the next screen, then you are on the team.`
       : r.shareCents > 0 ? 'Your seat is already paid for — joining costs you nothing.'
       : 'Joining a team costs you nothing — the season is already paid for.'}</div>
     <div class="invited">
-      <div class="who">${esc(by)} wants you on ${esc(team)}</div>
+      <div class="who">${sub ? `${esc(by)} wants you as a substitute for ${esc(team)}` : `${esc(by)} wants you on ${esc(team)}`}</div>
       <div class="what">${esc(league)}</div>
     </div>
-    <ul class="ck">
+    <ul class="ck">${sub ? `
+      <li>A substitute <b>plays when a teammate cannot</b>. The team tells you when they need you.</li>
+      <li>The team's players book the weekly round. League member perks are for the team's players, not substitutes.</li>
+      <li>You see the team and its weeks on My Account.</li>` : `
       <li>Your team plays <b>once a week, whenever suits you</b> — there is no fixed league night.</li>
       <li>Any bay, any time, and anyone on the team can book the round. <b>Bay time is paid at the regular rate.</b></li>
-      <li>You see the team, the weeks you have played and the standings on My Account.</li>
+      <li>You see the team, the weeks you have played and the standings on My Account.</li>`}
     </ul>
     <div class="err" id="i-err"></div>
     ${SIGNED_IN
@@ -656,7 +724,7 @@ async function inviteView(token){
     btn.disabled = true; btn.textContent = pay ? 'Opening secure payment…' : 'Joining…'; err.textContent = '';
     const j = await leaguesApi('invite-claim', { token });
     if(j.ok && j.payRequired && j.url){ location.href = j.url; return; }
-    if(j.ok){ joinedView(team, league, j.already); return; }
+    if(j.ok){ joinedView(team, league, j.already, sub); return; }
     btn.disabled = false; btn.textContent = joinLabel;
     if(j.status===401 || j.status===403){ err.innerHTML = `Your sign-in has expired. <a href="${esc(signInHref(back))}">Sign in again</a> and we will bring you back to this invitation.`; return; }
     if(j.status===409){ err.textContent = j.error || `That invitation has just been used, or the team filled up. Ask ${by} to send another, or call the shop at ${SHOP}.`; return; }
@@ -689,7 +757,19 @@ function inviteProblem(title, body, account){
   </div>`);
 }
 
-function joinedView(team, league, already){
+function joinedView(team, league, already, sub){
+  if(sub){
+    render(`<div class="center">
+      <div class="big ok">✓</div>
+      <h1>You are a substitute for ${esc(team)}</h1>
+      <div class="note is-ok" style="text-align:left;margin-top:16px">
+        ${already ? 'You were already their substitute, so nothing has changed. ' : ''}You fill in for ${esc(team)} in ${esc(league)} when a teammate is away. The team will let you know when they need you. The team and its weeks are on My Account.
+      </div>
+      <a class="btn btn-primary" href="/account" style="max-width:320px;margin:22px auto 0">See the team</a>
+    </div>`);
+    history.replaceState({}, '', '/leagues');
+    return;
+  }
   render(`<div class="center">
     <div class="big ok">✓</div>
     <h1>You are on ${esc(team)}</h1>
@@ -733,6 +813,13 @@ async function load(){
     const lg = LEAGUES.find(l => l.id === start);
     history.replaceState({}, '', '/leagues');
     if(lg && !myTeamIn(lg)) startView(lg);
+  }
+  // The same, for somebody who chose "join as a solo player" and had to sign in first.
+  const soloFor = params.get('solo');
+  if(soloFor && SIGNED_IN){
+    const lg = LEAGUES.find(l => l.id === soloFor);
+    history.replaceState({}, '', '/leagues');
+    if(lg && !myTeamIn(lg) && !lg.mySolo && lg.soloCents != null) soloView(lg);
   }
 }
 load();

@@ -572,6 +572,14 @@
   .tb-list{margin-top:8px}
   .tb-player{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
   .tb-player:first-child{border-top:none}
+  /* "Make a team from solo players": each player is a toggle button. */
+  .st-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-height:300px;overflow:auto}
+  .st-pick{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;font:inherit;color:inherit;
+    background:var(--surface-2,#F3F5F8);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer}
+  .st-pick:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+  .st-pick .st-tick{visibility:hidden;font-weight:700;color:var(--orange)}
+  .st-pick.is-on{border-color:var(--orange);background:rgba(240,82,61,.08)}
+  .st-pick.is-on .st-tick{visibility:visible}
   .lr-grid th.lr-col,.lr-grid td.lr-col{text-align:center;white-space:nowrap;min-width:48px}
   tr.lo-off td{color:var(--dim)}
   .lo-tdel{border:none;background:none;color:var(--dim);cursor:pointer;font-size:12px;margin-left:4px;padding:0 2px}
@@ -3099,7 +3107,7 @@ async function loadLeaguesTab(){
   if(leagueRoute()) return openLeaguePage(leagueRoute());   // the address bar is showing one league
   showLeagueIndex();
   const host=$('#lea-list');
-  const [l, m, t, p, p36, p39, p40] = await Promise.all([
+  const [l, m, t, p, p36, p39, p40, p41] = await Promise.all([
     sb.from('leagues').select('*').order('sort').order('season_start'),
     sb.from('league_members').select('league_id,status'),
     sb.from('league_teams').select('league_id'),
@@ -3107,11 +3115,13 @@ async function loadLeaguesTab(){
     sb.from('leagues').select('id,team_min').limit(1),                    // …and 0036 (min team size)?
     sb.from('leagues').select('id,details').limit(1),                     // …and 0039 (league info)?
     sb.from('leagues').select('id,week_start').limit(1),                  // …and 0040 (week start day)?
+    sb.from('league_members').select('id,role').limit(1),                 // …and 0041 (substitutes)?
   ]);
   LG31.league = !p.error;
   LG31.min = !p36.error;
   LG31.info = !p39.error;
   LG31.week = !p40.error;
+  LG41.subs = !p41.error;
   renderBookingWindowCard();
   if(l.error){
     if(isAuthError(l.error)) return;
@@ -3379,6 +3389,9 @@ window.addEventListener('hashchange', applyLeagueRoute);
 const MIG31_NOTE = 'Run migration 0031 (supabase/migrations/0031_league_teams.sql) to record team captains, team payments, invites and the weekly rounds teams book for themselves.';
 const mig31Flag = (ok, extra) => ok ? '' : `<div class="note-flag" style="margin-top:10px"><span>${esc(MIG31_NOTE)}${extra?' '+esc(extra):''}</span></div>`;
 let LG31 = { league:true, rounds:true, min:true, info:true, week:true };
+// Migration 0041: designated substitutes. Until it is run there is no role to write, so the
+// "Add substitute" button is not offered.
+let LG41 = { subs:true };
 const LEAGUE_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];   // 0031 columns: on leagues (loadLeaguesTab) / on bookings (loadLeagueIndex)
 
 // The person staff ring about a team: its captain, or failing that whoever joined first.
@@ -3676,7 +3689,8 @@ async function duplicateLeague({ league, teams }){
 }
 
 // Add a player: an existing customer, or a brand-new person created on the spot.
-function openAddPlayer(ctx, presetTeamId){
+// asSub: add them as the team's designated substitute instead (migration 0041) — no seat, no fee.
+function openAddPlayer(ctx, presetTeamId, asSub){
   const { league, teams, members } = ctx;
   const inLeague=new Set(members.filter(x=>x.status==='active').map(x=>x.customer_id));
   let mode='existing', chosen=null;
@@ -3684,8 +3698,9 @@ function openAddPlayer(ctx, presetTeamId){
   sheet.classList.remove('res-wide');
   sheet.innerHTML=`
     <button class="sheet-close" id="x">✕</button>
-    <h3>Add a player to ${esc(league.name)}</h3>
-    <div class="sub">${presetTeamId?`Joining team <b>${esc((teams.find(t=>t.id===presetTeamId)||{}).name||'')}</b>.`:'Pick someone who has booked before, or add a new person.'}</div>
+    <h3>${asSub?`Add a substitute to ${esc((teams.find(t=>t.id===presetTeamId)||{}).name||'the team')}`:`Add a player to ${esc(league.name)}`}</h3>
+    <div class="sub">${asSub?'A substitute fills in when a teammate is away. They take no seat, pay no league fee and get no league perks. Up to 3 a team.'
+      :presetTeamId?`Joining team <b>${esc((teams.find(t=>t.id===presetTeamId)||{}).name||'')}</b>.`:'Pick someone who has booked before, or add a new person.'}</div>
     <div class="seg seg-sm" id="ap-mode" role="tablist" style="margin-bottom:12px">
       <button type="button" role="tab" data-v="existing" class="on" aria-selected="true">Existing customer</button>
       <button type="button" role="tab" data-v="new" aria-selected="false">New person</button></div>
@@ -3702,11 +3717,11 @@ function openAddPlayer(ctx, presetTeamId){
         <div class="field"><label for="ap-email">Email</label><input class="input" id="ap-email" type="email" placeholder="Optional" autocomplete="off" /></div>
       </div>
     </div>
-    ${league.team_mode?`<div class="field"><label for="ap-team">Team</label><select class="input" id="ap-team">${teamOpts}</select>
+    ${league.team_mode&&!asSub?`<div class="field"><label for="ap-team">Team</label><select class="input" id="ap-team">${teamOpts}</select>
       <div class="dim" style="font-size:12px;margin-top:6px">The season is paid for by the team, so adding a player here doesn’t charge anyone. Team payments live on the Teams tab.</div></div>`:''}
     <div class="field"><label for="ap-note">Note</label><input class="input" id="ap-note" maxlength="200" placeholder="Optional — e.g. left-handed, captain" /></div>
     <div class="err" id="ap-err"></div>
-    <div class="row" style="gap:10px"><button class="btn btn-ghost" id="ap-back" style="flex:1">Back</button><button class="btn btn-primary" id="ap-save" style="flex:2">Add player</button></div>`;
+    <div class="row" style="gap:10px"><button class="btn btn-ghost" id="ap-back" style="flex:1">Back</button><button class="btn btn-primary" id="ap-save" style="flex:2">${asSub?'Add substitute':'Add player'}</button></div>`;
   overlay.classList.add('show');
   enhanceSelects(sheet);
   const back=()=>{ closeSheet(); ctx.reload(); };      // the league is a page behind this sheet now
@@ -3735,8 +3750,10 @@ function openAddPlayer(ctx, presetTeamId){
   });
   $('#ap-save').onclick=async()=>{
     const err=msg=>{ $('#ap-err').textContent=msg; };
-    const teamId=($('#ap-team')&&$('#ap-team').value)||null;
-    if(league.team_size && teamId && members.filter(x=>x.status==='active' && x.team_id===teamId).length>=league.team_size)
+    const teamId=asSub ? presetTeamId : (($('#ap-team')&&$('#ap-team').value)||null);
+    if(asSub && members.filter(x=>x.status==='active' && x.team_id===teamId && x.role==='sub').length>=3)
+      return err('That team already has its 3 substitutes.');
+    if(!asSub && league.team_size && teamId && members.filter(x=>x.status==='active' && x.team_id===teamId && x.role!=='sub').length>=league.team_size)
       return err(`That team is full — it already has ${league.team_size} player${league.team_size===1?'':'s'}. Raise “Most golfers per team” in Edit league first.`);
     let customer=chosen, created=false;
     if(mode==='new'){
@@ -3756,7 +3773,7 @@ function openAddPlayer(ctx, presetTeamId){
     }
     if(!customer) return err('Pick a customer, or switch to “New person”.');
     if(inLeague.has(customer.id)) return err(`${customer.name||'They'} ${customer.name?'is':'are'} already in this league.`);
-    const row={ team_id:teamId, status:'active', note:$('#ap-note').value.trim()||null };
+    const row={ team_id:teamId, status:'active', note:$('#ap-note').value.trim()||null, ...(asSub?{ role:'sub' }:{}) };
     const prior=members.find(x=>x.customer_id===customer.id);   // left earlier: bring them back, results intact
     $('#ap-save').disabled=true;
     const ok = prior ? await dbUpdate('league_members',prior.id,{ ...row, joined_at:new Date().toISOString() })
@@ -3767,7 +3784,7 @@ function openAddPlayer(ctx, presetTeamId){
       if(created && !(await sb.from('customers').delete().eq('id',customer.id)).error) CUSTOMERS=CUSTOMERS.filter(cu=>cu.id!==customer.id);
       return err('Could not add them to the league. Check the details and try again.');
     }
-    toast(`${customer.name||'Player'} added`,'ok'); await loadLeagueIndex(); back();
+    toast(`${customer.name||(asSub?'Substitute':'Player')} added`,'ok'); await loadLeagueIndex(); back();
   };
 }
 
@@ -3785,19 +3802,26 @@ function leagueTeamsBoard(ctx){
   const playerRow=(x,team)=>{ const isCap=team && team.captain_customer_id===x.customer_id;
     // Paid their own seat online (0036)? Players who took a seat the captain covered show nothing.
     const ownSeat=(payments||[]).some(p=>team && p.team_id===team.id && p.for_customer_id===x.customer_id);
+    // No team yet and paid online: a solo sign-up (0041) waiting to be placed.
+    const soloPaid=!team && (x.paid_cents||0)>0;
     return `<div class="tb-player" data-id="${x.id}">
-      <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}${ownSeat?' <span class="pill confirmed">Paid own seat</span>':''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
+      <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}${ownSeat?' <span class="pill confirmed">Paid own seat</span>':''}${soloPaid?` <span class="pill confirmed">Paid ${esc(money(x.paid_cents))}</span>`:''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
       ${edit?`<div class="row" style="gap:6px;flex-wrap:nowrap;align-items:center">
         ${team&&!isCap&&mig31.cols?'<button class="btn btn-ghost btn-sm tb-cap" aria-label="Make '+esc(x.name)+' the captain">Make captain</button>':''}
         <select class="input tb-move" aria-label="Move ${esc(x.name)} to a team" style="padding:6px 9px;font-size:12.5px;min-width:120px">${moveOpts(x.team_id)}</select>
         <button class="btn btn-ghost btn-sm tb-remove" aria-label="Remove ${esc(x.name)} from the league">✕</button></div>`:''}
     </div>`; };
+  // A designated substitute (0041): on the roster, but no seat — so no "move" and no captaincy.
+  const subRow=x=>`<div class="tb-player" data-sub="${x.id}">
+      <div><b>${esc(x.name)}</b> <span class="pill info">Sub</span><div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
+      ${edit?`<button class="btn btn-ghost btn-sm tb-remove" aria-label="Remove ${esc(x.name)} as a substitute">✕</button>`:''}
+    </div>`;
   const inviteRow=i=>{
     const state = i.revoked_at ? '<span class="pill cancelled">Withdrawn</span>'
       : i.claimed_at ? `<span class="pill confirmed">Joined ${esc(shortDate2(String(i.claimed_at).slice(0,10)))}</span>`
       : '<span class="pill warn">Waiting</span>';
     return `<div class="tb-player" data-invite="${i.id}">
-      <div><b>${esc(i.name||fmtPhone(i.phone)||i.phone)}</b><div class="dim" style="font-size:12px">${esc(fmtPhone(i.phone)||i.phone)} · invited ${esc(shortDate2(String(i.created_at).slice(0,10)))}</div></div>
+      <div><b>${esc(i.name||fmtPhone(i.phone)||i.phone)}</b>${i.role==='sub'?' <span class="pill info">Sub</span>':''}<div class="dim" style="font-size:12px">${esc(fmtPhone(i.phone)||i.phone)} · invited ${esc(shortDate2(String(i.created_at).slice(0,10)))}</div></div>
       <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:center">${state}${edit&&!i.claimed_at&&!i.revoked_at?'<button class="btn btn-ghost btn-sm tb-revoke">Withdraw</button>':''}</div>
     </div>`; };
   const payLine=t=>{
@@ -3826,23 +3850,29 @@ function leagueTeamsBoard(ctx){
         <button type="button" class="link-btn tb-open" data-bid="${esc(r.id)}" data-date="${esc(r.booking_date)}">Open</button></div>`
       : `<div style="font-size:13px"><span class="pill warn">Not booked this week</span>${roundBooking?` <button type="button" class="btn btn-ghost btn-sm tb-book">Book their round</button>`:''}</div>`;
   };
-  const card=(t)=>{ const list=active.filter(x=>(x.team_id||null)===(t?t.id:null));
+  const card=(t)=>{ const onCard=active.filter(x=>(x.team_id||null)===(t?t.id:null));
+    // Substitutes (0041) are listed apart and never count towards the team's size.
+    const list=onCard.filter(x=>x.role!=='sub'), subs=t?onCard.filter(x=>x.role==='sub'):[];
+    const size=t?(t.seats||league.team_size||0):0, full=!!size && list.length>=size;
     const cap=t&&teamCaptain(t,members), inv=t?(invites||[]).filter(i=>i.team_id===t.id):[];
     return `<div class="card tb-team" data-team="${t?t.id:''}" style="margin:0">
-      <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><h3 class="card-h" style="margin:0;flex:1 1 110px;min-width:0;overflow-wrap:break-word">${t?esc(t.name):'No team yet'}</h3>
+      <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><h3 class="card-h" style="margin:0;flex:1 1 110px;min-width:0;overflow-wrap:break-word">${t?esc(t.name):'Solo players'}</h3>
         <span class="pill manager">${list.length}${t&&(t.seats||league.team_size)?' / '+(t.seats||league.team_size):''}</span>
         ${edit&&t?`<button class="btn btn-ghost btn-sm tb-rename">Rename</button><button class="btn btn-ghost btn-sm tb-del" aria-label="Delete team ${esc(t.name)}">Delete</button>`:''}</div>
       ${t?`<div class="dim" style="font-size:12.5px;margin-top:4px">Captain: ${cap?`${esc(cap.name)}${cap.phone?' · '+esc(fmtPhone(cap.phone)):''}${cap.assumed?' (assumed — nobody set)':''}`:'nobody yet'}</div>
-        ${payLine(t)}${roundLine(t)}`:'<div class="dim" style="font-size:12.5px;margin-top:4px">Players who have joined the league but aren’t on a team yet.</div>'}
-      <div class="sec-h" style="margin:14px 0 0">${t?'Roster':'Players'}</div>
+        ${payLine(t)}${roundLine(t)}`:`<div class="dim" style="font-size:12.5px;margin-top:4px">Signed up without a team and waiting to be placed. Use each player’s team menu to put them on a team, or make a new team out of them. They are texted when placed.</div>`}
+      <div class="sec-h" style="margin:14px 0 0">${t?'Roster':'Waiting for a team'}</div>
       <div class="tb-list">${list.map(x=>playerRow(x,t)).join('')||'<div class="dim" style="font-size:13px;padding:8px 0">Nobody yet.</div>'}</div>
+      ${t&&subs.length?`<div class="sec-h" style="margin:14px 0 0">Substitutes <span class="dim" style="font-weight:500">${subs.length} of 3</span></div><div class="tb-list">${subs.map(subRow).join('')}</div>`:''}
+      ${!t&&edit&&list.length?`<button class="btn btn-primary btn-sm tb-solo-team" style="width:100%;margin-top:10px">Make a team from these players</button>`:''}
       ${t&&mig31.invites&&inv.length?`<div class="sec-h" style="margin:14px 0 0">Invites</div><div class="tb-list">${inv.map(inviteRow).join('')}</div>`:''}
       ${edit&&t?`<button class="btn btn-ghost btn-sm tb-add" style="width:100%;margin-top:10px">+ Add player to ${esc(t.name)}</button>`:''}
+      ${edit&&t&&LG41.subs&&full&&subs.length<3?`<button class="btn btn-ghost btn-sm tb-add-sub" style="width:100%;margin-top:8px">+ Add substitute</button>`:''}
     </div>`; };
   const unassigned=active.filter(x=>!x.team_id).length;
   $('#lo-body').innerHTML=`
     ${mig31Flag(mig31.cols && mig31.invites && mig31.rounds)}
-    <div class="dim" style="font-size:12.5px;margin-bottom:10px">One captain buys the team and invites the rest by phone. Any member can book the team’s round for the week.</div>
+    <div class="dim" style="font-size:12.5px;margin-bottom:10px">One captain buys the team and invites the rest by phone. Any member can book the team’s round for the week. A full team can name up to 3 substitutes.</div>
     ${edit?`<div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:nowrap"><input class="input" id="tb-new" maxlength="60" placeholder="New team name" style="max-width:280px" /><button class="btn btn-primary btn-sm" id="tb-create">Add team</button></div>`:''}
     <div class="plans-grid">${teams.map(card).join('')}${unassigned?card(null):''}</div>
     ${!teams.length?'<div class="empty">No teams yet — add the first one above.</div>':''}`;
@@ -3865,6 +3895,12 @@ function leagueTeamsBoard(ctx){
   $('#lo-body').querySelectorAll('.tb-team').forEach(el=>{
     const team=teams.find(t=>t.id===el.dataset.team);
     if(el.querySelector('.tb-add')) el.querySelector('.tb-add').onclick=()=>openAddPlayer(ctx, team.id);
+    if(el.querySelector('.tb-add-sub')) el.querySelector('.tb-add-sub').onclick=()=>openAddPlayer(ctx, team.id, true);
+    if(el.querySelector('.tb-solo-team')) el.querySelector('.tb-solo-team').onclick=()=>openSoloTeam(ctx);
+    el.querySelectorAll('.tb-player[data-sub]').forEach(p=>{
+      const row=members.find(x=>x.id===p.dataset.sub);
+      if(p.querySelector('.tb-remove')) p.querySelector('.tb-remove').onclick=()=>removePlayer(ctx,row);
+    });
     if(el.querySelector('.tb-book')) el.querySelector('.tb-book').onclick=()=>goToLeagueRound(team.id, week);
     if(el.querySelector('.tb-rename')) el.querySelector('.tb-rename').onclick=()=>promptSheet({ title:'Rename team', fields:[{ id:'name', label:'Team name', value:team.name }],
       onOk:async v=>{ if(!v.name) return 'Give the team a name.';
@@ -3885,7 +3921,17 @@ function leagueTeamsBoard(ctx){
       okLabel:'Mark unpaid', onOk:async()=>{ if(await dbUpdate('league_teams',team.id,{ paid_cents:0, paid_at:null })){ toast('Marked as unpaid','ok'); reload(); } } });
     el.querySelectorAll('.tb-player[data-id]').forEach(p=>{
       const row=members.find(x=>x.id===p.dataset.id);
-      p.querySelector('.tb-move').onchange=async e=>{ if(await dbUpdate('league_members',row.id,{ team_id:e.target.value||null })){ toast('Player moved','ok'); reload(); } };
+      p.querySelector('.tb-move').onchange=async e=>{
+        const to=e.target.value||null;
+        // Onto a team from none: the server places them, so the team cannot go past its size, a
+        // solo's payment is carried over as a paid seat, and they are texted which team they are on.
+        if(to && !row.team_id && !DEMO_MODE){
+          const r=await apiPost('/api/leagues?action=place-solo', { memberId:row.id, teamId:to });
+          if(!r.ok){ toast(r.error||'Could not place that player.','err'); reload(); return; }
+          toast(`${row.name} is on ${r.teamName}${r.grew?' — a seat was added for them':''}`,'ok'); await loadLeagueIndex(); reload(); return;
+        }
+        if(await dbUpdate('league_members',row.id,{ team_id:to })){ toast('Player moved','ok'); reload(); }
+      };
       p.querySelector('.tb-remove').onclick=()=>removePlayer(ctx,row);
       if(p.querySelector('.tb-cap')) p.querySelector('.tb-cap').onclick=async()=>{
         if(await dbUpdate('league_teams',team.id,{ captain_customer_id:row.customer_id })){ toast(`${row.name} is now the captain`,'ok'); reload(); }
@@ -3898,6 +3944,58 @@ function leagueTeamsBoard(ctx){
         okLabel:'Withdraw invite', onOk:async()=>{ if(await dbUpdate('league_team_invites',inv.id,{ revoked_at:new Date().toISOString() })){ toast('Invite withdrawn','ok'); reload(); } } });
     });
   });
+}
+
+// "Make a team from these players": pick which solos, name the team. The server makes the team,
+// carries each one's payment over as a paid seat, makes the first one captain, and texts them.
+function openSoloTeam(ctx){
+  const { league, teams, members, reload } = ctx;
+  const solos=members.filter(x=>x.status==='active' && !x.team_id && x.role!=='sub');
+  const max=league.team_size||null;
+  const picked=new Set(solos.slice(0, max||solos.length).map(x=>x.id));
+  sheet.classList.remove('res-wide');
+  sheet.innerHTML=`
+    <button class="sheet-close" id="x">✕</button>
+    <h3>Make a team from solo players</h3>
+    <div class="sub">Tap the players to put together${max?` — up to ${max}`:''}. The first one picked is the captain; you can change that on the team afterwards.</div>
+    <div class="st-list" role="group" aria-label="Solo players">${solos.map(x=>`<button type="button" class="st-pick${picked.has(x.id)?' is-on':''}" data-id="${x.id}" aria-pressed="${picked.has(x.id)}">
+      <span><b>${esc(x.name)}</b><span class="dim" style="font-size:12px;display:block">${esc(fmtPhone(x.phone)||x.email||'')}</span></span>
+      <span class="st-tick" aria-hidden="true">✓</span></button>`).join('')}</div>
+    <div class="field" style="margin-top:14px"><label for="st-name">Team name</label><input class="input" id="st-name" maxlength="60" placeholder="e.g. The Mulligans" autocomplete="off" /></div>
+    <div class="err" id="st-err"></div>
+    <div class="row" style="gap:10px"><button class="btn btn-ghost" id="st-back" style="flex:1">Back</button><button class="btn btn-primary" id="st-save" style="flex:2">Make team</button></div>`;
+  overlay.classList.add('show');
+  const back=()=>{ closeSheet(); reload(); };
+  $('#x').onclick=closeSheet; $('#st-back').onclick=back;
+  const label=()=>{ $('#st-save').textContent=picked.size?`Make team of ${picked.size}`:'Make team'; };
+  label();
+  sheet.querySelectorAll('.st-pick').forEach(b=>b.onclick=()=>{
+    const id=b.dataset.id, on=!picked.has(id);
+    if(on && max && picked.size>=max){ $('#st-err').textContent=`A team in ${league.name} holds up to ${max}.`; return; }
+    $('#st-err').textContent='';
+    on?picked.add(id):picked.delete(id);
+    b.classList.toggle('is-on',on); b.setAttribute('aria-pressed',String(on)); label();
+  });
+  $('#st-name').focus();
+  $('#st-save').onclick=async()=>{
+    const err=msg=>{ $('#st-err').textContent=msg; };
+    const name=$('#st-name').value.trim();
+    if(!picked.size) return err('Pick at least one player.');
+    if(!name) return err('Give the team a name.');
+    if(teams.some(t=>t.name.toLowerCase()===name.toLowerCase())) return err('There is already a team with that name.');
+    // In the order they are listed, so "the first one picked is the captain" means what it says.
+    const ids=solos.filter(x=>picked.has(x.id)).map(x=>x.id);
+    $('#st-save').disabled=true;
+    let r;
+    if(DEMO_MODE){
+      const made=await sb.from('league_teams').insert({ league_id:league.id, name, captain_customer_id:solos.find(x=>x.id===ids[0]).customer_id }).select().single();
+      if(!made.error) for(const id of ids) await sb.from('league_members').update({ team_id:made.data.id }).eq('id',id);
+      r=made.error?{ ok:false, error:made.error.message }:{ ok:true, teamName:name, placed:ids.length };
+    } else r=await apiPost('/api/leagues?action=team-from-solos', { leagueId:league.id, memberIds:ids, name });
+    $('#st-save').disabled=false;
+    if(!r.ok) return err(r.error||'Could not make the team. Try again.');
+    toast(`${r.teamName} made — ${r.placed} player${r.placed===1?'':'s'} placed`,'ok'); await loadLeagueIndex(); back();
+  };
 }
 
 function removePlayer({ league, reload }, row){

@@ -133,6 +133,12 @@
       stripe_session_id: null, note: i % 2 === 0 ? 'Captain — bought the team' : null, joined_at: hoursAgo(1000 - i * 10) })),
     ...CUSTOMERS.slice(6, 12).map((c, i) => ({ id: uid('lm'), league_id: LEAGUE_SUN.id, customer_id: c.id, team_id: null,
       status: 'active', source: 'online', paid_cents: 0, paid_at: null, stripe_session_id: null, note: null, joined_at: hoursAgo(600 - i * 10) })),
+    // Migration 0041. Two people who signed up on their own, paid, and are waiting to be placed…
+    ...CUSTOMERS.slice(8, 10).map((c, i) => ({ id: uid('lm'), league_id: LEAGUE_THU.id, customer_id: c.id, team_id: null, role: 'player',
+      status: 'active', source: 'online', paid_cents: 10000, paid_at: hoursAgo(40 - i * 6), stripe_session_id: `cs_demo_solo_${i + 1}`, note: null, joined_at: hoursAgo(40 - i * 6) })),
+    // …and a designated substitute on Aces: on the roster, no seat, no fee.
+    ...CUSTOMERS.slice(10, 11).map((c) => ({ id: uid('lm'), league_id: LEAGUE_THU.id, customer_id: c.id, team_id: LEAGUE_TEAMS[0].id, role: 'sub',
+      status: 'active', source: 'invite', paid_cents: 0, paid_at: null, stripe_session_id: null, note: null, joined_at: hoursAgo(30) })),
   ];
   // "Here's the link, you're on my team." One claimed, two still out, one withdrawn.
   const LEAGUE_INVITES = [

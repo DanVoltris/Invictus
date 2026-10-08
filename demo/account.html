@@ -540,8 +540,11 @@ async function leaguesPost(action, body, token){
   return { status:r.status, ok: r.ok && j.ok !== false, ...j };
 }
 
+// Leagues this customer signed up for on their own and has not been placed in yet (0041).
+let MY_SOLOS = [];
 async function loadMyTeams(token){
   const j = await leaguesPost('my-teams', {}, token);
+  MY_SOLOS = (j.ok && Array.isArray(j.solos)) ? j.solos : [];
   if(j.ok && Array.isArray(j.teams)) return { teams:j.teams, bays:j.bays || {} };
   // 404/400: this server does not know the action (leagues are not deployed here). 401/403: not
   // signed in. None of those is worth telling a customer who may well have no team at all.
@@ -639,6 +642,12 @@ function drawProfile(c, bks, justInherited, opts){
     </div>
 
     ${teams.map((t,i) => teamCard(t, i, opts)).join('')}
+    ${MY_SOLOS.map(x => `<div class="card">
+      <div class="sec-title" style="margin-top:0">My league</div>
+      <h2 class="lg-name">${esc((x.league||{}).name || 'League')} <span class="pill warn">Waiting to be placed</span></h2>
+      <div class="lg-note" style="margin-top:10px">You signed up as a solo player. We are pairing you with a team and will text you when it is done. Your team will then show here.</div>
+      ${(x.league||{}).id ? `<a class="btn btn-ghost" href="/leagues?info=${encodeURIComponent(x.league.id)}" style="margin-top:12px">Rules, schedule &amp; prizes</a>` : ''}
+    </div>`).join('')}
     ${(opts && opts.teamsError) ? `<div class="card"><div class="sec-title" style="margin-top:0">My team</div><div class="lg-note">${esc(opts.teamsError)} Reload the page, and if it keeps happening call the shop at 204-488-6177 — your team and your booked rounds are safe either way.</div></div>` : ''}
     <div class="card">
       <div class="sec-title" style="margin-top:0">Upcoming</div>
@@ -805,6 +814,34 @@ function teamCard(t, idx, opts){
       : `<button class="btn btn-ghost inv-go" style="margin-top:12px">Create invite link</button>`}
     <div class="inv-out"></div>`;
 
+  // Designated substitutes (0041): up to three, once the team has all its players. Everyone sees
+  // who they are; the captain invites them the same way as a player, by mobile number.
+  const sb = t.subs || null;
+  const iAmSub = !!team.sub;
+  let subsBlock = '';
+  if(sb){
+    const list = sb.list || [], waitingSubs = sb.invited || [], max = sb.max || 3;
+    const left = Math.max(0, max - list.length - waitingSubs.length);
+    const names = list.length
+      ? `<div class="chips">${list.map(p => `<span class="chip${p.isMe?' is-you':''}">${esc(p.name)} · sub${p.isMe?' (you)':''}</span>`).join('')}</div>`
+      : (iAmCaptain ? '' : '<div class="empty" style="padding:8px 0">No substitutes named.</div>');
+    const form = !iAmCaptain ? ''
+      : !sb.canInvite ? '<div class="lg-note" style="margin-top:10px">You can name substitutes once every spot on your team is filled.</div>'
+      : !left ? `<div class="lg-note" style="margin-top:10px">Your team has its ${max} substitutes${waitingSubs.length ? ', counting the invites still waiting' : ''}.</div>`
+      : `<div class="sub" style="margin:10px 0">A substitute fills in when a teammate is away. They pay no league fee and take no spot on the team. Up to ${max}; you can add ${left} more.</div>
+        <label class="fld" for="sub-phone-${idx}">Their mobile number</label>
+        <input class="input sub-phone" id="sub-phone-${idx}" type="tel" inputmode="tel" placeholder="(204) 000-0000" />
+        <label class="fld" for="sub-name-${idx}" style="margin-top:12px">Their name <span class="opt">(optional)</span></label>
+        <input class="input sub-name" id="sub-name-${idx}" type="text" maxlength="120" placeholder="So you can tell the invites apart" />
+        <div class="err sub-err"></div>
+        <button class="btn btn-ghost sub-go" style="margin-top:12px">Create substitute invite</button>
+        <div class="sub-out"></div>`;
+    if(names || form || waitingSubs.length){
+      subsBlock = `<div class="sec-title">Substitutes</div>${names}
+        ${waitingSubs.length ? `<div class="sub" style="margin:8px 0 0">Still to accept: ${waitingSubs.map(i => esc(i.name)).join(', ')}.</div>` : ''}${form}`;
+    }
+  }
+
   const details = [
     ['Season', (lg.season_start && lg.season_end) ? `${fmtDate(lg.season_start)} – ${fmtDate(lg.season_end)}` : 'Dates to be announced'],
     ['Weeks', weeks.length ? `${cur ? `Week ${cur.number} of ${weeks.length}` : `${weeks.length} weeks`}${missed ? ` · ${missed} missed` : ''}` : '—'],
@@ -822,11 +859,12 @@ function teamCard(t, idx, opts){
     <h2 class="lg-name">${esc(team.name || 'Your team')} ${paidPill}</h2>
     <div class="sub" style="margin-bottom:12px">${esc(lg.name || 'League')}${lg.description ? ' · ' + esc(lg.description) : ''}${
       (lg.id && L.hasDetails(lg.details)) ? ` · <a href="/leagues?info=${encodeURIComponent(lg.id)}" style="color:var(--orange);font-weight:600">Rules, schedule &amp; prizes</a>` : ''}</div>
-    ${now}
+    ${iAmSub ? '<div class="lg-note" style="margin-bottom:12px">You are a <b>substitute</b> for this team: you fill in when a teammate is away. The team’s players book the weekly round.</div>' : now}
     <div class="sec-title">On the team</div>
     ${chips}
     ${seatsBlock}
-    ${invite}
+    ${iAmSub ? '' : invite}
+    ${subsBlock}
     <div class="sec-title">Week by week</div>
     ${weeks.length ? `<div class="sched">${weekRows}</div>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`
       : '<div class="empty" style="padding:8px 0">The shop has not set this season\'s dates yet.</div>'}
@@ -869,11 +907,13 @@ function wireTeams(teams){
       err.textContent = r.error || 'Could not open the payment. Try again, or pay at the shop — 204-488-6177.';
     };
   });
-  document.querySelectorAll('[data-team-card]').forEach(card => {
-    const btn = card.querySelector('.inv-go');
+  // One wiring for both invite forms on a card: a player's ('inv') and a substitute's ('sub', 0041).
+  const wireInvite = (card, pre, role) => {
+    const btn = card.querySelector(`.${pre}-go`);
     if(!btn) return;
-    const phone = card.querySelector('.inv-phone'), nameEl = card.querySelector('.inv-name'),
-          err = card.querySelector('.inv-err'), out = card.querySelector('.inv-out');
+    const phone = card.querySelector(`.${pre}-phone`), nameEl = card.querySelector(`.${pre}-name`),
+          err = card.querySelector(`.${pre}-err`), out = card.querySelector(`.${pre}-out`);
+    const label = btn.textContent;
     phone.addEventListener('input', () => phone.classList.remove('invalid'));
     btn.onclick = async () => {
       const p = (phone.value || '').trim();
@@ -883,8 +923,8 @@ function wireTeams(teams){
         phone.classList.add('invalid'); phone.focus(); return;
       }
       btn.disabled = true; btn.textContent = 'Making the link…';
-      const r = await leaguesPost('invite', { teamId: card.dataset.teamId, phone: p, name: (nameEl.value || '').trim() || undefined });
-      btn.disabled = false; btn.textContent = 'Create invite link';
+      const r = await leaguesPost('invite', { teamId: card.dataset.teamId, phone: p, name: (nameEl.value || '').trim() || undefined, role });
+      btn.disabled = false; btn.textContent = label;
       if(r.ok && r.alreadyOnTeam){
         out.innerHTML = `<div class="lg-note" style="margin-top:12px">${esc(p)} is already on your team — there is nothing to send. They will see the team on their own My Account.</div>`;
         phone.value = ''; nameEl.value = '';
@@ -912,7 +952,8 @@ function wireTeams(teams){
       };
       phone.value = ''; nameEl.value = '';
     };
-  });
+  };
+  document.querySelectorAll('[data-team-card]').forEach(card => { wireInvite(card, 'inv'); wireInvite(card, 'sub', 'sub'); });
 }
 
 // Address and career: shown on the account, editable in place.
