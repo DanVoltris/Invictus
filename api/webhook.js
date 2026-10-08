@@ -1,6 +1,6 @@
 import { stripeStatus, stripeClient, normalizeSettings } from '../lib/booking.js';
 import { insertBooking, getSettings, confirmHold, upsertCustomer, bookingByPaymentIntent, setPaymentState,
-         redeemGiftCard, redeemPromo, confirmLeagueCheckout, confirmLeagueTeamCheckout, confirmLeagueSeatCheckout,
+         redeemGiftCard, redeemPromo, confirmLeagueCheckout, confirmLeagueTeamCheckout, confirmLeagueSeatCheckout, confirmLeagueSoloCheckout,
   recordStripeEvent, forgetStripeEvent, bookingForHold, bookingExistsForSetupIntent, rememberStripeCustomer } from '../lib/db.js';
 import { notifyBookingConfirmed } from '../lib/notify.js';
 import { applyChargeRefunded } from '../lib/refunds.js';
@@ -108,6 +108,16 @@ async function fulfil(event, stripe) {
     if (r.error && r.retry) throw new Error(`league seat not saved: ${r.error}`);   // 500 → Stripe retries
     if (r.error) console.warn('⚠ League seat not given:', r.error);
     else console.log(`✅ League seat paid — ${(r.team && r.team.name) || r.teamId}${r.already ? ' (already recorded)' : ''}`);
+    return;
+  }
+
+  // A solo sign-up (migration 0041): one golfer with no team, waiting to be placed. Backup for the
+  // success page; league_members.stripe_session_id is unique, so a replay adds nobody twice.
+  if (sessionKind === 'league-solo') {
+    const r = await confirmLeagueSoloCheckout(stripe, event.data.object.id);
+    if (r.error && r.retry) throw new Error(`league solo sign-up not saved: ${r.error}`);   // 500 → Stripe retries
+    if (r.error) console.warn('⚠ League solo sign-up ignored:', r.error);
+    else console.log(`✅ League solo sign-up saved — ${r.league && r.league.name}${r.already ? ' (already there)' : ''}`);
     return;
   }
 

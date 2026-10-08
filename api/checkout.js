@@ -98,7 +98,11 @@ export async function createPaymentIntent(req, res) {
       if (!me) return res.status(401).json({ error: 'Sign in to book your team’s league round.', code: 'sign_in' });
       const m = await teamMembershipFor({ teamId: String(teamId), customerId: me.id });
       if (!m || !m.team || !m.league) return res.status(404).json({ error: 'That team isn’t in a league any more.', code: 'no_team' });
-      if (!m.member) return res.status(403).json({ error: 'You’re not on that team, so you can’t book its league round.', code: 'not_on_team' });
+      if (!m.member) {
+        return res.status(403).json({ code: 'not_on_team', error: m.sub
+          ? `You’re a substitute for ${m.team.name}, and the league round is booked by one of the team’s players. Book this as an ordinary session, or ask the captain to book the round.`
+          : 'You’re not on that team, so you can’t book its league round.' });
+      }
       const lg = m.league;
       if ((lg.season_start && dateISO < lg.season_start) || (lg.season_end && dateISO > lg.season_end)) {
         return res.status(400).json({ code: 'outside_season',

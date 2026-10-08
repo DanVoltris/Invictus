@@ -40,6 +40,12 @@ const UNIQUE = {
   league_seat_payments: (row, rows) => (row.stripe_session_id && rows.some((r) => r.stripe_session_id === row.stripe_session_id) ? 'league_seat_payments_session' : null),
 };
 
+// Migration 0041's trigger: a team has at most three active substitutes. Checked on every insert
+// and update of league_members, exactly where the database checks it.
+const subsLimit = (row, rows) => (row.role === 'sub' && row.status === 'active' && row.team_id
+  && rows.filter((r) => r !== row && r.id !== row.id && r.team_id === row.team_id && r.role === 'sub' && r.status === 'active').length >= 3
+  ? { code: '23514', message: 'league_subs_limit: a team can have at most 3 substitutes' } : null);
+
 function builder(table) {
   const st = { f: [], op: 'select', payload: null, cols: '' };
   const match = (r) => st.f.every(([k, c, v]) => k === 'eq' ? r[c] === v : k === 'in' ? v.includes(r[c]) : k === 'is' ? (r[c] ?? null) === v
@@ -70,11 +76,16 @@ function builder(table) {
       for (const row of list) {
         const clash = UNIQUE[table] && UNIQUE[table](row, rows);
         if (clash) return { data: null, error: { code: '23505', message: `duplicate key value violates unique constraint "${clash}"` } };
+        if (table === 'league_members' && subsLimit(row, rows)) return { data: null, error: subsLimit(row, rows) };
         rows.push(row);
       }
       return { data: Array.isArray(st.payload) ? list : list[0], error: null };
     }
-    if (st.op === 'update') { const hit = rows.filter(match); hit.forEach((r) => Object.assign(r, st.payload)); return { data: hit, error: null }; }
+    if (st.op === 'update') {
+      const hit = rows.filter(match);
+      if (table === 'league_members') for (const r of hit) { const no = subsLimit({ ...r, ...st.payload }, rows); if (no) return { data: null, error: no }; }
+      hit.forEach((r) => Object.assign(r, st.payload)); return { data: hit, error: null };
+    }
     if (st.op === 'delete') { S.db[table] = rows.filter((r) => !match(r)); return { data: null, error: null }; }
     // Used by one test to make the "already played this week" pre-check miss, so the database's
     // own unique index is the thing that catches it.
@@ -217,7 +228,7 @@ test('list: the leagues you can buy a team in, with the team count and your own 
   assert.equal(anon.code, 200);
   assert.deepEqual(anon.out.leagues.map((l) => l.id), ['L-team', 'L-free'], 'the finished season is not offered');
   assert.deepEqual(anon.out.leagues[0], { id: 'L-team', name: 'Winter Team League', description: 'Six weeks, play when you like.',
-    fee_cents: 30000, team_size: 4, team_min: null, weekly_min_mins: 180, season_start: addDays(-14), season_end: addDays(42), teamCount: 0, myTeamId: null, hasInfo: false });
+    fee_cents: 30000, team_size: 4, team_min: null, weekly_min_mins: 180, season_start: addDays(-14), season_end: addDays(42), teamCount: 0, myTeamId: null, soloCents: 7500, hasInfo: false });
 
   const teamId = await ownTeam();
   const mine = await run(leaguesApi, { query: { action: 'list' }, ...cap });
@@ -989,4 +1000,251 @@ test('a league that says nothing still counts Monday to Sunday: Tuesday then Sun
   const b = await payRound({ teamId, dateISO: sun }, cap);
   assert.equal(b.code, 409);
   assert.equal(b.out.code, 'round_booked');
+});
+
+// ---- Solo sign-ups and substitutes (migration 0041) --------------------------------------------
+// Extra people for these tests: each gets a customer row, a login and a token, like cap/friend/other.
+function person(key, name, phone) {
+  S.db.customers.push({ id: `c-${key}`, name, phone: `+1${phone}`, email: null, user_id: `user-${key}` });
+  S.tokens[`tok-${key}`] = `user-${key}`;
+  return { id: `c-${key}`, auth: { headers: { authorization: `Bearer tok-${key}` } }, phone };
+}
+const admin = { headers: { authorization: 'Bearer tok-admin' } };
+const emp = { headers: { authorization: 'Bearer tok-emp' } };
+const onTeam = (teamId, customerId, extra = {}) => S.db.league_members.push({ id: `lm-${++seq}`, league_id: 'L-team', customer_id: customerId, team_id: teamId, status: 'active', role: 'player', paid_cents: 0, ...extra });
+const members = (teamId, role = 'player') => S.db.league_members.filter((m) => m.team_id === teamId && m.status === 'active' && (m.role || 'player') === role);
+// A solo who has paid online: the whole sign-up, through Checkout and the success page.
+async function soloSignUp(who) {
+  const r = await run(leaguesApi, { query: { action: 'join-solo' }, body: { leagueId: 'L-team' }, ...who });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  const sessionId = Object.keys(S.sessions).at(-1);
+  const done = await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId } });
+  assert.equal(done.code, 200, JSON.stringify(done.out));
+  return { r, done, sessionId };
+}
+
+test('solo: one golfer pays one share, is in the league with no team, and cannot sign up twice', async () => {
+  world();
+  assert.equal((await run(leaguesApi, { query: { action: 'join-solo' }, body: { leagueId: 'L-team' } })).code, 401, 'signed out');
+
+  const { r, done, sessionId } = await soloSignUp(other);
+  assert.equal(r.out.amountCents, 7500, 'a quarter of the $300 team price — one seat of a full team');
+  const sent = S.stripe.find(([c]) => c === 'checkout.sessions.create')[1];
+  assert.equal(sent.line_items[0].price_data.unit_amount, 7500);
+  assert.deepEqual(sent.metadata, { kind: 'league-solo', leagueId: 'L-team', customerId: 'c-other' });
+  assert.equal(done.out.solo, true);
+
+  const rows = S.db.league_members.filter((m) => m.customer_id === 'c-other');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].team_id, null, 'no team yet — the manager places them');
+  assert.equal(rows[0].paid_cents, 7500);
+  assert.equal(rows[0].stripe_session_id, sessionId);
+
+  // The success page and the webhook both settle it: still one row.
+  await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId } });
+  assert.equal(S.db.league_members.filter((m) => m.customer_id === 'c-other').length, 1);
+
+  // What they see while they wait, and what the league page shows them.
+  const mine = await run(leaguesApi, { query: { action: 'my-teams' }, ...other });
+  assert.deepEqual(mine.out.teams, []);
+  assert.deepEqual(mine.out.solos.map((x) => x.league.name), ['Winter Team League']);
+  const listed = (await run(leaguesApi, { query: { action: 'list' }, ...other })).out.leagues.find((l) => l.id === 'L-team');
+  assert.equal(listed.mySolo, true);
+  assert.equal(listed.soloCents, 7500);
+
+  const again = await run(leaguesApi, { query: { action: 'join-solo' }, body: { leagueId: 'L-team' }, ...other });
+  assert.equal(again.code, 409);
+  assert.match(again.out.error, /already signed up as a solo player/);
+  // And a captain cannot also sign up solo in the league their team is in.
+  await ownTeam();
+  const capSolo = await run(leaguesApi, { query: { action: 'join-solo' }, body: { leagueId: 'L-team' }, ...cap });
+  assert.equal(capSolo.code, 409);
+  assert.match(capSolo.out.error, /already on Aces/);
+});
+
+test('placing a solo: staff only; they join the team, their payment becomes a paid seat, and they are texted', async () => {
+  world();
+  // A team of two bought seat by seat: the captain has paid one of its two seats.
+  const made = await db.createLeagueTeam({ leagueId: 'L-team', name: 'Aces', captainCustomerId: 'c-cap', paidCents: 7500, stripeSessionId: 'cs_seed', seats: 2, shareCents: 7500 });
+  const teamId = made.teamId;
+  await soloSignUp(other);
+  const solo = S.db.league_members.find((m) => m.customer_id === 'c-other');
+
+  for (const who of [{}, other]) {
+    const no = await run(leaguesApi, { query: { action: 'place-solo' }, body: { memberId: solo.id, teamId }, ...who });
+    assert.equal(no.code, 403, 'a customer and a signed-out caller are both refused');
+  }
+  // Staff without the Bookings permission are refused too.
+  S.db.role_permissions.find((x) => x.capability === 'booking.write').allowed = false;
+  assert.equal((await run(leaguesApi, { query: { action: 'place-solo' }, body: { memberId: solo.id, teamId }, ...emp })).code, 403);
+  S.db.role_permissions.find((x) => x.capability === 'booking.write').allowed = true;
+  assert.equal(solo.team_id, null);
+
+  const r = await run(leaguesApi, { query: { action: 'place-solo' }, body: { memberId: solo.id, teamId }, ...admin });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.teamName, 'Aces');
+  assert.equal(r.out.grew, false, 'there was an open seat');
+  assert.equal(solo.team_id, teamId);
+  const seat = S.db.league_seat_payments.find((p) => p.for_customer_id === 'c-other');
+  assert.equal(seat.amount_cents, 7500);
+  assert.equal(seat.seats, 1);
+  const money = (await db.teamMoneyFor(teamId)).money;
+  assert.equal(money.paidSeats, 2);
+  assert.equal(money.owedCents, 0, 'the captain is not chased for a seat the solo already paid for');
+  assert.ok(S.db.notifications.some((n) => n.template === 'league.placed' && n.recipient === '+12045550199'), 'told which team they are on');
+
+  // Placing them again changes nothing and records no second seat.
+  const twice = await run(leaguesApi, { query: { action: 'place-solo' }, body: { memberId: solo.id, teamId }, ...admin });
+  assert.equal(twice.out.already, true);
+  assert.equal(S.db.league_seat_payments.filter((p) => p.for_customer_id === 'c-other').length, 1);
+
+  // The team's two seats are taken. The next solo brings their own seat, up to the league's four.
+  const a = person('a', 'Ana Ruiz', '2045550201'), b = person('b', 'Bo Chen', '2045550202'), c = person('c', 'Cy Dunn', '2045550203');
+  for (const x of [a, b, c]) await soloSignUp(x.auth);
+  const idOf = (x) => S.db.league_members.find((m) => m.customer_id === x.id).id;
+  const third = await run(leaguesApi, { query: { action: 'place-solo' }, body: { memberId: idOf(a), teamId }, ...admin });
+  assert.equal(third.out.grew, true);
+  assert.equal(S.db.league_teams.find((t) => t.id === teamId).seats, 3);
+  assert.equal((await run(leaguesApi, { query: { action: 'place-solo' }, body: { memberId: idOf(b), teamId }, ...admin })).code, 200);
+  const fifth = await run(leaguesApi, { query: { action: 'place-solo' }, body: { memberId: idOf(c), teamId }, ...admin });
+  assert.equal(fifth.code, 409, 'never past the league’s team size');
+  assert.match(fifth.out.error, /Aces is full/);
+  assert.equal(members(teamId).length, 4);
+});
+
+test('a team made from solos: one seat each, all paid, the first is captain', async () => {
+  world();
+  const a = person('a', 'Ana Ruiz', '2045550201'), b = person('b', 'Bo Chen', '2045550202');
+  await soloSignUp(a.auth); await soloSignUp(b.auth);
+  const ids = [a, b].map((x) => S.db.league_members.find((m) => m.customer_id === x.id).id);
+
+  assert.equal((await run(leaguesApi, { query: { action: 'team-from-solos' }, body: { leagueId: 'L-team', memberIds: ids, name: 'Mulligans' }, ...other })).code, 403);
+  const r = await run(leaguesApi, { query: { action: 'team-from-solos' }, body: { leagueId: 'L-team', memberIds: ids, name: 'Mulligans' }, ...admin });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.placed, 2);
+  const team = S.db.league_teams.find((t) => t.id === r.out.teamId);
+  assert.equal(team.name, 'Mulligans');
+  assert.equal(team.captain_customer_id, 'c-a');
+  assert.equal(team.seats, 2);
+  assert.equal(team.share_cents, 7500);
+  assert.equal(members(team.id).length, 2);
+  const money = (await db.teamMoneyFor(team.id)).money;
+  assert.deepEqual([money.paidSeats, money.players, money.owedCents], [2, 2, 0]);
+  assert.equal(S.db.notifications.filter((n) => n.template === 'league.placed').length, 2);
+  // They see their team on My Account now, not "waiting to be placed".
+  const mine = await run(leaguesApi, { query: { action: 'my-teams' }, ...b.auth });
+  assert.deepEqual(mine.out.teams.map((t) => t.team.name), ['Mulligans']);
+  assert.deepEqual(mine.out.solos, []);
+
+  // A name already in the league, and players who are no longer team-less, are both refused.
+  await soloSignUp(other);
+  const otherId = S.db.league_members.find((m) => m.customer_id === 'c-other').id;
+  const clash = await run(leaguesApi, { query: { action: 'team-from-solos' }, body: { leagueId: 'L-team', memberIds: [otherId], name: 'mulligans' }, ...admin });
+  assert.equal(clash.code, 409);
+  const stale = await run(leaguesApi, { query: { action: 'team-from-solos' }, body: { leagueId: 'L-team', memberIds: [ids[0], otherId], name: 'Eagles' }, ...admin });
+  assert.equal(stale.code, 409);
+  assert.match(stale.out.error, /already on a team/);
+});
+
+// A full team: the captain plus three players, in a league whose teams hold four.
+async function fullTeam() {
+  const teamId = await ownTeam();
+  for (const k of ['p1', 'p2', 'p3']) onTeam(teamId, person(k, `Player ${k}`, `20455503${k.slice(1)}0`).id);
+  return teamId;
+}
+const inviteSub = (teamId, phone, who = cap) => run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone, role: 'sub' }, ...who });
+
+test('substitutes: only for a full team, invited by the captain, no seat and nothing to pay', async () => {
+  world();
+  const teamId = await ownTeam();
+  const early = await inviteSub(teamId, '2045550116');
+  assert.equal(early.code, 409);
+  assert.match(early.out.error, /Substitutes are for a full team\. Aces still has 3 open spots/);
+
+  for (const k of ['p1', 'p2', 'p3']) onTeam(teamId, person(k, `Player ${k}`, `20455503${k.slice(1)}0`).id);
+  assert.equal((await inviteSub(teamId, '2045550116', other)).code, 403, 'only the captain (or staff) invites');
+  const inv = await inviteSub(teamId, '2045550116');
+  assert.equal(inv.code, 200, JSON.stringify(inv.out));
+  assert.equal(inv.out.role, 'sub');
+  const row = S.db.league_team_invites.at(-1);
+  assert.equal(row.role, 'sub');
+  assert.equal(S.db.notifications.at(-1).payload.role, 'sub', 'the text says "substitute", not "paid for your spot"');
+
+  const info = await run(leaguesApi, { query: { action: 'invite-info' }, body: { token: row.token } });
+  assert.equal(info.out.role, 'sub');
+  assert.equal(info.out.teamFull, false, 'a full team is exactly when a substitute can join');
+  assert.equal(info.out.payToJoin, false);
+
+  const claim = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: row.token }, ...friend });
+  assert.equal(claim.code, 200, JSON.stringify(claim.out));
+  assert.equal(claim.out.sub, true);
+  assert.equal(claim.out.payRequired, undefined);
+  assert.equal(members(teamId, 'sub').length, 1);
+  assert.equal(members(teamId).length, 4, 'still four players');
+
+  const capView = (await run(leaguesApi, { query: { action: 'my-teams' }, ...cap })).out.teams[0];
+  assert.equal(capView.roster.length, 4, 'the roster is the players');
+  assert.deepEqual(capView.subs.list.map((x) => x.name), ['Sam O.']);
+  assert.equal(capView.subs.canInvite, true);
+  assert.equal(capView.subs.max, 3);
+  const subView = (await run(leaguesApi, { query: { action: 'my-teams' }, ...friend })).out.teams[0];
+  assert.equal(subView.team.sub, true);
+  assert.equal(subView.subs.list[0].isMe, true);
+});
+
+test('substitutes get no league perks: no longer booking window, and they cannot book the team’s league round', async () => {
+  world();
+  const teamId = await fullTeam();
+  const inv = await inviteSub(teamId, '2045550116');
+  await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: S.db.league_team_invites.at(-1).token }, ...friend });
+  assert.equal(inv.code, 200);
+
+  const win = await run(leaguesApi, { query: { action: 'window' }, ...friend });
+  assert.equal(win.out.league, false);
+  assert.equal(win.out.days, 10, 'the regular window, not the league one');
+  assert.equal((await run(leaguesApi, { query: { action: 'window' }, ...cap })).out.league, true, 'a player still gets it');
+
+  const r = await quote({ teamId }, friend);
+  assert.equal(r.code, 403);
+  assert.equal(r.out.code, 'not_on_team');
+  assert.match(r.out.error, /You’re a substitute for Aces/);
+  assert.equal(intentsMade().length, 0);
+});
+
+test('substitutes: three a team, counting invites still waiting; the database refuses a fourth', async () => {
+  world();
+  const teamId = await fullTeam();
+  const nums = ['2045550401', '2045550402', '2045550403'];
+  for (const n of nums) assert.equal((await inviteSub(teamId, n)).code, 200);
+  // Three are invited and none has accepted: a fourth text is refused already.
+  const fourth = await inviteSub(teamId, '2045550404');
+  assert.equal(fourth.code, 409);
+  assert.match(fourth.out.error, /up to 3 substitutes/);
+  // Re-sending to one of the three is still fine.
+  assert.equal((await inviteSub(teamId, nums[0])).out.resent, true);
+
+  // All three accept.
+  const tokens = S.db.league_team_invites.filter((i) => i.role === 'sub').map((i) => i.token);
+  const subs = nums.map((n, i) => person(`s${i}`, `Sub ${i}`, n));
+  for (let i = 0; i < 3; i++) assert.equal((await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: tokens[i] }, ...subs[i].auth })).code, 200);
+  assert.equal(members(teamId, 'sub').length, 3);
+  assert.equal((await inviteSub(teamId, '2045550404')).code, 409);
+
+  // Staff writing the roster directly (the portal does) hit the same wall in the database.
+  const direct = await db.admin().from('league_members').insert({ league_id: 'L-team', customer_id: 'c-other', team_id: teamId, status: 'active', role: 'sub' });
+  assert.match(direct.error.message, /league_subs_limit/);
+  assert.equal(members(teamId, 'sub').length, 3);
+});
+
+test('substitutes: somebody already playing in the league cannot also be one', async () => {
+  world();
+  const teamId = await fullTeam();
+  await db.createLeagueTeam({ leagueId: 'L-team', name: 'Birdies', captainCustomerId: 'c-other' });
+  await inviteSub(teamId, '2045550199');
+  const token = S.db.league_team_invites.at(-1).token;
+  const r = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token }, ...other });
+  assert.equal(r.code, 409);
+  assert.match(r.out.error, /already in Winter Team League/);
+  assert.equal(members(teamId, 'sub').length, 0);
+  assert.equal(S.db.league_team_invites.at(-1).claimed_at ?? null, null, 'the invite is not spent on a refusal');
 });

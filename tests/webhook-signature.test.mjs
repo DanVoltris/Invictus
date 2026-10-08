@@ -48,6 +48,7 @@ mock.module(url('lib', 'db.js'), { namedExports: {
   redeemPromo: rec('redeemPromo', {}),
   confirmLeagueCheckout: rec('confirmLeagueCheckout', {}),
   confirmLeagueTeamCheckout: rec('confirmLeagueTeamCheckout', {}),
+  confirmLeagueSoloCheckout: rec('confirmLeagueSoloCheckout', {}),   // 0041 solo sign-ups — owned by tests/league-teams.test.mjs
   confirmLeagueSeatCheckout: rec('confirmLeagueSeatCheckout', {}),   // 0036 seats — owned by tests/league-teams.test.mjs
   recordStripeEvent: rec('recordStripeEvent', { recorded: true }),
   forgetStripeEvent: rec('forgetStripeEvent', {}),

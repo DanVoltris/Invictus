@@ -223,8 +223,9 @@
     const split = seats > 0 && share > 0;
     const paid = payments.filter((p) => p.team_id === team.id).reduce((s, p) => s + (Math.floor(Number(p.seats)) || 0), 0);
     const paidSeats = split ? Math.min(seats, paid) : 0;
-    const players = members.filter((m) => m.team_id === team.id && m.status === 'active').length;
-    const openInvites = invites.filter((i) => i.team_id === team.id && !i.claimed_at && !i.revoked_at).length;
+    // Substitutes (role 'sub', migration 0041) take no seat, and neither do invites to be one.
+    const players = members.filter((m) => m.team_id === team.id && m.status === 'active' && m.role !== 'sub').length;
+    const openInvites = invites.filter((i) => i.team_id === team.id && i.role !== 'sub' && !i.claimed_at && !i.revoked_at).length;
     const unpaidSeats = split ? Math.max(0, seats - paidSeats) : 0;
     const owedCents = unpaidSeats * share;
     const started = !league || !league.season_start || !todayISO || league.season_start <= todayISO;

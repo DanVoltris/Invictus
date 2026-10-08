@@ -3,8 +3,9 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          customerHoursByContact, isLeaguePlayer, normPhone, accountCustomerForRequest, staffContext,
          listTeamLeagues, teamLeagueById, leagueTeamById, createLeagueTeam, confirmLeagueTeamCheckout,
          createTeamInvite, teamInviteByToken, claimTeamInvite, teamsForCustomer, MIGRATION_0031,
-         splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor } from '../lib/db.js';
-import { notifyTeamInvite } from '../lib/notify.js';
+         splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor,
+         soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos } from '../lib/db.js';
+import { notifyTeamInvite, notifyLeaguePlaced } from '../lib/notify.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
 const L = globalThis.InvictusLeagues;
 
@@ -15,12 +16,20 @@ const L = globalThis.InvictusLeagues;
 // captain picks the team's size (between the league's team_min and team_size), the team price is
 // shared across those seats, the captain pays one share and each friend pays one when they accept
 // the invite. Seats nobody pays for are owed by the captain and collected by staff. The team plays
-// once a week whenever it likes — a free booking made from the ordinary booking page
-// (api/booking.js ?action=league-round).
+// once a week whenever it likes — booked and paid for on the ordinary booking page, with the
+// team named at checkout (api/checkout.js).
+//
+// SINCE MIGRATION 0041 there are two more ways onto a roster. SOLO: somebody with no team pays one
+// golfer's share and waits, team-less, for the manager to place them (place-solo / team-from-solos,
+// staff only). SUBSTITUTE: a full team's captain invites up to three people who fill in when a
+// teammate is away — no seat, no fee, and none of a league member's perks.
 //
 //   POST ?action=list           (public)        leagues you can buy a team in
 //   POST ?action=buy-team       (signed in)     { leagueId, teamName, seats } → Stripe Checkout, or a free team
-//   POST ?action=invite         (captain/staff) { teamId, phone, name? } → the link to send a friend
+//   POST ?action=join-solo      (signed in)     { leagueId } → Stripe Checkout for one golfer's share, or a free place
+//   POST ?action=place-solo     (staff)         { memberId, teamId } → that player is on that team
+//   POST ?action=team-from-solos (staff)        { leagueId, memberIds, name } → a new team of them
+//   POST ?action=invite         (captain/staff) { teamId, phone, name?, role? } → the link to send a friend (role 'sub' = substitute)
 //   POST ?action=invite-info    (public)        { token } → whose team, is it still open, what joining costs
 //   POST ?action=invite-claim   (signed in)     { token } → you're on the team, or Checkout for your seat
 //   POST ?action=pay-seats      (captain)       { teamId, seats } → Checkout to cover seats for friends
@@ -61,6 +70,9 @@ export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     if (action === 'info') return await info(req, res);
     if (action === 'buy-team') return await buyTeam(req, res);
+    if (action === 'join-solo') return await joinSolo(req, res);
+    if (action === 'place-solo') return await placeSoloAction(req, res);
+    if (action === 'team-from-solos') return await teamFromSolosAction(req, res);
     if (action === 'invite') return await invite(req, res);
     if (action === 'invite-info') return await inviteInfo(req, res);
     if (action === 'invite-claim') return await inviteClaim(req, res);
@@ -175,6 +187,85 @@ async function buyTeam(req, res) {
   return res.status(200).json({ ok: true, url: session.url });
 }
 
+// Sign up without a team. Whoever is signed in pays one golfer's share and is in the league with
+// no team; the manager places them. A league with no team size has no share to charge, so it has
+// no solo sign-up.
+async function joinSolo(req, res) {
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to join as a solo player.' });
+  if (!admin()) return res.status(503).json({ ok: false, error: 'Leagues aren’t available right now — please call the shop.' });
+  const league = await teamLeagueById((req.body || {}).leagueId);
+  if (!league || league.is_active === false || league.join_online === false) {
+    return res.status(404).json({ ok: false, error: 'That league isn’t taking sign-ups online. Please call the shop.' });
+  }
+  if (league.season_end && league.season_end < winnipegTodayISO()) {
+    return res.status(400).json({ ok: false, error: 'That league’s season is over.' });
+  }
+  const share = soloShareCents(league);
+  if (share == null) return res.status(400).json({ ok: false, error: 'This league is joined by the team. Start a team, or call the shop.' });
+
+  // Already in it — on a team, or already waiting to be placed? Say so before taking any money.
+  const mine = await teamsForCustomer(me.id);
+  const onTeam = (mine.teams || []).find((t) => t.league.id === league.id);
+  if (onTeam) return res.status(409).json({ ok: false, error: `You’re already on ${onTeam.team.name} in this league.`, teamId: onTeam.team.id });
+  if ((mine.solos || []).some((x) => x.league.id === league.id)) {
+    return res.status(409).json({ ok: false, error: 'You’re already signed up as a solo player. We’ll text you when you’re placed on a team.' });
+  }
+
+  if (!(share > 0)) {
+    const r = await joinLeagueSolo({ leagueId: league.id, customerId: me.id });
+    return r.error ? res.status(r.code || 400).json({ ok: false, error: r.error })
+                   : res.status(200).json({ ok: true, solo: true, free: true, leagueName: league.name });
+  }
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) return res.status(503).json({ ok: false, error: 'Online payment isn’t available right now — please call the shop to join.' });
+  const settings = normalizeSettings(await getSettings());
+  const origin = req.headers.origin || `https://${req.headers.host}`;
+  const session = await stripeClient(process.env).checkout.sessions.create({
+    mode: 'payment',
+    line_items: [{ quantity: 1, price_data: { currency: settings.currency, unit_amount: share,
+      product_data: { name: `${league.name} — solo player`,
+        description: 'One golfer’s place for the season. We place you with a team and text you when it’s done.' } } }],
+    customer_email: validEmail(me.email) ? me.email : undefined,
+    metadata: { kind: 'league-solo', leagueId: league.id, customerId: String(me.id) },
+    success_url: `${origin}/leagues?success=1&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/leagues?canceled=1`,
+  });
+  return res.status(200).json({ ok: true, url: session.url, amountCents: share });
+}
+
+// Staff only (Bookings permission): put a team-less player on a team, and text them which one.
+async function placeSoloAction(req, res) {
+  const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
+  if (ctx.error) return res.status(403).json({ ok: false, error: 'Only staff with the Bookings permission can place players on teams.' });
+  const { memberId, teamId } = req.body || {};
+  if (!memberId || !teamId) return res.status(400).json({ ok: false, error: 'Which player, and which team?' });
+  const r = await placeSolo({ memberId, teamId });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  if (!r.already && r.customer) {
+    await notifyLeaguePlaced({ memberId: r.memberId, teamId: r.team.id, phone: r.customer.phone, name: r.customer.name,
+      teamName: r.team.name, leagueName: r.league && r.league.name, customerId: r.customer.id });
+  }
+  return res.status(200).json({ ok: true, teamId: r.team.id, teamName: r.team.name, grew: !!r.grew, already: !!r.already });
+}
+
+// Staff only: a new team made of players who have none.
+async function teamFromSolosAction(req, res) {
+  const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
+  if (ctx.error) return res.status(403).json({ ok: false, error: 'Only staff with the Bookings permission can make teams.' });
+  const { leagueId, memberIds, name } = req.body || {};
+  if (!leagueId || !Array.isArray(memberIds) || !memberIds.length || memberIds.length > 20) {
+    return res.status(400).json({ ok: false, error: 'Pick the players to put on the team.' });
+  }
+  const r = await teamFromSolos({ leagueId, memberIds, name });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  for (const c of r.placed) {
+    await notifyLeaguePlaced({ memberId: c.memberId, teamId: r.team.id, phone: c.phone, name: c.name,
+      teamName: r.team.name, leagueName: r.league.name, customerId: c.id });
+  }
+  return res.status(200).json({ ok: true, teamId: r.team.id, teamName: r.team.name, placed: r.placed.length });
+}
+
 // "Is that name free?" — asked before Checkout only. Returns the sentence to show, or null.
 async function teamNameTaken(leagueId, nm) {
   const db = admin();
@@ -187,7 +278,8 @@ async function teamNameTaken(leagueId, nm) {
 
 // The captain (or staff) invites a friend by phone number.
 async function invite(req, res) {
-  const { teamId, phone, name } = req.body || {};
+  const { teamId, phone, name, role } = req.body || {};
+  const asSub = role === 'sub';   // a designated substitute (0041), not a player
   if (!teamId) return res.status(400).json({ ok: false, error: 'Which team?' });
   if (!normPhone(phone)) return res.status(400).json({ ok: false, error: 'Enter your friend’s mobile number, including area code.' });
 
@@ -205,7 +297,7 @@ async function invite(req, res) {
     }
   }
 
-  const r = await createTeamInvite({ teamId: team.id, phone, name, invitedBy: me ? me.id : null });
+  const r = await createTeamInvite({ teamId: team.id, phone, name, invitedBy: me ? me.id : null, role: asSub ? 'sub' : 'player' });
   if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
   if (r.alreadyOnTeam) return res.status(200).json({ ok: true, alreadyOnTeam: true, link: null });
 
@@ -216,8 +308,9 @@ async function invite(req, res) {
     inviteId: r.invite.id, phone: r.invite.phone, name: r.invite.name, link,
     teamName: team.name, leagueName: r.league && r.league.name,
     invitedBy: me ? me.name : null, weeklyMins: r.league && r.league.weekly_min_mins,
+    role: r.invite.role === 'sub' ? 'sub' : 'player',
   });
-  return res.status(200).json({ ok: true, link, resent: !!r.already });
+  return res.status(200).json({ ok: true, link, resent: !!r.already, role: r.invite.role === 'sub' ? 'sub' : 'player' });
 }
 
 // Public: what the person who tapped the link is being offered. No phone numbers, no roster.
@@ -235,7 +328,8 @@ async function inviteInfo(req, res) {
   const found2 = await teamMoneyFor(team.id);
   const money = found2 && found2.money;
   const size = Number(team.seats) || Number(league && league.team_size) || 0;
-  const teamFull = !!(size && money && money.players >= size);
+  const asSub = inv.role === 'sub';   // a substitute takes no seat and pays nothing
+  const teamFull = !asSub && !!(size && money && money.players >= size);
   let invitedBy = null;
   if (db && inv.invited_by) {
     const { data } = await db.from('customers').select('name').eq('id', inv.invited_by).maybeSingle();
@@ -251,8 +345,9 @@ async function inviteInfo(req, res) {
     revoked: !!inv.revoked_at,
     weeklyMins: (league && league.weekly_min_mins) || null,
     seats: size || null,
-    payToJoin: !!(money && money.split && money.freeSeats < 1),
-    shareCents: money && money.split ? money.shareCents : 0,
+    role: asSub ? 'sub' : 'player',
+    payToJoin: !asSub && !!(money && money.split && money.freeSeats < 1),
+    shareCents: !asSub && money && money.split ? money.shareCents : 0,
   });
 }
 
@@ -283,7 +378,7 @@ async function inviteClaim(req, res) {
     });
     return res.status(200).json({ ok: true, payRequired: true, url: session.url, shareCents: r.shareCents });
   }
-  return res.status(200).json({ ok: true, teamId: r.teamId, leagueId: r.leagueId, already: !!r.already });
+  return res.status(200).json({ ok: true, teamId: r.teamId, leagueId: r.leagueId, already: !!r.already, ...(r.sub ? { sub: true } : {}) });
 }
 
 // The captain covers seats for friends who have not joined (or will not pay) — so those friends
@@ -325,7 +420,7 @@ async function myTeams(req, res) {
   if (!me) return res.status(401).json({ ok: false, error: 'Your session has ended. Sign in again.' });
   const r = await teamsForCustomer(me.id);
   if (r.error) return res.status(r.code || 500).json({ ok: false, error: r.error, teams: [] });
-  return res.status(200).json({ ok: true, teams: r.teams });
+  return res.status(200).json({ ok: true, teams: r.teams, solos: r.solos || [] });
 }
 
 // ----- The 0028 per-player sign-up, unchanged ------------------------------------------
@@ -389,6 +484,9 @@ async function confirm(req, res) {
   const seat = await confirmLeagueSeatCheckout(stripe, sessionId);
   if (seat.ok) return res.status(200).json({ ok: true, teamId: seat.teamId, leagueName: seat.league && seat.league.name, seat: true });
   if (!/not a league seat/.test(seat.error || '')) return res.status(seat.code || 400).json({ ok: false, error: seat.error, refunded: !!seat.refunded });
+  const solo = await confirmLeagueSoloCheckout(stripe, sessionId);
+  if (solo.ok) return res.status(200).json({ ok: true, solo: true, leagueName: solo.league && solo.league.name });
+  if (!/not a league solo/.test(solo.error || '')) return res.status(solo.code || 400).json({ ok: false, error: solo.error });
   const r = await confirmLeagueCheckout(stripe, sessionId);
   if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
   return res.status(200).json({ ok: true, leagueName: r.league && r.league.name, email: r.email });
