@@ -8,6 +8,9 @@
   "team_min": 4,
   "details": {
     "about": "The 2026-2027 Invictus Winter League is a 16-week, four-person scramble bringing together Winnipeg's golf community for competition, connection, and memorable experiences.\n\nTeams compete throughout the season on championship courses powered by Golfzon, with the league champions receiving a trip to a destination to be announced.",
+    "eligibility": [
+      "No professional players allowed"
+    ],
     "format": [
       "16 weeks of league play",
       "Four-person scramble",

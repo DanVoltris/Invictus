@@ -3243,6 +3243,7 @@ function openLeagueEditor(x){
     ${cols39 ? `
     <div class="field"><label for="li-about">About the league</label><textarea class="input" id="li-about" rows="4" maxlength="2000" placeholder="What the league is, who it is for, what the champions win.">${esc(info.about)}</textarea></div>
     <div class="field"><label for="li-perks">Member perks <span class="dim">(one per line — what a league member gets)</span></label><textarea class="input" id="li-perks" rows="4" placeholder="Priority booking up to 3 months in advance&#10;$5 off booking fees">${esc(info.perks.join('\n'))}</textarea></div>
+    <div class="field"><label for="li-elig">Who can play <span class="dim">(one per line — shown as its own section on the league page)</span></label><textarea class="input" id="li-elig" rows="2" placeholder="No professional players allowed">${esc(info.eligibility.join('\n'))}</textarea></div>
     <div class="field"><label for="li-format">Format &amp; rules <span class="dim">(one per line)</span></label><textarea class="input" id="li-format" rows="6" placeholder="Four-person scramble&#10;2-foot concede&#10;No mulligans">${esc(info.format.join('\n'))}</textarea></div>
     <div class="field"><label for="li-settings">League settings <span class="dim">(one per line, written as Setting: value — shown as a table)</span></label><textarea class="input" id="li-settings" rows="7" placeholder="Green firmness: Firm&#10;Tee boxes: Blue (Men) / White (Ladies)&#10;Mulligans: 0">${esc(info.settings.map(r=>r.value?`${r.label}: ${r.value}`:r.label).join('\n'))}</textarea></div>
     <div class="field"><label for="li-challenges">Featured challenges <span class="dim">(one per line)</span></label><textarea class="input" id="li-challenges" rows="4" placeholder="Mega Putt Challenge&#10;Closest to the Pin Challenge">${esc(info.challenges.join('\n'))}</textarea></div>
@@ -3329,7 +3330,7 @@ function openLeagueEditor(x){
       const sched=readWeeks();
       const bad=sched.findIndex(w=>w.from && w.to && w.to<w.from);
       if(bad>=0) return err(`Week ${bad+1} in the schedule ends before it starts.`);
-      details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, format:$('#li-format').value,
+      details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value,
         settings:$('#li-settings').value, challenges:$('#li-challenges').value,
         schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value });
     }

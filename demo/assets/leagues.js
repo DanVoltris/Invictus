@@ -237,7 +237,7 @@
   }
 
   /* ----- League info: what the printed brochure says (migration 0039, leagues.details) -----
-     About, member perks, format & rules, the league settings table, featured challenges, the
+     About, member perks, who can play, format & rules, the league settings table, featured challenges, the
      week-by-week schedule with a note per week, a notice under it, team awards and the grand prize. One shape and one clean-up, used by the manager's form, the customer page and the
      server — so nothing oversized or malformed is ever saved or shown. Lists come in as arrays or
      as text with one item per line; a leading bullet is dropped, so a pasted brochure line works. */
@@ -263,13 +263,13 @@
       return { from, to, phase: line(x.phase, 60), event: line(x.event, 80), course: line(x.course, 120), location: line(x.location, 120),
         note: line(x.note, INFO_LIMITS.note), ...(x.optional === true || x.optional === 'true' ? { optional: true } : {}) };
     }).filter((w) => w.from || w.event || w.course || w.note).slice(0, INFO_LIMITS.weeks);
-    return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), format: list(d.format), settings,
+    return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), eligibility: list(d.eligibility), format: list(d.format), settings,
       challenges: list(d.challenges), schedule, notice: para(d.notice, INFO_LIMITS.notice),
       awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize) };
   }
   function hasDetails(raw) {
     const d = normalizeDetails(raw);
-    return !!(d.about || d.prize || d.notice || d.perks.length || d.format.length || d.settings.length
+    return !!(d.about || d.prize || d.notice || d.perks.length || d.eligibility.length || d.format.length || d.settings.length
       || d.challenges.length || d.schedule.length || d.awards.length);
   }
   // "Nov 1 – 7", "Nov 29 – Dec 5", "Dec 27 – Jan 2". Dates are plain calendar days, never shifted

@@ -128,8 +128,10 @@ test('publicName: how a player appears to other players', () => {
 test('league info: lists take one item per line or an array, and lose bullets and blanks', () => {
   const d = L.normalizeDetails({ format: '• Four-person scramble\n- 2-foot concede\n\n  * No mulligans  ', awards: ['Cup Winner', '', '  Most   Honest '] });
   assert.deepEqual(d.format, ['Four-person scramble', '2-foot concede', 'No mulligans']);
+  assert.deepEqual(L.normalizeDetails({ eligibility: 'No professional players allowed\n' }).eligibility, ['No professional players allowed']);
+  assert.equal(L.hasDetails({ eligibility: 'No professional players allowed' }), true);
   assert.deepEqual(d.awards, ['Cup Winner', 'Most Honest']);
-  assert.deepEqual(L.normalizeDetails(null), { about: '', perks: [], format: [], settings: [], challenges: [], schedule: [], notice: '', awards: [], prize: '' });
+  assert.deepEqual(L.normalizeDetails(null), { about: '', perks: [], eligibility: [], format: [], settings: [], challenges: [], schedule: [], notice: '', awards: [], prize: '' });
   assert.deepEqual(L.normalizeDetails('nonsense'), L.normalizeDetails({}));
 });
 

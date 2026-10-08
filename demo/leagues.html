@@ -382,6 +382,7 @@ function leaguePageHTML(lg, { back }){
       <div class="lp-main">
         ${paras.length ? `<section class="lp-about">${paras.map(x => `<p>${esc(x)}</p>`).join('')}</section>` : ''}
         ${d.perks.length ? `<section><h2>Member perks</h2>${list(d.perks)}</section>` : ''}
+        ${d.eligibility.length ? `<section><h2>Who can play</h2>${list(d.eligibility)}</section>` : ''}
         ${(d.format.length || d.challenges.length) ? `<section class="lp-cols">
           ${d.format.length ? `<div><h2>Format and rules</h2>${list(d.format)}</div>` : ''}
           ${d.challenges.length ? `<div><h2>Featured challenges</h2>${list(d.challenges)}</div>` : ''}
