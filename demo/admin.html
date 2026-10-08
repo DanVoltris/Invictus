@@ -3853,7 +3853,6 @@ function leagueTeamsBoard(ctx){
   const card=(t)=>{ const onCard=active.filter(x=>(x.team_id||null)===(t?t.id:null));
     // Substitutes (0041) are listed apart and never count towards the team's size.
     const list=onCard.filter(x=>x.role!=='sub'), subs=t?onCard.filter(x=>x.role==='sub'):[];
-    const size=t?(t.seats||league.team_size||0):0, full=!!size && list.length>=size;
     const cap=t&&teamCaptain(t,members), inv=t?(invites||[]).filter(i=>i.team_id===t.id):[];
     return `<div class="card tb-team" data-team="${t?t.id:''}" style="margin:0">
       <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><h3 class="card-h" style="margin:0;flex:1 1 110px;min-width:0;overflow-wrap:break-word">${t?esc(t.name):'Solo players'}</h3>
@@ -3867,12 +3866,12 @@ function leagueTeamsBoard(ctx){
       ${!t&&edit&&list.length?`<button class="btn btn-primary btn-sm tb-solo-team" style="width:100%;margin-top:10px">Make a team from these players</button>`:''}
       ${t&&mig31.invites&&inv.length?`<div class="sec-h" style="margin:14px 0 0">Invites</div><div class="tb-list">${inv.map(inviteRow).join('')}</div>`:''}
       ${edit&&t?`<button class="btn btn-ghost btn-sm tb-add" style="width:100%;margin-top:10px">+ Add player to ${esc(t.name)}</button>`:''}
-      ${edit&&t&&LG41.subs&&full&&subs.length<3?`<button class="btn btn-ghost btn-sm tb-add-sub" style="width:100%;margin-top:8px">+ Add substitute</button>`:''}
+      ${edit&&t&&LG41.subs&&subs.length<3?`<button class="btn btn-ghost btn-sm tb-add-sub" style="width:100%;margin-top:8px">+ Add substitute</button>`:''}
     </div>`; };
   const unassigned=active.filter(x=>!x.team_id).length;
   $('#lo-body').innerHTML=`
     ${mig31Flag(mig31.cols && mig31.invites && mig31.rounds)}
-    <div class="dim" style="font-size:12.5px;margin-bottom:10px">One captain buys the team and invites the rest by phone. Any member can book the team’s round for the week. A full team can name up to 3 substitutes.</div>
+    <div class="dim" style="font-size:12.5px;margin-bottom:10px">One captain buys the team and invites the rest by phone. Any member can book the team’s round for the week. A team can name up to 3 substitutes.</div>
     ${edit?`<div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:nowrap"><input class="input" id="tb-new" maxlength="60" placeholder="New team name" style="max-width:280px" /><button class="btn btn-primary btn-sm" id="tb-create">Add team</button></div>`:''}
     <div class="plans-grid">${teams.map(card).join('')}${unassigned?card(null):''}</div>
     ${!teams.length?'<div class="empty">No teams yet — add the first one above.</div>':''}`;

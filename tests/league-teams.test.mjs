@@ -1154,12 +1154,18 @@ async function fullTeam() {
 }
 const inviteSub = (teamId, phone, who = cap) => run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone, role: 'sub' }, ...who });
 
-test('substitutes: only for a full team, invited by the captain, no seat and nothing to pay', async () => {
+test('substitutes: the captain invites one whenever they like — the team need not be full — and a sub takes no seat', async () => {
   world();
   const teamId = await ownTeam();
-  const early = await inviteSub(teamId, '2045550116');
-  assert.equal(early.code, 409);
-  assert.match(early.out.error, /Substitutes are for a full team\. Aces still has 3 open spots/);
+  // A team of one, three open spots: a substitute can be invited already, and takes none of them.
+  const early = await inviteSub(teamId, '2045550150');
+  assert.equal(early.code, 200, JSON.stringify(early.out));
+  assert.equal(early.out.role, 'sub');
+  const lonely = (await run(leaguesApi, { query: { action: 'my-teams' }, ...cap })).out.teams[0];
+  assert.equal(lonely.subs.canInvite, true);
+  assert.deepEqual(lonely.subs.invited.map((x) => x.name), ['Invited substitute']);
+  assert.equal((await db.teamMoneyFor(teamId)).money.openInvites, 0, 'a substitute’s invite holds no seat');
+  S.db.league_team_invites.at(-1).revoked_at = new Date().toISOString();
 
   for (const k of ['p1', 'p2', 'p3']) onTeam(teamId, person(k, `Player ${k}`, `20455503${k.slice(1)}0`).id);
   assert.equal((await inviteSub(teamId, '2045550116', other)).code, 403, 'only the captain (or staff) invites');

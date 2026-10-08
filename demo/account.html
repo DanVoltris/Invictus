@@ -127,10 +127,12 @@
   .seat-bar i{flex:1;height:8px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border)}
   .seat-bar i.is-paid{background:#4ec06a;border-color:#3aa857}
   .lg-note.is-owed{background:rgba(240,82,61,.08);border-color:rgba(240,82,61,.4);color:#A8321F}
-  .seat-pick{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
-  .seat-pick button{border:1px solid var(--border);background:var(--near-black);color:var(--muted);border-radius:10px;padding:8px 13px;font-family:'Space Grotesk';font-weight:700;font-size:13.5px;cursor:pointer}
-  .seat-pick button.is-on{border-color:var(--orange);color:var(--orange);background:rgba(240,82,61,.08)}
-  .seat-pick button:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+  .seat-pick,.inv-role{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+  .inv-role{margin:0 0 10px}
+  .inv-role button:disabled{opacity:.55;cursor:not-allowed}
+  .seat-pick button,.inv-role button{border:1px solid var(--border);background:var(--near-black);color:var(--muted);border-radius:10px;padding:8px 13px;font-family:'Space Grotesk';font-weight:700;font-size:13.5px;cursor:pointer}
+  .seat-pick button.is-on,.inv-role button.is-on{border-color:var(--orange);color:var(--orange);background:rgba(240,82,61,.08)}
+  .seat-pick button:focus-visible,.inv-role button:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
 </style>
 </head>
 <body>
@@ -797,50 +799,41 @@ function teamCard(t, idx, opts){
       <div class="seat-bar" aria-hidden="true">${bar}</div>
       <div class="sub" style="margin:0">${intro}</div>${capPart}`;
   }
+  // Designated substitutes (0041): up to three a team. Everyone sees who they are; the captain
+  // invites one from the same form as a teammate, by choosing which it is.
+  const sb = t.subs || null;
+  const iAmSub = !!team.sub;
+  const subList = sb ? (sb.list || []) : [], subWaiting = sb ? (sb.invited || []) : [], subMax = sb ? (sb.max || 3) : 0;
+  const subLeft = sb ? Math.max(0, subMax - subList.length - subWaiting.length) : 0;
+  const subsBlock = (subList.length || subWaiting.length) ? `<div class="sec-title">Substitutes</div>
+      ${subList.length ? `<div class="chips">${subList.map(p => `<span class="chip${p.isMe?' is-you':''}">${esc(p.name)} · sub${p.isMe?' (you)':''}</span>`).join('')}</div>` : ''}
+      ${subWaiting.length ? `<div class="sub" style="margin:8px 0 0">Still to accept: ${subWaiting.map(i => esc(i.name)).join(', ')}.</div>` : ''}` : '';
+  // What this invite can be for: a teammate while there is room, a substitute while fewer than
+  // three are named. The form opens on whichever is possible.
+  const canPlayer = room !== 0, canSub = !!(sb && sb.canInvite !== false && subLeft > 0);
+  const role0 = canPlayer ? 'player' : 'sub';
+
   // Not the captain: say who can add a player rather than showing a control the server will refuse.
   const invite = iAmCaptain === false ? `
     <div class="lg-note" style="margin-top:12px">${captain
       ? `Only the captain can add players. Ask ${esc(L.publicName(captain.name))} to send an invite from their own My Account.`
       : 'Only the team captain can add players, and the shop has not recorded one for this team. Call 204-488-6177 and we will add your player for you.'}</div>` : `
-    <div class="sec-title">Invite a player</div>
-    <div class="sub" style="margin-bottom:10px">${iAmCaptain === null ? 'If you are the captain, you' : 'You'} can add players by mobile number${room!=null ? ` — room for ${room} more` : ''}. We give you a link to send them; they tap it${st ? `, pay their own ${money(st.shareCents)} share (nothing if you have covered their seat),` : ''} and they are on the team.</div>
+    <div class="sec-title">Invite someone</div>
+    ${sb ? `<div class="inv-role" role="radiogroup" aria-label="Invite them as">
+      <button type="button" role="radio" data-role="player" aria-checked="${role0==='player'}" class="${role0==='player'?'is-on':''}" tabindex="${role0==='player'?0:-1}" ${canPlayer?'':'disabled'}>Teammate${canPlayer?'':' · team full'}</button>
+      <button type="button" role="radio" data-role="sub" aria-checked="${role0==='sub'}" class="${role0==='sub'?'is-on':''}" tabindex="${role0==='sub'?0:-1}" ${canSub?'':'disabled'}>Substitute${canSub?'':` · ${subMax} of ${subMax}`}</button>
+    </div>
+    <div class="sub inv-help-sub" style="margin-bottom:10px" ${role0==='sub'?'':'hidden'}>A substitute fills in when a teammate is away. They pay no league fee and take no spot on the team. Up to ${subMax}${subLeft?`; you can add ${subLeft} more`:''}.</div>` : ''}
+    <div class="sub inv-help-player" style="margin-bottom:10px" ${role0==='player'?'':'hidden'}>${iAmCaptain === null ? 'If you are the captain, you' : 'You'} can add players by mobile number${room!=null ? ` — room for ${room} more` : ''}. We give you a link to send them; they tap it${st ? `, pay their own ${money(st.shareCents)} share (nothing if you have covered their seat),` : ''} and they are on the team.</div>
     <label class="fld" for="inv-phone-${idx}">Their mobile number</label>
-    <input class="input inv-phone" id="inv-phone-${idx}" type="tel" inputmode="tel" placeholder="(204) 000-0000" ${room===0?'disabled':''} />
+    <input class="input inv-phone" id="inv-phone-${idx}" type="tel" inputmode="tel" placeholder="(204) 000-0000" ${canPlayer||canSub?'':'disabled'} />
     <label class="fld" for="inv-name-${idx}" style="margin-top:12px">Their name <span class="opt">(optional)</span></label>
-    <input class="input inv-name" id="inv-name-${idx}" type="text" maxlength="120" placeholder="So you can tell the invites apart" ${room===0?'disabled':''} />
+    <input class="input inv-name" id="inv-name-${idx}" type="text" maxlength="120" placeholder="So you can tell the invites apart" ${canPlayer||canSub?'':'disabled'} />
     <div class="err inv-err"></div>
-    ${room===0
-      ? '<div class="lg-note">Your team is full, so there is nobody left to invite. If somebody has dropped out, call the shop at 204-488-6177 and we will free the place up.</div>'
-      : `<button class="btn btn-ghost inv-go" style="margin-top:12px">Create invite link</button>`}
+    ${!(canPlayer||canSub)
+      ? `<div class="lg-note">Your team is full${sb ? ' and has its '+subMax+' substitutes' : ''}, so there is nobody left to invite. If somebody has dropped out, call the shop at 204-488-6177 and we will free the place up.</div>`
+      : `<button class="btn btn-ghost inv-go" style="margin-top:12px">${role0==='sub' ? 'Create substitute invite' : 'Create invite link'}</button>`}
     <div class="inv-out"></div>`;
-
-  // Designated substitutes (0041): up to three, once the team has all its players. Everyone sees
-  // who they are; the captain invites them the same way as a player, by mobile number.
-  const sb = t.subs || null;
-  const iAmSub = !!team.sub;
-  let subsBlock = '';
-  if(sb){
-    const list = sb.list || [], waitingSubs = sb.invited || [], max = sb.max || 3;
-    const left = Math.max(0, max - list.length - waitingSubs.length);
-    const names = list.length
-      ? `<div class="chips">${list.map(p => `<span class="chip${p.isMe?' is-you':''}">${esc(p.name)} · sub${p.isMe?' (you)':''}</span>`).join('')}</div>`
-      : (iAmCaptain ? '' : '<div class="empty" style="padding:8px 0">No substitutes named.</div>');
-    const form = !iAmCaptain ? ''
-      : !sb.canInvite ? '<div class="lg-note" style="margin-top:10px">You can name substitutes once every spot on your team is filled.</div>'
-      : !left ? `<div class="lg-note" style="margin-top:10px">Your team has its ${max} substitutes${waitingSubs.length ? ', counting the invites still waiting' : ''}.</div>`
-      : `<div class="sub" style="margin:10px 0">A substitute fills in when a teammate is away. They pay no league fee and take no spot on the team. Up to ${max}; you can add ${left} more.</div>
-        <label class="fld" for="sub-phone-${idx}">Their mobile number</label>
-        <input class="input sub-phone" id="sub-phone-${idx}" type="tel" inputmode="tel" placeholder="(204) 000-0000" />
-        <label class="fld" for="sub-name-${idx}" style="margin-top:12px">Their name <span class="opt">(optional)</span></label>
-        <input class="input sub-name" id="sub-name-${idx}" type="text" maxlength="120" placeholder="So you can tell the invites apart" />
-        <div class="err sub-err"></div>
-        <button class="btn btn-ghost sub-go" style="margin-top:12px">Create substitute invite</button>
-        <div class="sub-out"></div>`;
-    if(names || form || waitingSubs.length){
-      subsBlock = `<div class="sec-title">Substitutes</div>${names}
-        ${waitingSubs.length ? `<div class="sub" style="margin:8px 0 0">Still to accept: ${waitingSubs.map(i => esc(i.name)).join(', ')}.</div>` : ''}${form}`;
-    }
-  }
 
   const details = [
     ['Season', (lg.season_start && lg.season_end) ? `${fmtDate(lg.season_start)} – ${fmtDate(lg.season_end)}` : 'Dates to be announced'],
@@ -907,13 +900,31 @@ function wireTeams(teams){
       err.textContent = r.error || 'Could not open the payment. Try again, or pay at the shop — 204-488-6177.';
     };
   });
-  // One wiring for both invite forms on a card: a player's ('inv') and a substitute's ('sub', 0041).
-  const wireInvite = (card, pre, role) => {
-    const btn = card.querySelector(`.${pre}-go`);
+  document.querySelectorAll('[data-team-card]').forEach(card => {
+    const btn = card.querySelector('.inv-go');
     if(!btn) return;
-    const phone = card.querySelector(`.${pre}-phone`), nameEl = card.querySelector(`.${pre}-name`),
-          err = card.querySelector(`.${pre}-err`), out = card.querySelector(`.${pre}-out`);
-    const label = btn.textContent;
+    const phone = card.querySelector('.inv-phone'), nameEl = card.querySelector('.inv-name'),
+          err = card.querySelector('.inv-err'), out = card.querySelector('.inv-out');
+    // "Teammate or substitute?" (0041) — a radio group: click, or arrow keys between the two.
+    const roles = [...card.querySelectorAll('.inv-role button')].filter(b => !b.disabled);
+    const labelFor = r => r === 'sub' ? 'Create substitute invite' : 'Create invite link';
+    let role = (roles.find(b => b.classList.contains('is-on')) || {}).dataset ? roles.find(b => b.classList.contains('is-on')).dataset.role : undefined;
+    let label = btn.textContent;
+    const pickRole = (b, focus) => {
+      card.querySelectorAll('.inv-role button').forEach(x => { const on = x === b; x.classList.toggle('is-on', on); x.setAttribute('aria-checked', String(on)); x.tabIndex = on ? 0 : -1; });
+      role = b.dataset.role; label = labelFor(role); btn.textContent = label;
+      const hp = card.querySelector('.inv-help-player'), hs = card.querySelector('.inv-help-sub');
+      if(hp) hp.hidden = role !== 'player'; if(hs) hs.hidden = role !== 'sub';
+      err.textContent = ''; out.innerHTML = '';
+      if(focus) b.focus();
+    };
+    roles.forEach((b, i) => {
+      b.onclick = () => pickRole(b);
+      b.onkeydown = e => {
+        const k = e.key, to = (k==='ArrowRight'||k==='ArrowDown') ? Math.min(roles.length-1, i+1) : (k==='ArrowLeft'||k==='ArrowUp') ? Math.max(0, i-1) : null;
+        if(to!=null){ e.preventDefault(); pickRole(roles[to], true); }
+      };
+    });
     phone.addEventListener('input', () => phone.classList.remove('invalid'));
     btn.onclick = async () => {
       const p = (phone.value || '').trim();
@@ -952,8 +963,7 @@ function wireTeams(teams){
       };
       phone.value = ''; nameEl.value = '';
     };
-  };
-  document.querySelectorAll('[data-team-card]').forEach(card => { wireInvite(card, 'inv'); wireInvite(card, 'sub', 'sub'); });
+  });
 }
 
 // Address and career: shown on the account, editable in place.

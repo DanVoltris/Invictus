@@ -21,7 +21,7 @@ const L = globalThis.InvictusLeagues;
 //
 // SINCE MIGRATION 0041 there are two more ways onto a roster. SOLO: somebody with no team pays one
 // golfer's share and waits, team-less, for the manager to place them (place-solo / team-from-solos,
-// staff only). SUBSTITUTE: a full team's captain invites up to three people who fill in when a
+// staff only). SUBSTITUTE: a team's captain invites up to three people who fill in when a
 // teammate is away — no seat, no fee, and none of a league member's perks.
 //
 //   POST ?action=list           (public)        leagues you can buy a team in

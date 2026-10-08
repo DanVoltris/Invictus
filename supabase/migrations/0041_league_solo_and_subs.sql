@@ -4,7 +4,7 @@
 -- league_members with team_id NULL: "in the league, waiting to be placed". The manager then puts
 -- them on a team from the staff portal (api/leagues.js ?action=place-solo).
 --
--- SUBSTITUTES are people a FULL team names to fill in when a teammate is away. They are on the
+-- SUBSTITUTES are people a team names to fill in when a teammate is away. They are on the
 -- team's roster but they are not one of its players: they take no seat, pay no league fee, and get
 -- none of a league member's perks (the longer booking window, booking the team's weekly round).
 -- So a roster row now says which it is:
