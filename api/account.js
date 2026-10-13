@@ -369,38 +369,54 @@ async function feedback(req, res, db) {
 // Find the customer this waiver belongs to: an explicit customer id, the contact on a booking,
 // or an email/phone match. Only creates a new customer row when `create` is true (i.e. on submit,
 // never on a status check). The waiver lives on the customer so it covers all their visits (clause 12).
-// Fill in any contact fields the matched customer is missing (so signing saves their email/phone).
-async function backfill(db, cust, { e, p, n }) {
+//
+// HOW the person was identified decides what the caller may learn and change. This endpoint has no
+// login, so there are two kinds of caller:
+//   'link'     they hold a customer id or a booking id — an unguessable uuid that staff copied to
+//              them or that came with their own booking. Treated as that customer.
+//   'contact'  they typed a phone number or an email. Anybody can type anybody's, so this proves
+//              nothing: it may find the record and sign an unsigned waiver, and no more.
+//
+// Fill in what the matched customer is missing. Contact details only for a 'link' caller: writing
+// a typed phone onto a row found by somebody else's email would hand that row to whoever owns the
+// phone, because a proven phone is what My Account links a login to.
+async function backfill(db, cust, { e, p, n }, via) {
   const patch = {};
-  if (e && !cust.email) patch.email = e;
-  if (p && !cust.phone) patch.phone = p;
+  if (via === 'link' && e && !cust.email) patch.email = e;
+  if (via === 'link' && p && !cust.phone) patch.phone = p;
   if (n && !cust.name) patch.name = n;
   if (!Object.keys(patch).length) return cust;
   const { data, error } = await db.from('customers').update(patch).eq('id', cust.id).select('*').maybeSingle();
   return (!error && data) ? data : { ...cust, ...patch };   // email is unique — if it collides, keep the row as-is
 }
 
+// → { cust, via }. cust is null when nobody matched (and nothing was created).
 async function resolveCustomer(db, { customerId, bookingId, email, phone, name }, create = false) {
-  let e = (email || '').trim().toLowerCase(), p = (phone || '').trim(), n = (name || '').trim();
+  const typed = { e: (email || '').trim().toLowerCase(), p: (phone || '').trim(), n: (name || '').trim() };
   if (customerId) {
     const { data } = await db.from('customers').select('*').eq('id', customerId).maybeSingle();
-    if (data) return create ? backfill(db, data, { e, p, n }) : data;
+    if (data) return { cust: create ? await backfill(db, data, typed, 'link') : data, via: 'link' };
   }
+  // A booking link identifies by the BOOKING's own contact details, never by ones typed beside it.
+  let match = typed, via = 'contact', bk = null;
   if (bookingId && /^[0-9a-fA-F-]{10,}$/.test(bookingId)) {
-    const { data: bk } = await db.from('bookings')
-      .select('customer_email,customer_phone,customer_name').eq('id', bookingId).maybeSingle();
-    if (bk) { e = e || (bk.customer_email || '').trim().toLowerCase(); p = p || (bk.customer_phone || '').trim(); n = n || (bk.customer_name || '').trim(); }
+    ({ data: bk } = await db.from('bookings')
+      .select('customer_email,customer_phone,customer_name').eq('id', bookingId).maybeSingle());
+    const be = ((bk && bk.customer_email) || '').trim().toLowerCase(), bp = ((bk && bk.customer_phone) || '').trim();
+    if (be || bp) { match = { e: be, p: bp }; via = 'link'; }
   }
+  const n = typed.n || ((bk && bk.customer_name) || '').trim();
   // Phone-first, digits-insensitive match (email fallback) — same matcher as everything else.
-  const hit = await customerHoursByContact({ email: e, phone: p });
-  if (hit) return create ? backfill(db, hit, { e, p, n }) : hit;
+  const hit = await customerHoursByContact({ email: match.e, phone: match.p });
+  if (hit) return { cust: create ? await backfill(db, hit, { ...typed, n }, via) : hit, via };
   // Only create when there's a real identifier (an email) — never a name-only duplicate.
+  const e = typed.e || match.e, p = typed.p || match.p;
   if (create && e) {
     const { data, error } = await db.from('customers')
       .insert({ name: n || null, email: e || null, phone: p || null }).select('*').single();
-    if (!error) return data;
+    if (!error) return { cust: data, via };
   }
-  return null;
+  return { cust: null, via };
 }
 
 export async function waiver(req, res) {
@@ -410,8 +426,11 @@ export async function waiver(req, res) {
   // Status check — does this person already have a waiver on file?
   if (req.method === 'GET') {
     const q = req.query || {};
-    const cust = await resolveCustomer(db, { customerId: q.c, bookingId: q.b, email: q.e, phone: q.p }, false);
+    const { cust, via } = await resolveCustomer(db, { customerId: q.c, bookingId: q.b, email: q.e, phone: q.p }, false);
     if (!cust) return res.status(200).json({ ok: true, signed: false });
+    // A typed phone or email gets yes/no only. The name and the date would make this a public
+    // phone-number-to-person lookup — the directory the head of this file says must not exist.
+    if (via !== 'link') return res.status(200).json({ ok: true, signed: !!cust.waiver_signed_at });
     return res.status(200).json({
       ok: true,
       signed: !!cust.waiver_signed_at,
@@ -426,8 +445,11 @@ export async function waiver(req, res) {
     const signer = (name || '').trim();
     if (signer.length < 2) return res.status(400).json({ ok: false, error: 'Please enter your full name to sign.' });
 
-    const cust = await resolveCustomer(db, { customerId, bookingId, email, phone, name: signer }, true);
+    const { cust, via } = await resolveCustomer(db, { customerId, bookingId, email, phone, name: signer }, true);
     if (!cust) return res.status(400).json({ ok: false, error: 'Please enter your email so we can save your waiver to your profile.' });
+    // A waiver already on file is not replaced on the strength of a typed phone or email: that
+    // would let anyone re-sign somebody else's under any name. Staff and link holders still can.
+    if (via !== 'link' && cust.waiver_signed_at) return res.status(200).json({ ok: true, signedAt: cust.waiver_signed_at, already: true });
 
     const signedAt = new Date().toISOString();
     const code = 'W-' + signedAt.slice(0, 10).replace(/-/g, '') + '-' + String(cust.id).replace(/-/g, '').slice(0, 4).toUpperCase();
