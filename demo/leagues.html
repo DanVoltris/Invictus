@@ -45,6 +45,20 @@
   .lp-about p + p{margin-top:14px}
   .lp-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 44px}
   /* Plain ruled lists: the rule does the separating, so there are no bullets to decorate. */
+  /* Official rules: one row per numbered section, opened to read its rules. */
+  .lp-rules-intro{font-size:14.5px;line-height:1.6;color:var(--muted);margin:0 0 14px}
+  .lp-rule{border-bottom:1px solid var(--border)}
+  .lp-rule:first-of-type{border-top:1px solid var(--border)}
+  .lp-rule summary{display:flex;align-items:baseline;gap:14px;padding:14px 0;cursor:pointer;list-style:none}
+  .lp-rule summary::-webkit-details-marker{display:none}
+  .lp-rule summary:focus-visible{outline:2px solid var(--orange);outline-offset:2px;border-radius:4px}
+  .lp-rule-n{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.08em;color:var(--orange-ink);min-width:22px}
+  .lp-rule-t{flex:1;font-size:15.5px;font-weight:600;color:var(--white);line-height:1.35}
+  .lp-rule-x{width:9px;height:9px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg);align-self:center;transition:transform .15s}
+  .lp-rule[open] .lp-rule-x{transform:rotate(-135deg)}
+  .lp-rule ul{list-style:none;margin:0;padding:0 0 14px 36px}
+  .lp-rule li{font-size:14.5px;line-height:1.6;color:var(--muted);padding:5px 0}
+  @media (max-width:720px){ .lp-rule ul{padding-left:0} }
   .lp-list{list-style:none;border-top:1px solid var(--border)}
   .lp-list li{padding:11px 0;border-bottom:1px solid var(--border);font-size:15px;line-height:1.45;color:var(--white)}
 
@@ -422,6 +436,11 @@ function leaguePageHTML(lg, { back }){
             </tbody>`).join('')}
           </table>
           ${d.notice ? `<p class="lp-notice">${esc(d.notice)}</p>` : ''}</section>` : ''}
+        ${d.rules.length ? `<section class="lp-rules"><h2>Official rules</h2>
+          ${d.rules.filter(r => !r.title).map(r => r.lines.map(x => `<p class="lp-rules-intro">${esc(x)}</p>`).join('')).join('')}
+          ${d.rules.filter(r => r.title).map((r, i) => `<details class="lp-rule"><summary><span class="lp-rule-n">${i + 1}</span><span class="lp-rule-t">${esc(r.title)}</span><span class="lp-rule-x" aria-hidden="true"></span></summary>
+            <ul>${r.lines.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>`).join('')}
+        </section>` : ''}
         ${d.awards.length ? `<section><h2>Team awards</h2><ul class="lp-honours">${d.awards.map(a => `<li>${esc(a)}</li>`).join('')}</ul></section>` : ''}
         ${d.prize ? `<section><h2>Grand prize</h2><div class="lp-prize"><p>${esc(d.prize)}</p></div></section>` : ''}
         <section><h2>How it works</h2>

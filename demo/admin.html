@@ -3255,6 +3255,7 @@ function openLeagueEditor(x){
     <div class="field"><label for="li-perks">Member perks <span class="dim">(one per line — what a league member gets)</span></label><textarea class="input" id="li-perks" rows="4" placeholder="Priority booking up to 3 months in advance&#10;$5 off booking fees">${esc(info.perks.join('\n'))}</textarea></div>
     <div class="field"><label for="li-elig">Who can play <span class="dim">(one per line — shown as its own section on the league page)</span></label><textarea class="input" id="li-elig" rows="2" placeholder="No professional players allowed">${esc(info.eligibility.join('\n'))}</textarea></div>
     <div class="field"><label for="li-format">Format &amp; rules <span class="dim">(one per line)</span></label><textarea class="input" id="li-format" rows="6" placeholder="Four-person scramble&#10;2-foot concede&#10;No mulligans">${esc(info.format.join('\n'))}</textarea></div>
+    <div class="field"><label for="li-rules">Official rules <span class="dim">(start each section with a number and a dot, like “3. Team Rosters”, then its rules one per line — you can paste the rules straight from an email)</span></label><textarea class="input" id="li-rules" rows="12" placeholder="1. Regular Season Deadlines&#10;All rounds must be completed before the playoffs begin.&#10;&#10;2. Team Rosters &amp; Substitutions&#10;Substitutes are permitted during the regular season only.">${esc(InvictusLeagues.rulesText(info.rules))}</textarea></div>
     <div class="field"><label for="li-settings">League settings <span class="dim">(one per line, written as Setting: value — shown as a table)</span></label><textarea class="input" id="li-settings" rows="7" placeholder="Green firmness: Firm&#10;Tee boxes: Blue (Men) / White (Ladies)&#10;Mulligans: 0">${esc(info.settings.map(r=>r.value?`${r.label}: ${r.value}`:r.label).join('\n'))}</textarea></div>
     <div class="field"><label for="li-challenges">Featured challenges <span class="dim">(one per line)</span></label><textarea class="input" id="li-challenges" rows="4" placeholder="Mega Putt Challenge&#10;Closest to the Pin Challenge">${esc(info.challenges.join('\n'))}</textarea></div>
     <div class="field" style="margin-bottom:6px"><label>Schedule <span class="dim">(one row per week — dates, course and where it is)</span></label>
@@ -3340,7 +3341,7 @@ function openLeagueEditor(x){
       const sched=readWeeks();
       const bad=sched.findIndex(w=>w.from && w.to && w.to<w.from);
       if(bad>=0) return err(`Week ${bad+1} in the schedule ends before it starts.`);
-      details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value,
+      details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value, rules:$('#li-rules').value,
         settings:$('#li-settings').value, challenges:$('#li-challenges').value,
         schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value });
     }

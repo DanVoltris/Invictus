@@ -131,7 +131,7 @@ test('league info: lists take one item per line or an array, and lose bullets an
   assert.deepEqual(L.normalizeDetails({ eligibility: 'No professional players allowed\n' }).eligibility, ['No professional players allowed']);
   assert.equal(L.hasDetails({ eligibility: 'No professional players allowed' }), true);
   assert.deepEqual(d.awards, ['Cup Winner', 'Most Honest']);
-  assert.deepEqual(L.normalizeDetails(null), { about: '', perks: [], eligibility: [], format: [], settings: [], challenges: [], schedule: [], notice: '', awards: [], prize: '' });
+  assert.deepEqual(L.normalizeDetails(null), { about: '', perks: [], eligibility: [], format: [], rules: [], settings: [], challenges: [], schedule: [], notice: '', awards: [], prize: '' });
   assert.deepEqual(L.normalizeDetails('nonsense'), L.normalizeDetails({}));
 });
 
@@ -255,4 +255,24 @@ test('breaks: nobody is chased during a break', () => {
 test('breaks: the flag survives the clean-up as a real true, and nothing else turns it on', () => {
   const d = L.normalizeDetails({ schedule: [{ from: '2026-12-13', to: '2026-12-26', course: 'x', optional: true }, { course: 'y', optional: 'yes' }, { course: 'z' }] });
   assert.deepEqual(d.schedule.map((r) => r.optional), [true, undefined, undefined]);
+});
+
+test('official rules: pasted text becomes numbered sections, and the form gets the same text back', () => {
+  const pasted = ['Everyone follows these.', '', '1. Team Rosters & Substitutions', 'Substitutes are permitted during the regular season only.', '',
+    '• Rosters lock after Week 4.', '', '2) Playoff Eligibility', 'No substitute players.', '# Enforcement', 'Management decides.'].join('\n');
+  const d = L.normalizeDetails({ rules: pasted });
+  assert.deepEqual(d.rules, [
+    { title: '', lines: ['Everyone follows these.'] },
+    { title: 'Team Rosters & Substitutions', lines: ['Substitutes are permitted during the regular season only.', 'Rosters lock after Week 4.'] },
+    { title: 'Playoff Eligibility', lines: ['No substitute players.'] },
+    { title: 'Enforcement', lines: ['Management decides.'] },
+  ]);
+  assert.equal(L.hasDetails({ rules: pasted }), true);
+  // What is saved (the sections) and what the manager edits (the text) turn into each other.
+  assert.deepEqual(L.normalizeDetails({ rules: L.rulesText(d.rules) }).rules, d.rules);
+  assert.deepEqual(L.normalizeDetails({ rules: d.rules }).rules, d.rules);
+  // A date or a score in a rule is not mistaken for a heading, and junk is dropped.
+  assert.deepEqual(L.normalizeDetails({ rules: '1. Deadlines\nFebruary 20, 2027, is the deadline.\n2027 is the year.' }).rules,
+    [{ title: 'Deadlines', lines: ['February 20, 2027, is the deadline.', '2027 is the year.'] }]);
+  assert.deepEqual(L.normalizeDetails({ rules: [null, { title: '  ', lines: [' '] }, 7] }).rules, []);
 });

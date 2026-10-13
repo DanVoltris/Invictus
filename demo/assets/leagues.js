@@ -242,7 +242,8 @@
      week-by-week schedule with a note per week, a notice under it, team awards and the grand prize. One shape and one clean-up, used by the manager's form, the customer page and the
      server — so nothing oversized or malformed is ever saved or shown. Lists come in as arrays or
      as text with one item per line; a leading bullet is dropped, so a pasted brochure line works. */
-  const INFO_LIMITS = { about: 2000, prize: 2000, notice: 800, items: 60, item: 200, weeks: 60, note: 240 };
+  const INFO_LIMITS = { about: 2000, prize: 2000, notice: 800, items: 60, item: 200, weeks: 60, note: 240,
+    ruleSections: 30, ruleLines: 30, rule: 600 };
   function normalizeDetails(raw) {
     const d = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     const line = (v, max) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, max);
@@ -256,6 +257,30 @@
       const t = String(x == null ? '' : x).replace(/^\s*[•·\-*–—]+\s*/, ''), i = t.indexOf(':');
       return i < 0 ? { label: line(t, 60), value: '' } : { label: line(t.slice(0, i), 60), value: line(t.slice(i + 1), INFO_LIMITS.item) };
     }).filter((r) => r.label).slice(0, INFO_LIMITS.items);
+    // The official rules: numbered sections, each a heading and its rules. Given as
+    // [{ title, lines }] or as text the manager types or pastes — a line that starts with a number
+    // and a dot ("3. Team Rosters") or with # is a heading, every other line is a rule under the
+    // heading above it. Lines before the first heading are the introduction (a section with no title).
+    const rules = [];
+    if (Array.isArray(d.rules)) {
+      d.rules.forEach((x) => {
+        const o = x && typeof x === 'object' ? x : {};
+        rules.push({ title: line(o.title, 120), lines: (Array.isArray(o.lines) ? o.lines : []).map((l) => line(l, INFO_LIMITS.rule)).filter(Boolean).slice(0, INFO_LIMITS.ruleLines) });
+      });
+    } else {
+      String(d.rules == null ? '' : d.rules).split('\n').forEach((raw) => {
+        const t = line(raw, INFO_LIMITS.rule);
+        if (!t) return;
+        const head = /^(?:#+\s*|\d{1,2}[.)]\s+)(.+)$/.exec(t);
+        if (head) rules.push({ title: line(head[1], 120), lines: [] });
+        else {
+          if (!rules.length) rules.push({ title: '', lines: [] });
+          const cur = rules[rules.length - 1];
+          if (cur.lines.length < INFO_LIMITS.ruleLines) cur.lines.push(t.replace(/^\s*[•·\-*–—]+\s*/, ''));
+        }
+      });
+    }
+    const ruleSections = rules.filter((r) => r.title || r.lines.length).slice(0, INFO_LIMITS.ruleSections);
     const date = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(Date.parse(`${v}T00:00:00Z`)) ? String(v) : null);
     const schedule = (Array.isArray(d.schedule) ? d.schedule : []).map((w) => {
       const x = w && typeof w === 'object' ? w : {};
@@ -264,13 +289,19 @@
       return { from, to, phase: line(x.phase, 60), event: line(x.event, 80), course: line(x.course, 120), location: line(x.location, 120),
         note: line(x.note, INFO_LIMITS.note), ...(x.optional === true || x.optional === 'true' ? { optional: true } : {}) };
     }).filter((w) => w.from || w.event || w.course || w.note).slice(0, INFO_LIMITS.weeks);
-    return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), eligibility: list(d.eligibility), format: list(d.format), settings,
+    return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), eligibility: list(d.eligibility), format: list(d.format), rules: ruleSections, settings,
       challenges: list(d.challenges), schedule, notice: para(d.notice, INFO_LIMITS.notice),
       awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize) };
   }
+  // The rules back as the text the manager edits: "1. Heading", its rules one per line, a blank
+  // line between sections. normalizeDetails({ rules: rulesText(x) }) gives x back.
+  function rulesText(rules) {
+    let n = 0;
+    return (rules || []).map((r) => [r.title ? `${++n}. ${r.title}` : null, ...(r.lines || [])].filter((x) => x != null).join('\n')).join('\n\n');
+  }
   function hasDetails(raw) {
     const d = normalizeDetails(raw);
-    return !!(d.about || d.prize || d.notice || d.perks.length || d.eligibility.length || d.format.length || d.settings.length
+    return !!(d.about || d.prize || d.notice || d.perks.length || d.eligibility.length || d.format.length || d.rules.length || d.settings.length
       || d.challenges.length || d.schedule.length || d.awards.length);
   }
   // "Nov 1 – 7", "Nov 29 – Dec 5", "Dec 27 – Jan 2". Dates are plain calendar days, never shifted
@@ -298,5 +329,5 @@
   root.InvictusLeagues = { DAY_NAMES, timeLabel, scheduleLabel, weekOf, weeks, currentWeek, progress,
     teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName,
     seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
-    weekIn, weekStartOf };
+    weekIn, weekStartOf, rulesText };
 })(typeof window !== 'undefined' ? window : globalThis);

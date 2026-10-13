@@ -194,7 +194,7 @@
       "Oldest Participant",
       "Bottom 20 Draw"
     ],
-    "prize": "3 teams (guaranteed) going to the trip: 1 champions and 2 random draw.\n\nThe participant or team with the highest hour booked during the league season will also receive a spot on the trip. (4 person max)\n\nMore details will be announced closer to the tournament date.",
+    "prize": "3 teams (guaranteed) going to the trip: 1 champions and 2 random draw.\n\nThe team with the most eligible hours played during the league season will also receive a spot on the trip (4 person max). See rule 10 for what counts.\n\nMore details will be announced closer to the tournament date.",
     "perks": [
       "Priority booking up to 3 months in advance",
       "$5 off booking fees",
@@ -236,6 +236,137 @@
         "value": "0"
       }
     ],
-    "notice": "Course notice: All scheduled courses are subject to change based on availability, simulator updates, or league requirements. Any changes will be communicated to participants in advance whenever possible."
+    "notice": "Course notice: All scheduled courses are subject to change based on availability, simulator updates, or league requirements. Any changes will be communicated to participants in advance whenever possible.",
+    "rules": [
+      {
+        "title": "",
+        "lines": [
+          "All participating teams and players are responsible for reviewing and following the rules outlined below. These regulations are in place to ensure fair competition, accurate scoring, and a consistent experience for all participants."
+        ]
+      },
+      {
+        "title": "Regular Season Deadlines & Scheduling",
+        "lines": [
+          "February 20, 2027, is the final deadline for completing all regular season rounds. All rounds must be completed before the playoffs begin.",
+          "Teams are encouraged to complete their rounds during their designated weeks.",
+          "If a team is unable to complete a round during its scheduled week, it may be played during another week, provided all regular season rounds are completed by February 20.",
+          "Any regular season rounds not completed by the deadline will not count toward the team's final standings."
+        ]
+      },
+      {
+        "title": "Player Participation & Stroke Requirements",
+        "lines": [
+          "Every participating team member must take their own stroke during each applicable turn in the four-person scramble format.",
+          "A single player is not permitted to take multiple strokes on behalf of other team members.",
+          "Teams competing with fewer than four players may only take the number of strokes corresponding to the number of players physically present and signed into the simulator.",
+          "Four players present = Four strokes.",
+          "Three players present = Three strokes.",
+          "Two players present = Two strokes.",
+          "Teams are strictly prohibited from signing in absent players to receive additional strokes.",
+          "Any violation of these participation requirements may result in the round being invalidated."
+        ]
+      },
+      {
+        "title": "Team Rosters & Substitutions",
+        "lines": [
+          "Substitute players are permitted during the regular season only.",
+          "Substitutes are strictly prohibited during playoffs. Only officially registered team members may participate in playoff rounds.",
+          "A player may only be registered to one team throughout the season.",
+          "Registered players cannot compete as substitutes for another team, regardless of circumstances.",
+          "Teams may make adjustments to their official roster during the first four weeks of regular season play.",
+          "All rosters will be locked following Week 4. No further roster changes will be permitted.",
+          "Teams are responsible for ensuring their roster information is accurate before the roster lock deadline."
+        ]
+      },
+      {
+        "title": "Official Round Setup & Staff Authorization",
+        "lines": [
+          "All official Winter League rounds must be set up by an Invictus Golf staff member.",
+          "Teams are not permitted to independently configure or initiate their official league rounds.",
+          "Any round started without staff authorization or assistance will be considered invalid, regardless of the final score.",
+          "Invalid rounds must be replayed in their entirety.",
+          "Teams must notify staff before beginning each official league round."
+        ]
+      },
+      {
+        "title": "Scorecard Submission & Verification",
+        "lines": [
+          "At the completion of every official league round, the team captain is responsible for submitting the following:",
+          "A clear photograph of the final simulator scoreboard.",
+          "The completed physical scorecard, handed directly to a staff member.",
+          "Both submissions are required for score verification and official leaderboard updates.",
+          "Failure to provide the required documentation may result in the score being withheld until verified."
+        ]
+      },
+      {
+        "title": "Booking Times & Round Completion",
+        "lines": [
+          "Teams are responsible for booking sufficient time to complete their entire round.",
+          "All 18 holes must be completed before the team's allotted booking time expires.",
+          "If a team fails to finish its round within its reserved time, the incomplete round will not count.",
+          "The team must book another session and replay the round in its entirety.",
+          "Teams are responsible for managing their pace of play and ensuring they can complete the round within their booking period."
+        ]
+      },
+      {
+        "title": "Skipped Holes & Round Integrity",
+        "lines": [
+          "Every hole must be played and completed in its entirety.",
+          "Intentionally skipping any hole will result in the entire round being declared invalid.",
+          "Teams may not bypass difficult holes or manually advance through holes to improve their score or save time.",
+          "Invalid rounds must be replayed in full."
+        ]
+      },
+      {
+        "title": "Simulator Malfunctions & Technical Issues",
+        "lines": [
+          "If a simulator freezes, crashes, or experiences a technical malfunction during an official league round, players must immediately notify an Invictus Golf staff member.",
+          "Players must not attempt to independently restart or manipulate the simulator.",
+          "Staff will assist with rebooting the simulator and restoring the round.",
+          "If necessary, the team will resume play from the beginning of the hole where the malfunction occurred.",
+          "Teams will not be penalized for legitimate technical issues when staff have been notified and the issue has been verified."
+        ]
+      },
+      {
+        "title": "Registration Fees & Eligibility",
+        "lines": [
+          "All league registration fees must be paid in full before a team's first official regular season round.",
+          "Teams with outstanding registration fees will not be permitted to begin official league play.",
+          "Only officially registered team members are eligible to receive league prizes, including: end-of-season golf trips, tournament placement prizes, random prize draws, individual competition prizes, and other league-exclusive rewards.",
+          "Substitute players are not eligible for league prizes unless they become official registered team members before the Week 4 roster deadline."
+        ]
+      },
+      {
+        "title": "Cumulative Hours Played – Team Trip Prize",
+        "lines": [
+          "The team accumulating the most eligible hours of play at Invictus Golf during the competition period will qualify for the cumulative hours trip prize.",
+          "Teams may accumulate eligible hours through regular league rounds and additional recreational bookings outside the league.",
+          "At least two of the team's four officially registered members must be physically present and participating for a session to count toward the team's cumulative hours.",
+          "Hours will be credited toward the team total rather than individual player totals.",
+          "Cancellations, no-shows, and unused booking time will not count toward the cumulative hours prize.",
+          "Only actual eligible playing time will be counted.",
+          "Substitute players cannot independently accumulate hours toward another team's total.",
+          "All qualifying hours are subject to verification through Invictus Golf's booking records."
+        ]
+      },
+      {
+        "title": "Playoff Eligibility",
+        "lines": [
+          "Only officially registered players listed on the team's locked roster are permitted to compete during playoffs.",
+          "No substitute players will be allowed under any circumstances.",
+          "Teams must comply with all official stroke requirements, round setup procedures, and scorecard submission rules throughout the playoffs.",
+          "Any playoff round found to violate these regulations may be invalidated."
+        ]
+      },
+      {
+        "title": "Enforcement & Final Decisions",
+        "lines": [
+          "Invictus Golf reserves the right to review and verify all league scores, player participation, roster eligibility, and cumulative playing hours.",
+          "Any team found intentionally manipulating scores, misrepresenting player participation, or attempting to gain an unfair competitive advantage may face penalties, including round invalidation, loss of points, prize disqualification, or removal from the league.",
+          "All disputes and rule violations will be reviewed by league management. Final decisions regarding scoring, eligibility, and enforcement will be made by Invictus Golf management.",
+          "By participating in the 2026–2027 Invictus Golf Winter League, all players and teams agree to abide by these official rules and regulations."
+        ]
+      }
+    ]
   }
 }
