@@ -732,7 +732,8 @@ function teamCard(t, idx, opts){
     const r = cur.round;
     now = `<div class="week-now is-booked"><div class="t-k">This week's round · week ${cur.number} of ${weeks.length}</div>
       <div class="wn-main">${esc(fmtDate(r.booking_date))}${r.start_min!=null ? ' · ' + esc(hhmm(r.start_min)) + '–' + esc(hhmm(r.end_min)) : ''}</div>
-      <div class="wn-sub">${esc(bayName(r.bay_id))} · booked. Anyone on the team can turn up — you do not each need a booking.</div></div>`;
+      <div class="wn-sub">${esc(bayName(r.bay_id))} · booked. Anyone on the team can turn up — you do not each need a booking.
+        <b>Tell staff before you start</b>: they set up every official league round. Afterwards the captain hands in the scorecard and adds the scoreboard photo below.</div></div>`;
   } else if(cur.off){
     // A break in the schedule (the holidays, say): no round is expected, and none is missed.
     now = `<div class="week-now"><div class="t-k">This week · week ${cur.number} of ${weeks.length}</div>
@@ -747,11 +748,37 @@ function teamCard(t, idx, opts){
       <a class="btn btn-primary" href="/?league-round=1">Book this week's round</a></div>`;
   }
 
+  // The league's own rules, as far as they have a date on them (the manager sets these on the
+  // league form): a missed week to make up, the roster lock, the deadline, the playoffs.
+  const kd = L.leagueDates(lg);
+  const daysTo = iso => Math.round((Date.parse(iso + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 864e5);
+  const nextRound = L.roundTarget({ league: lg, weeks, dateISO: today });
+  const locked = L.rosterLocked(lg, today);
+  const notes = [];
+  if(nextRound.ok && nextRound.makeup){
+    notes.push(['is-owed', `<b>Week ${nextRound.week.number} to make up.</b> Your team missed week ${nextRound.week.number} (${esc(shortDate(nextRound.week.start))} – ${esc(shortDate(nextRound.week.end))}). Rounds are played in order, so the next league round you book counts for it, and then you carry on with the weeks after.${kd.regularEnd ? ` Every regular-season round has to be played by ${esc(fmtDate(kd.regularEnd))}.` : ''} <a href="/?league-round=1" style="color:var(--orange);font-weight:600">Book the make-up round</a>`]);
+  }
+  if(kd.rosterLockOn){
+    const d = daysTo(kd.rosterLockOn);
+    if(d < 0) notes.push(['', `<b>Rosters are locked.</b> They locked after week ${kd.rosterLockWeek} (${esc(fmtDate(kd.rosterLockOn))}), so players and substitutes can no longer be added or changed. Call the shop at 204-488-6177 if something needs correcting.`]);
+    else if(d <= 7) notes.push(['is-owed', `<b>Rosters lock after ${esc(fmtDate(kd.rosterLockOn))}</b> (the end of week ${kd.rosterLockWeek}). Add or change your players and substitutes before then. After it no roster changes are allowed, and a substitute who is not made a full team member by then cannot win league prizes.`]);
+  }
+  if(kd.regularEnd){
+    const d = daysTo(kd.regularEnd);
+    if(d >= 0 && d <= 14) notes.push(['is-owed', `<b>The regular season ends ${esc(fmtDate(kd.regularEnd))}.</b> Any round not played by then does not count toward your standings.`]);
+  }
+  if(kd.playoffsStart){
+    const d = daysTo(kd.playoffsStart);
+    if(d <= 0 && (!lg.season_end || today <= lg.season_end)) notes.push(['', '<b>Playoffs.</b> Only your team’s registered players may play. Substitutes cannot play in a playoff round under any circumstances.']);
+    else if(d > 0 && d <= 7) notes.push(['is-owed', `<b>Playoffs start ${esc(fmtDate(kd.playoffsStart))}.</b> Substitutes are not allowed in the playoffs: only your team’s registered players can play.`]);
+  }
+  const ruleNotes = notes.map(([cls, html]) => `<div class="lg-note ${cls}" style="margin-top:10px">${html}</div>`).join('');
+
   const weekRows = weeks.map(w => {
     const what = w.round
-      ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${w.score!=null ? ` · <b>${esc(w.score)}</b>` : ''}`
+      ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${(w.round.booking_date && L.weekIn(lg, w.round.booking_date) !== w.start) ? ' · make-up' : ''}${w.score!=null ? ` · <b>${esc(w.score)}</b>` : ''}`
       : w.off ? 'Break: no round needed'
-      : w.missed ? 'Missed — not played'
+      : w.missed ? ((kd.regularEnd && today > kd.regularEnd) ? 'Missed, not played' : 'Missed: to make up')
       : w.current ? 'Not booked yet'
       : 'To come';
     return `<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}">
@@ -853,10 +880,11 @@ function teamCard(t, idx, opts){
     <div class="sub" style="margin-bottom:12px">${esc(lg.name || 'League')}${lg.description ? ' · ' + esc(lg.description) : ''}${
       (lg.id && L.hasDetails(lg.details)) ? ` · <a href="/leagues?info=${encodeURIComponent(lg.id)}" style="color:var(--orange);font-weight:600">Rules, schedule &amp; prizes</a>` : ''}</div>
     ${iAmSub ? '<div class="lg-note" style="margin-bottom:12px">You are a <b>substitute</b> for this team: you fill in when a teammate is away. The team’s players book the weekly round.</div>' : now}
+    ${ruleNotes}
     <div class="sec-title">On the team</div>
     ${chips}
     ${seatsBlock}
-    ${iAmSub ? '' : invite}
+    ${iAmSub ? '' : (locked && iAmCaptain !== false ? '' : invite)}
     ${subsBlock}
     <div class="sec-title">Week by week</div>
     ${weeks.length ? `<div class="sched">${weekRows}</div>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`

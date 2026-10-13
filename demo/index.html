@@ -2284,7 +2284,7 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape' && $('#wl-overlay'
 
    Migration 0031 may not be applied. Everything below is skipped silently in that case: no banner,
    no panel, and the page books exactly as it did before. */
-const LEAGUE_REFUSALS = ['round_booked', 'not_on_team', 'no_team', 'sign_in', 'outside_season'];
+const LEAGUE_REFUSALS = ['round_booked', 'not_on_team', 'no_team', 'sign_in', 'outside_season', 'fees_unpaid', 'after_deadline'];
 let LG = { teams: [], armed: null, intent: false, note: null };
 
 const todayISO = () => { const w = winnipegNow(); return `${w.y}-${pad(w.mo)}-${pad(w.d)}`; };
@@ -2312,8 +2312,8 @@ async function loadLeagueRound(){
     const weeks = (Array.isArray(t.weeks) && t.weeks.length ? t.weeks
       : LEA.teamWeeks({ league: lg, todayISO: today, rounds: t.rounds || team.rounds || [] }))
       .map(w => ({ ...w, round: w.round || null, current: w.start === thisWeek }));
-    return { teamId: team.id, teamName: team.name || 'your team', leagueName: lg.name || 'the league',
-             minMins: lg.weekly_min_mins || 180, weeks, weekStart: LEA.weekStartOf(lg) };
+    return { teamId: team.id, teamName: team.name || 'your team', leagueName: lg.name || 'the league', league: lg,
+             minMins: lg.weekly_min_mins || 180, weeks, weekStart: LEA.weekStartOf(lg), sub: !!team.sub };
   }).filter(t => t.teamId);
   renderLeagueBar();
   if(LG.intent) scrollToTimes();
@@ -2323,9 +2323,16 @@ async function loadLeagueRound(){
 function renderLeagueBar(){
   const host = $('#lg-bar'); if(!host) return;
   if(!LG.teams.length){ host.style.display='none'; host.innerHTML=''; return; }
-  const open = LG.teams.filter(t => { const c = t.weeks.find(w => w.current); return c && !c.round; });
+  const LEA = window.InvictusLeagues;
+  // What a league round booked TODAY would count for: the earliest week not played (a missed week
+  // first), or nothing when the team is up to date. The same rule the server applies at checkout.
+  const next = t => LEA.roundTarget({ league: t.league, weeks: t.weeks, dateISO: todayISO() });
+  const open = LG.teams.filter(t => !t.sub && next(t).ok);
   const lines = LG.teams.map(t => {
-    const c = t.weeks.find(w => w.current);
+    const c = t.weeks.find(w => w.current), n = next(t);
+    if(t.sub) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b>: you are a substitute, so the team's players book the league round. Anything you book here is an ordinary session.</div>`;
+    if(n.code === 'after_deadline') return `<div class="lg-line"><b>${escHtml(t.teamName)}</b>: the regular season ended on ${escHtml(longDate(n.regularEnd))}${n.playoffsStart ? `, and playoffs start ${escHtml(longDate(n.playoffsStart))}` : ''}. A booking now is an ordinary session.</div>`;
+    if(n.ok && n.makeup) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> has a missed round to make up: <b>week ${n.week.number}</b> (${escHtml(weekLabel(n.week))}). Your next league round counts for it, then you carry on with the weeks after. Pick any open time below and choose your team at checkout.</div>`;
     if(!c) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> — ${escHtml(t.leagueName)} is not running this week, so a booking now is an ordinary session.</div>`;
     if(c.round) return `<div class="lg-line">✓ <b>${escHtml(t.teamName)}</b> has this week's round booked — <b>${escHtml(roundLine(c.round))}</b>. That is week ${c.number} of ${t.weeks.length} done; anything else you book here is an ordinary session.</div>`;
     return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> has not played week ${c.number} of ${t.weeks.length} yet. You have until ${escHtml(longDate(c.end))}. Pick any open time below and choose your team at checkout: it counts as your round and the <b>league discount</b> comes off the price. Any player on the team can book it.</div>`;
@@ -2342,17 +2349,20 @@ function renderLeagueBar(){
 // does not; a date outside a team's season belongs to neither list.
 function leagueChoices(){
   const LEA = window.InvictusLeagues;
-  const out = { open: [], taken: [] };
+  const out = { open: [], taken: [], closed: [] };
   if(!LEA || !LG.teams.length || !state.date) return out;
   // The week the session really falls in: a 1 AM Monday start is next week's round (0038).
   const day = state.startMin!=null ? realSlot().dateISO : isoDate(state.date);
   for(const t of LG.teams){
-    const wk = LEA.weekOf(day, t.weekStart);   // that league's own week (0040)
-    const w = (t.weeks || []).find(x => x.start === wk);
-    if(!w) continue;
-    const entry = { teamId:t.teamId, teamName:t.teamName, leagueName:t.leagueName, minMins:t.minMins,
-                    week:w, round:w.round, weeksTotal:t.weeks.length };
-    (w.round ? out.taken : out.open).push(entry);
+    if(t.sub) continue;                        // a substitute does not book the team's round
+    // The week this round would count for: the earliest one the team has not played (a missed week
+    // is made up first), in that league's own weeks (0040, 0042).
+    const n = LEA.roundTarget({ league: t.league, weeks: t.weeks || [], dateISO: day });
+    if(n.code === 'outside_season') continue;
+    const base = { teamId:t.teamId, teamName:t.teamName, leagueName:t.leagueName, minMins:t.minMins, weeksTotal:t.weeks.length };
+    if(n.ok) out.open.push({ ...base, week:n.week, round:null, makeup:!!n.makeup });
+    else if(n.code === 'after_deadline') out.closed.push({ ...base, regularEnd:n.regularEnd, playoffsStart:n.playoffsStart });
+    else if(n.existing) out.taken.push({ ...base, week:(t.weeks.find(x => x.start === LEA.weekOf(day, t.weekStart)) || {}), round:n.existing });
   }
   return out;
 }
@@ -2375,10 +2385,12 @@ function renderLeaguePanel(){
     const off = (piCache && piCache.key===bookingKey()) ? (piCache.leagueDiscountCents||0) : 0;
     host.innerHTML = `<div class="lg-panel is-armed">
       <div class="lg-t">League round</div>
-      <div class="lg-d">This booking counts as <b>${escHtml(a.teamName)}</b>'s round for the week. You pay for the bay as usual, less the league discount. Everyone on the team sees it, and any of you can turn up.</div>
+      <div class="lg-d">${a.makeup
+        ? `This booking is <b>${escHtml(a.teamName)}</b>'s make-up round for <b>week ${a.week.number}</b>, which the team missed. Rounds are played in order, so it counts for that week first.`
+        : `This booking counts as <b>${escHtml(a.teamName)}</b>'s round for the week.`} You pay for the bay as usual, less the league discount. <b>Tell staff before you start</b>: they set up every official league round.</div>
       <ul class="lg-facts">
         <li><span class="k">Team</span><span class="v">${escHtml(a.teamName)} · ${escHtml(a.leagueName)}</span></li>
-        <li><span class="k">Counts as</span><span class="v">Week ${a.week.number} of ${a.weeksTotal} · ${escHtml(weekLabel(a.week))}</span></li>
+        <li><span class="k">Counts as</span><span class="v">Week ${a.week.number} of ${a.weeksTotal} · ${escHtml(weekLabel(a.week))}${a.makeup ? ' · make-up' : ''}</span></li>
         ${off>0 ? `<li><span class="k">League discount</span><span class="v" style="color:#067647">−${escHtml(money(off/100))}</span></li>` : ''}
       </ul>
       <a class="lg-off" id="lg-off">No, book this as an ordinary session</a>
@@ -2387,24 +2399,29 @@ function renderLeaguePanel(){
     return;
   }
 
-  const { open, taken } = leagueChoices();
+  const { open, taken, closed } = leagueChoices();
   if(open.length){
     const one = open.length === 1;
     host.innerHTML = `<div class="lg-panel is-offer">
       <div class="lg-t">Is this your league round?</div>
       <div class="lg-d">${one
-        ? `<b>${escHtml(open[0].teamName)}</b> has not played week ${open[0].week.number} of ${escHtml(open[0].leagueName)} (${escHtml(weekLabel(open[0].week))}) yet. Count this booking as the round and the <b>league discount</b> comes off the price.`
+        ? (open[0].makeup
+          ? `<b>${escHtml(open[0].teamName)}</b> missed week ${open[0].week.number} of ${escHtml(open[0].leagueName)} (${escHtml(weekLabel(open[0].week))}). Count this booking as that make-up round and the <b>league discount</b> comes off the price.`
+          : `<b>${escHtml(open[0].teamName)}</b> has not played week ${open[0].week.number} of ${escHtml(open[0].leagueName)} (${escHtml(weekLabel(open[0].week))}) yet. Count this booking as the round and the <b>league discount</b> comes off the price.`)
         : 'You are on more than one team with a round still to play that week. Say which team this booking is for and the <b>league discount</b> comes off the price.'}</div>
       ${open.map((o,i) => `<button type="button" class="btn btn-line" data-arm="${i}">${one
-        ? 'Yes, this is our league round' : `${escHtml(o.teamName)} · week ${o.week.number}`}</button>`).join('')}
+        ? (o.makeup ? `Yes, this is our week ${o.week.number} make-up` : 'Yes, this is our league round') : `${escHtml(o.teamName)} · week ${o.week.number}${o.makeup ? ' make-up' : ''}`}</button>`).join('')}
     </div>`;
     host.querySelectorAll('[data-arm]').forEach(b => { b.onclick = () => armLeague(open[+b.dataset.arm]); });
     return;
   }
-  if(taken.length){
+  if(taken.length || closed.length){
     host.innerHTML = taken.map(t => `<div class="lg-panel is-note">
-      <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)} has already played that week</div>
-      <div class="lg-d">Week ${t.week.number} is booked: <b>${escHtml(roundLine(t.round))}</b>. A team plays one league round a week, so this one is an ordinary session at the normal price.</div>
+      <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)} is up to date</div>
+      <div class="lg-d">${t.week.number ? `Week ${t.week.number} is booked` : 'That week is booked'}: <b>${escHtml(roundLine(t.round))}</b>, and there is no missed week to make up. So this one is an ordinary session at the normal price.</div>
+    </div>`).join('') + closed.map(t => `<div class="lg-panel is-note">
+      <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)}: the regular season is over</div>
+      <div class="lg-d">Regular-season rounds had to be played by <b>${escHtml(longDate(t.regularEnd))}</b>${t.playoffsStart ? `, and playoffs start ${escHtml(longDate(t.playoffsStart))}` : ''}. This one is an ordinary session at the normal price.</div>
     </div>`).join('');
     return;
   }
@@ -2442,7 +2459,7 @@ function noteLeagueRound(conf){
   LG.armed = null;
   const counted = !(conf && conf.leagueRound && conf.leagueRound.counted === false);
   $('#conf-msg').textContent += counted
-    ? ` This is ${a.teamName}'s league round for week ${a.week.number}. Everyone on the team can see it on My Account.`
+    ? ` This is ${a.teamName}'s ${a.makeup ? 'make-up round' : 'league round'} for week ${a.week.number}. Tell staff before you start so they can set the round up, and add your scoreboard photo on My Account afterwards.`
     : ` A teammate booked ${a.teamName}'s league round for that week just before you, so this one is an ordinary session, not a second round.`;
   if(counted) $('#conf-recap').insertAdjacentHTML('afterbegin',
     `<div class="row"><span class="k">League round</span><span>${escHtml(a.teamName)} · week ${a.week.number} of ${a.weeksTotal}</span></div>`);

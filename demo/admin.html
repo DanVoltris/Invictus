@@ -3084,12 +3084,15 @@ let LG_TEAM_BY_ID = {};    // team_id -> the same object
 async function loadLeagueIndex(){
   LEAGUE_INDEX = {}; LG_TEAMS = []; LG_TEAM_BY_ID = {};
   const [l, m, t, probe] = await Promise.all([
-    sb.from('leagues').select('id,name,is_active,season_start,season_end,team_mode,bay_ids'),
+    // Every column: the day the league week starts (0040) and its key dates (details.dates) decide
+    // which week a round counts for, and neither exists on an older database.
+    sb.from('leagues').select('*'),
     sb.from('league_members').select('customer_id,league_id,status').eq('status','active'),
     sb.from('league_teams').select('id,name,league_id').order('name'),
     sb.from('bookings').select('id,league_team_id').limit(1),   // has migration 0031 been run?
   ]);
   LG31.rounds = !probe.error;
+  LG42.makeups = !(await sb.from('bookings').select('id,league_for_week').limit(1)).error;   // …and 0042?
   if(l.error || m.error) return;   // migration 0028 not applied: nobody is in a league yet
   const today=todayISO();
   const currentLeagues=(l.data||[]).filter(x=>LG().isCurrent(x,today));
@@ -3255,6 +3258,15 @@ function openLeagueEditor(x){
     <div class="field"><label for="li-perks">Member perks <span class="dim">(one per line — what a league member gets)</span></label><textarea class="input" id="li-perks" rows="4" placeholder="Priority booking up to 3 months in advance&#10;$5 off booking fees">${esc(info.perks.join('\n'))}</textarea></div>
     <div class="field"><label for="li-elig">Who can play <span class="dim">(one per line — shown as its own section on the league page)</span></label><textarea class="input" id="li-elig" rows="2" placeholder="No professional players allowed">${esc(info.eligibility.join('\n'))}</textarea></div>
     <div class="field"><label for="li-format">Format &amp; rules <span class="dim">(one per line)</span></label><textarea class="input" id="li-format" rows="6" placeholder="Four-person scramble&#10;2-foot concede&#10;No mulligans">${esc(info.format.join('\n'))}</textarea></div>
+    <div class="sec-h" style="margin:18px 0 8px">Rules the site enforces</div>
+    <div class="dim" style="font-size:12.5px;margin:-2px 0 10px">Each one is optional. Leave a box empty (or the switch off) and the site does not enforce that rule.</div>
+    <div class="grid2">
+      <div class="field"><label for="li-regend">Regular season ends <span class="dim">(last day a regular round counts)</span></label><input class="input" id="li-regend" type="date" value="${esc((info.dates||{}).regularEnd||'')}" /></div>
+      <div class="field"><label for="li-playoffs">Playoffs start <span class="dim">(no substitutes from this day)</span></label><input class="input" id="li-playoffs" type="date" value="${esc((info.dates||{}).playoffsStart||'')}" /></div>
+    </div>
+    <div class="field"><label for="li-lock">Rosters lock after week <span class="dim">(captains can’t add players or substitutes after it; staff still can)</span></label><input class="input" id="li-lock" type="number" min="1" max="60" step="1" style="max-width:140px" placeholder="e.g. 4" value="${esc((info.dates||{}).rosterLockWeek||'')}" /></div>
+    ${switchRow('li-fees','Fees before the first round','A team that still owes any of its league fee can’t book a league round until it is paid in full.',!!(info.dates||{}).feesFirst)}
+    <div class="dim" style="font-size:12.5px;margin:8px 0 14px">Captains are texted a week before rosters lock and a week before the playoffs. A team that missed a week plays that round first, then the next (make-up rounds), up to the regular-season deadline.</div>
     <div class="field"><label for="li-rules">Official rules <span class="dim">(start each section with a number and a dot, like “3. Team Rosters”, then its rules one per line — you can paste the rules straight from an email)</span></label><textarea class="input" id="li-rules" rows="12" placeholder="1. Regular Season Deadlines&#10;All rounds must be completed before the playoffs begin.&#10;&#10;2. Team Rosters &amp; Substitutions&#10;Substitutes are permitted during the regular season only.">${esc(InvictusLeagues.rulesText(info.rules))}</textarea></div>
     <div class="field"><label for="li-settings">League settings <span class="dim">(one per line, written as Setting: value — shown as a table)</span></label><textarea class="input" id="li-settings" rows="7" placeholder="Green firmness: Firm&#10;Tee boxes: Blue (Men) / White (Ladies)&#10;Mulligans: 0">${esc(info.settings.map(r=>r.value?`${r.label}: ${r.value}`:r.label).join('\n'))}</textarea></div>
     <div class="field"><label for="li-challenges">Featured challenges <span class="dim">(one per line)</span></label><textarea class="input" id="li-challenges" rows="4" placeholder="Mega Putt Challenge&#10;Closest to the Pin Challenge">${esc(info.challenges.join('\n'))}</textarea></div>
@@ -3343,7 +3355,11 @@ function openLeagueEditor(x){
       if(bad>=0) return err(`Week ${bad+1} in the schedule ends before it starts.`);
       details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value, rules:$('#li-rules').value,
         settings:$('#li-settings').value, challenges:$('#li-challenges').value,
-        schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value });
+        schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value,
+        dates:{ regularEnd:$('#li-regend').value, playoffsStart:$('#li-playoffs').value, rosterLockWeek:$('#li-lock').value, feesFirst:$('#li-fees').checked } });
+      const kd=details.dates||{};
+      if(kd.regularEnd && kd.playoffsStart && kd.playoffsStart<=kd.regularEnd) return err('Playoffs have to start after the regular season ends.');
+      if($('#li-lock').value.trim() && !kd.rosterLockWeek) return err('“Rosters lock after week” needs a whole week number, like 4.');
     }
     const row={ name, description:$('#le-desc').value.trim()||null,
       season_start:from, season_end:to, bay_ids:[...bays], fee_cents:fee, scoring:$('#le-scoring').value,
@@ -3393,6 +3409,8 @@ let LG31 = { league:true, rounds:true, min:true, info:true, week:true };
 // Migration 0041: designated substitutes. Until it is run there is no role to write, so the
 // "Add substitute" button is not offered.
 let LG41 = { subs:true };
+// Migration 0042: make-up rounds (bookings.league_for_week) and scorecard photos.
+let LG42 = { makeups:true };
 const LEAGUE_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];   // 0031 columns: on leagues (loadLeaguesTab) / on bookings (loadLeagueIndex)
 
 // The person staff ring about a team: its captain, or failing that whoever joined first.
@@ -3407,7 +3425,7 @@ const teamPaid = t => !!(t.paid_at || t.paid_cents>0);
 // a row read before migration 0031 filled it in.
 // The league week a round falls in. With the league, it is worked out from the day it was booked
 // for and that league's start day (migration 0040); without, from what the database stored.
-const roundWeek = (r, league) => league ? LG().weekIn(league, r.booking_date) : (r.league_week || LG().weekOf(r.booking_date));
+const roundWeek = (r, league) => league ? LG().roundWeek(league, r) : (r.league_week || LG().weekOf(r.booking_date));
 const weekLabel = w => `${shortDate2(w.start)} – ${shortDate2(w.end)}`;
 function roundText(r){
   return `${esc(shortDate2(r.booking_date))} · ${esc(LG().timeLabel(r.start_min))}–${esc(LG().timeLabel(r.end_min))} · ${esc(bayName(r.bay_id))}`;
@@ -3435,14 +3453,6 @@ const leagueOffPerHourCents = () => { const v=((SETTINGS && SETTINGS.booking_win
 const leagueRoundOffCents = b => Math.round(leagueOffPerHourCents()*Math.max(0,(b.end_min-b.start_min))/60);
 const leagueTeamLabel = id => { const t=LG_TEAM_BY_ID[id]; return t ? `${t.league.name} · ${t.name}` : 'League round'; };
 
-// The league week dateISO falls in, as { start, end } — the same week the database files the
-// round under (bookings.league_week), starting on the day that league says (migration 0040).
-function roundWeekRange(dateISO, league){
-  const start=LG().weekIn(league, dateISO);
-  const d=new Date(start+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+6);
-  return { start, end:d.toISOString().slice(0,10) };
-}
-
 // Everything that has to be true before a booking may carry league_team_id. Resolves to
 // { ok:true } or { error:'…', clash } — `clash` is the round already holding that week, so the
 // caller can offer to open it. The week is re-read from the database every time, never from the
@@ -3455,16 +3465,28 @@ async function checkLeagueRound(teamId, dateISO, ignoreBookingId){
   if(!LG().isCurrent(lg,today)) return { error:`${lg.name} isn’t running any more, so ${t.name} can’t book a round on it.` };
   if(lg.season_start && dateISO<lg.season_start) return { error:`${lg.name} starts on ${shortDate2(lg.season_start)} — ${dateLabel(dateISO)} is before the season begins.` };
   if(lg.season_end && dateISO>lg.season_end) return { error:`${lg.name} ended on ${shortDate2(lg.season_end)} — ${dateLabel(dateISO)} is after the season.` };
-  const w=roundWeekRange(dateISO, lg);
-  const { data, error } = await sb.from('bookings').select('id,bay_id,booking_date,start_min,end_min,status')
-    .eq('league_team_id',teamId).gte('booking_date',w.start).lte('booking_date',w.end).neq('status','cancelled');
-  if(error){
-    if(missingSchema(error)) return { error:MIG31_NOTE };
-    return { error:'Could not check this team’s week: '+error.message };
+  // ROUNDS ARE PLAYED IN ORDER (the league's rules): this booking counts for the earliest week the
+  // team has not played — a missed week first — worked out from every live round the team has,
+  // with the same shared maths the customer's checkout uses (InvictusLeagues.roundTarget).
+  const COLS='id,bay_id,booking_date,start_min,end_min,status,league_week';
+  let q=LG42.makeups ? await sb.from('bookings').select(COLS+',league_for_week').eq('league_team_id',teamId).neq('status','cancelled') : { error:{ message:'league_for_week' } };
+  if(q.error && /league_for_week/.test(q.error.message||'')) q=await sb.from('bookings').select(COLS).eq('league_team_id',teamId).neq('status','cancelled');
+  if(q.error){
+    if(missingSchema(q.error)) return { error:MIG31_NOTE };
+    return { error:'Could not check this team’s weeks: '+q.error.message };
   }
-  const clash=(data||[]).find(x=>String(x.id)!==String(ignoreBookingId));
-  if(clash) return { error:`${t.name} already has a round this week — ${roundText(clash)}.`, clash };
-  return { ok:true, week:w, team:t };
+  const rounds=(q.data||[]).filter(x=>String(x.id)!==String(ignoreBookingId));
+  const weeks=LG().teamWeeks({ league:lg, todayISO:today, rounds });
+  const here=weeks.find(w=>w.start===LG().weekIn(lg, dateISO));
+  let tgt=LG().roundTarget({ league:lg, weeks, dateISO });
+  // Before 0042 there is nowhere to record a make-up: a round can only be the week it is played in.
+  if(tgt.ok && tgt.makeup && !LG42.makeups) tgt = here && here.round ? { ok:false, code:'round_booked', existing:here.round } : { ok:true, week:here, makeup:false };
+  if(!tgt.ok){
+    if(tgt.code==='after_deadline') return { error:`${lg.name}’s regular season ended on ${shortDate2(tgt.regularEnd)}, so a round on ${dateLabel(dateISO)} does not count${tgt.playoffsStart?` (playoffs start ${shortDate2(tgt.playoffsStart)})`:''}.` };
+    if(tgt.existing) return { error:`${t.name} already has a round this week — ${roundText(tgt.existing)} — and no missed week to make up.`, clash:tgt.existing };
+    return { error:`${dateLabel(dateISO)} is not in ${lg.name}’s season.` };
+  }
+  return { ok:true, week:tgt.week, team:t, makeup:!!tgt.makeup, forWeek: tgt.makeup ? tgt.week.start : null };
 }
 
 // One place to say no. With a clash it offers to open the round that already holds the week.
@@ -3568,7 +3590,7 @@ async function openLeaguePage(id){
   // The two reads migration 0031 makes possible. Either can fail on its own (column or table not
   // there yet); each then reads as null and the screens that need it say so instead of breaking.
   const [rd, iv, sp] = await Promise.all([
-    sb.from('bookings').select('id,bay_id,booking_date,start_min,end_min,status,customer_name,league_team_id,league_week')
+    sb.from('bookings').select('id,bay_id,booking_date,start_min,end_min,status,customer_name,league_team_id,league_week'+(LG42.makeups?',league_for_week':''))
       .not('league_team_id','is',null).order('booking_date'),
     sb.from('league_team_invites').select('*').order('created_at'),
     sb.from('league_seat_payments').select('*').eq('league_id',id),   // 0036 — null before it
@@ -4974,6 +4996,8 @@ function openAdd(bayId,startMin,dateISO){
       const chk=await checkLeagueRound(teamId, date, null);
       if(!chk.ok){ leagueRoundRefused(chk, teamId); return; }
       row.league_team_id=teamId;   // the tag only: a league round is paid for like any booking
+      if(chk.forWeek) row.league_for_week=chk.forWeek;          // a make-up: the missed week it counts for
+      if(chk.makeup) toast(`This is ${chk.team.name}’s make-up round for week ${chk.week.number}`,'ok');
     }
     $('#s-add').disabled=true;
     let r=await sb.from('bookings').insert(row);
@@ -5424,8 +5448,10 @@ function openManage(id){
           const chk=await checkLeagueRound(nowTeam, b.booking_date, b.id);
           if(!chk.ok){ leagueRoundRefused(chk, nowTeam); return; }
           patch.league_team_id=nowTeam;                          // the tag only: what was paid stays as it is
+          if(LG42.makeups) patch.league_for_week=chk.forWeek||null;   // a make-up counts for the week it missed
         } else {
           patch.league_team_id=null;                             // back to an ordinary reservation
+          if(LG42.makeups) patch.league_for_week=null;
         }
       }
       $('#m-save').disabled=true;
