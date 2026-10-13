@@ -367,6 +367,11 @@
           "By participating in the 2026–2027 Invictus Golf Winter League, all players and teams agree to abide by these official rules and regulations."
         ]
       }
-    ]
+    ],
+    "dates": {
+      "regularEnd": "2027-02-20",
+      "rosterLockWeek": 4,
+      "feesFirst": true
+    }
   }
 }
