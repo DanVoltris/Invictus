@@ -3605,7 +3605,7 @@ async function openLeaguePage(id){
   const members=(m.data||[]).map(x=>{ const cu=CUSTOMERS.find(k=>k.id===x.customer_id)||{};
     return { ...x, name:cu.name||'Unknown customer', phone:cu.phone||null, email:cu.email||null }; });
   const edit=can('booking.write');
-  const views=[['overview','Overview'], ...(league.team_mode?[['teams','Teams']]:[]), ['players','Players'], ['weeks','Weeks'], ['results','Results'], ['standings','Standings']];
+  const views=[['overview','Overview'], ...(league.team_mode?[['teams','Teams']]:[]), ['players','Players'], ['weeks','Weeks'], ['results','Results'], ['standings','Standings'], ...(league.team_mode?[['hours','Trip hours']]:[])];
   if(!views.some(v=>v[0]===LEAGUE_VIEW)) LEAGUE_VIEW='overview';
   const today=todayISO();
   $('#lea-index').classList.add('hidden');
@@ -3630,7 +3630,7 @@ async function openLeaguePage(id){
   const show=v=>{
     LEAGUE_VIEW=v;
     $('#lo-seg').querySelectorAll('button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.setAttribute('aria-selected',String(on)); });
-    ({ overview:leagueOverview, teams:leagueTeamsBoard, players:leaguePlayers, weeks:leagueWeeks, results:leagueResults, standings:leagueStandingsView })[v](ctx);
+    ({ overview:leagueOverview, teams:leagueTeamsBoard, players:leaguePlayers, weeks:leagueWeeks, results:leagueResults, standings:leagueStandingsView, hours:leagueHours })[v](ctx);
   };
   $('#lo-seg').querySelectorAll('button').forEach(b=>b.onclick=()=>show(b.dataset.v));
   show(LEAGUE_VIEW);
@@ -4192,6 +4192,66 @@ function leagueResults(ctx){
     confirmSheet({ title:`Clear week ${w.number}?`, body:`<div class="dim" style="font-size:13px">Deletes every score recorded for ${esc(weekLabel(w))}. The standings update straight away.</div>`, okLabel:'Clear week',
       onOk:async()=>{ const error=await writeWeek(w,[]); if(error){ if(!isAuthError(error)) toast('Could not clear: '+error.message,'err'); return; } toast('Week cleared','ok'); reload(); } });
   };
+}
+
+// ----- Trip hours: the cumulative-hours prize (rule 10 of the 2026-27 rules) -----
+// Which team has played the most. A session counts for a team when it is that team's league round,
+// or was booked by one of the team's registered players (never a substitute) — finished, not
+// cancelled, not a no-show, inside the season. Staff choose whether a session must also have been
+// checked in. The rule's "two registered members present" cannot be read off a booking, so this is
+// the list to verify from, not the verdict.
+let HOURS_CHECKED_ONLY = true;
+async function leagueHours(ctx){
+  const { league, teams, members, today } = ctx;
+  const body=$('#lo-body');
+  if(!league.season_start){ body.innerHTML='<div class="empty">Set the season dates on the league first.</div>'; return; }
+  body.innerHTML='<div class="empty">Adding up the hours…</div>';
+  const from=league.season_start, to=(league.season_end && league.season_end<today) ? league.season_end : today;
+  // Every booking in the season so far, a page at a time (one read stops at 1,000 rows).
+  const all=[];
+  for(let at=0; from<=to && at<20000; at+=1000){
+    const { data, error } = await sb.from('bookings')
+      .select('id,booking_date,start_min,end_min,status,status_label,customer_phone,customer_email,league_team_id')
+      .gte('booking_date',from).lte('booking_date',to).eq('status','confirmed').order('booking_date').order('id').range(at, at+999);
+    if(error){ if(!isAuthError(error)) body.innerHTML=`<div class="empty">Could not read the bookings: ${esc(error.message)}</div>`; return; }
+    all.push(...(data||[]));
+    if(!data || data.length<1000) break;
+  }
+  if(LEAGUE_VIEW!=='hours') return;                 // they moved to another tab while it loaded
+  // Whose booking is it? A registered player's phone or email → their team.
+  const byPhone={}, byEmail={};
+  members.filter(x=>x.status==='active' && x.team_id && x.role!=='sub').forEach(x=>{
+    if(digitsOf(x.phone).length>=10) byPhone[digitsOf(x.phone)]=x.team_id;
+    if(x.email) byEmail[String(x.email).toLowerCase()]=x.team_id;
+  });
+  const teamIds=new Set(teams.map(t=>t.id));
+  const nowMin=nowMinWpg();
+  const tally=Object.fromEntries(teams.map(t=>[t.id,{ mins:0, sessions:0, rounds:0, unchecked:0 }]));
+  for(const b of all){
+    if(NO_SHOW_LABEL.test(b.status_label||'')) continue;
+    if(b.booking_date===today && b.end_min>nowMin) continue;          // not finished yet
+    const team = teamIds.has(b.league_team_id) ? b.league_team_id
+      : (byPhone[digitsOf(b.customer_phone)] || byEmail[String(b.customer_email||'').toLowerCase()] || null);
+    if(!team || !tally[team]) continue;
+    const checked=CHECKIN_LABEL.test(b.status_label||'');
+    if(!checked) tally[team].unchecked += (b.end_min-b.start_min);
+    if(HOURS_CHECKED_ONLY && !checked) continue;
+    tally[team].mins += (b.end_min-b.start_min); tally[team].sessions++;
+    if(teamIds.has(b.league_team_id)) tally[team].rounds++;
+  }
+  const hrs=m=>(Math.round(m/6)/10).toFixed(1);
+  const rows=teams.map(t=>({ t, ...tally[t.id] })).sort((a,b)=>b.mins-a.mins || a.t.name.localeCompare(b.t.name));
+  body.innerHTML=`
+    <div class="card" style="margin:0 0 12px">${switchRow('lh-checked','Count only sessions marked Checked In','On: a session counts once staff have checked it in, so a no-show nobody marked is left out. Off: every finished, not-cancelled session counts.',HOURS_CHECKED_ONLY)}</div>
+    ${rows.some(r=>r.mins) ? `<div class="tbl-scroll"><table>
+      <thead><tr><th style="width:44px">#</th><th>Team</th><th style="text-align:right">Hours</th><th style="text-align:right">Sessions</th><th style="text-align:right">League rounds</th>${HOURS_CHECKED_ONLY?'<th style="text-align:right">Not checked in</th>':''}</tr></thead>
+      <tbody>${rows.map((r,i)=>`<tr><td><b>${r.mins?i+1:'—'}</b></td>
+        <td>${esc(r.t.name)}<div class="dim" style="font-size:12px">${esc(members.filter(x=>x.status==='active' && x.team_id===r.t.id && x.role!=='sub').map(x=>x.name).join(', '))}</div></td>
+        <td style="text-align:right;font-weight:700">${hrs(r.mins)}</td><td style="text-align:right">${r.sessions}</td><td style="text-align:right">${r.rounds}</td>
+        ${HOURS_CHECKED_ONLY?`<td style="text-align:right" class="dim">${r.unchecked?hrs(r.unchecked)+' h':'—'}</td>`:''}</tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">No eligible hours yet this season.</div>'}
+    <div class="foot-note">${esc(shortDate2(from))} to ${esc(shortDate2(to))}. A session counts for a team when it is the team’s league round or was booked by one of its registered players (the phone or email on the booking matches). Substitutes, cancellations and no-shows are left out, and time staff shortened is already off the booking. The rules also need at least two registered members to have been there: check that before awarding the trip.</div>`;
+  $('#lh-checked').onchange=e=>{ HOURS_CHECKED_ONLY=e.target.checked; leagueHours(ctx); };
 }
 
 function leagueStandingsView({ league, teams, members, results }){
