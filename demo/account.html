@@ -115,6 +115,15 @@
   .sched-row.is-current .sd-what{color:var(--orange);font-weight:700}
   .sched-row.is-missed .sd-date{color:var(--dim)}
   .sched-row.is-missed .sd-what{color:var(--danger)}
+  /* The scoreboard photo for a week's round (rule 5): a button, and what has been saved. */
+  .sc-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:6px;font-weight:500}
+  .sc-btn{font:inherit;font-size:12.5px;font-weight:700;color:var(--orange);background:none;border:1px solid rgba(240,82,61,.45);border-radius:8px;padding:5px 10px;cursor:pointer}
+  .sc-btn:hover{background:rgba(240,82,61,.08)}
+  .sc-btn:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+  .sc-btn:disabled{opacity:.6;cursor:default}
+  .sc-state{font-size:12px;color:var(--muted)}
+  .sc-state a{color:var(--orange);font-weight:600}
+  .sc-state.is-err{color:var(--danger)}
   @media(max-width:420px){ .sched-row{grid-template-columns:26px 88px 1fr;gap:6px;padding:9px 8px;font-size:12.5px} }
   /* Captain's invite control */
   .inv-link{display:flex;gap:8px;margin-top:10px;align-items:stretch}
@@ -781,10 +790,13 @@ function teamCard(t, idx, opts){
       : w.missed ? ((kd.regularEnd && today > kd.regularEnd) ? 'Missed, not played' : 'Missed: to make up')
       : w.current ? 'Not booked yet'
       : 'To come';
+    // Once a round has been played (or is today), anyone on the team can add its scoreboard photo.
+    const photo = (w.round && w.round.booking_date && w.round.booking_date <= today && team.id)
+      ? `<span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span>` : '';
     return `<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}">
       <span class="sd-n">${w.number}</span>
       <span class="sd-date">${esc(shortDate(w.start))} – ${esc(shortDate(w.end))}</span>
-      <span class="sd-what">${what}</span></div>`;
+      <span class="sd-what">${what}${photo}</span></div>`;
   }).join('');
 
   const by = lg.team_mode === false ? 'Player' : 'Team';
@@ -896,8 +908,61 @@ function teamCard(t, idx, opts){
   </div>`;
 }
 
+// A phone photo is several megabytes; the scoreboard is readable at a fraction of that. Shrunk
+// here to 1600px on its long side and re-saved as a JPEG, so it uploads quickly on mobile data.
+async function shrinkPhoto(file){
+  const url = URL.createObjectURL(file);
+  try{
+    const img = new Image();
+    await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = url; });
+    const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82);
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// The scoreboard photos (rule 5): what each week already has, and the button that adds one.
+function wireScorecards(){
+  document.querySelectorAll('[data-team-card]').forEach(async card => {
+    const ctls = [...card.querySelectorAll('.sc-ctl')];
+    const teamId = card.dataset.teamId;
+    if(!ctls.length || !teamId) return;
+    const show = cards => ctls.forEach(ctl => {
+      const mine = cards.filter(c => c.week === ctl.dataset.week), st = ctl.querySelector('.sc-state');
+      st.classList.remove('is-err');
+      st.innerHTML = mine.length ? `✓ ${mine.length} photo${mine.length===1?'':'s'} saved · ${mine.map((c, i) => c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">View${mine.length>1?' '+(i+1):''}</a>` : '').filter(Boolean).join(' · ')}` : '';
+      ctl.querySelector('.sc-btn').textContent = mine.length ? 'Add another photo' : 'Add scoreboard photo';
+    });
+    const load = async () => { const r = await leaguesPost('scorecards', { teamId }); if(r.ok && Array.isArray(r.cards)) show(r.cards); return r; };
+    ctls.forEach(ctl => {
+      const btn = ctl.querySelector('.sc-btn'), file = ctl.querySelector('.sc-file'), st = ctl.querySelector('.sc-state');
+      const fail = msg => { st.classList.add('is-err'); st.textContent = msg; };
+      btn.onclick = () => file.click();
+      file.onchange = async () => {
+        const f = file.files && file.files[0]; file.value = '';
+        if(!f) return;
+        const label = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Saving…'; st.classList.remove('is-err'); st.textContent = '';
+        let image;
+        try{ image = await shrinkPhoto(f); }
+        catch(e){ btn.disabled = false; btn.textContent = label; return fail('We could not read that file. Take the picture again, or choose a photo.'); }
+        const r = await leaguesPost('scorecard', { teamId, week: ctl.dataset.week, image });
+        btn.disabled = false; btn.textContent = label;
+        if(!r.ok) return fail(r.status === 413 ? 'That photo is too large to send. Take it again a little further back.'
+          : r.status === 503 ? 'Scorecard photos are still being switched on here. Hand the scorecard to staff for now.'
+          : (r.error || 'We could not save that photo. Try again, or hand the scorecard to staff.'));
+        await load();
+      };
+    });
+    await load();
+  });
+}
+
 // The captain's invite control: a phone number in, a single-use link out.
 function wireTeams(teams){
+  wireScorecards();
   // The captain paying for seats: pick how many (a radio group with arrow keys), then Checkout.
   document.querySelectorAll('[data-team-card]').forEach(card => {
     const go = card.querySelector('.seat-go');

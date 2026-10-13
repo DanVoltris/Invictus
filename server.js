@@ -48,7 +48,9 @@ const app = express();
 // BEFORE express.json(). Same shared handler the Vercel function uses.
 app.post('/api/webhook', express.raw({ type: 'application/json' }), (req, res) => webhook(req, res));
 
-app.use(express.json());
+// 6mb: a scoreboard photo arrives as a data URL (api/leagues.js ?action=scorecard). Vercel's own
+// limit for a function body is 4.5 MB; the handler refuses anything over 3.5 MB of image.
+app.use(express.json({ limit: '6mb' }));
 
 // /admin → manager portal, /manage → customer self-service, /waiver → participant waiver
 // (before static so clean URLs work)

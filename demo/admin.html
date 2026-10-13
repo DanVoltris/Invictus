@@ -572,6 +572,11 @@
   .tb-list{margin-top:8px}
   .tb-player{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
   .tb-player:first-child{border-top:none}
+  /* Scorecard photos in the staff viewer. */
+  .sc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:14px}
+  .sc-fig{margin:0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface-2,#F3F5F8)}
+  .sc-fig img{display:block;width:100%;height:220px;object-fit:contain;background:#111}
+  .sc-fig figcaption{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;font-size:12px}
   /* "Make a team from solo players": each player is a toggle button. */
   .st-list{display:flex;flex-direction:column;gap:8px;margin-top:12px;max-height:300px;overflow:auto}
   .st-pick{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;font:inherit;color:inherit;
@@ -4088,7 +4093,7 @@ function leagueWeeks(ctx){
   host.innerHTML=`
     ${mig31Flag(mig31.rounds,'Until then this page can list the weeks but not who played them.')}
     <div class="dim" style="font-size:12.5px;margin-bottom:10px">Weeks run ${LEAGUE_DAYS[LG().weekStartOf(league)]} to ${LEAGUE_DAYS[(LG().weekStartOf(league)+6)%7]}. Each team plays once a week, whenever suits them${league.weekly_min_mins?` (${Math.round(league.weekly_min_mins/6)/10} hours is the suggestion)`:''} — so a week is either played or missed, and there is no night to cancel.</div>
-    <div class="tbl-scroll"><table><thead><tr><th style="width:44px">#</th><th>Week</th><th>Status</th><th>${league.team_mode?'Played':'Scores'}</th><th>Missed</th></tr></thead><tbody>${
+    <div class="tbl-scroll"><table><thead><tr><th style="width:44px">#</th><th>Week</th><th>Status</th><th>${league.team_mode?'Played':'Scores'}</th><th>Missed</th>${league.team_mode?'<th>Scorecards</th>':''}</tr></thead><tbody>${
       all.map(w=>{
         const past=w.end<today, isNow=!!(cur&&cur.start===w.start);
         const played=mig31.rounds?playedIn(w):[], missed=mig31.rounds?teams.filter(t=>!played.includes(t)):[];
@@ -4107,7 +4112,44 @@ function leagueWeeks(ctx){
             : past?`<span class="pill cancelled">Missed</span> ${names(missed)}`
             : isNow?`<span class="pill warn">Not booked yet</span> ${names(missed)}`
             : '<span class="dim">—</span>'}</td>
+          ${league.team_mode?`<td class="lw-cards" data-week="${w.start}"><span class="dim">—</span></td>`:''}
         </tr>`; }).join('')}</tbody></table></div>`;
+  if(league.team_mode) loadWeekScorecards(ctx);
+}
+
+// The scoreboard photos teams have added (rule 5), week by week. The list — and a link to each
+// photo, good for an hour — comes from the server, because the photos live in a private bucket.
+async function loadWeekScorecards(ctx){
+  const { league, teams, edit } = ctx;
+  if(DEMO_MODE) return;
+  const r=await apiPost('/api/leagues?action=scorecards', { leagueId:league.id });
+  if(LEAGUE_VIEW!=='weeks' || !r || !r.ok || !Array.isArray(r.cards)) return;
+  const nameOf=id=>(teams.find(t=>t.id===id)||{}).name||'A team';
+  document.querySelectorAll('#lo-body .lw-cards').forEach(td=>{
+    const mine=r.cards.filter(c=>c.week===td.dataset.week);
+    const byTeam={}; mine.forEach(c=>{ (byTeam[c.teamId]=byTeam[c.teamId]||[]).push(c); });
+    const ids=Object.keys(byTeam).sort((a,b)=>nameOf(a).localeCompare(nameOf(b)));
+    td.innerHTML=ids.length ? ids.map(id=>`<button type="button" class="btn btn-ghost btn-sm lw-open" data-team="${esc(id)}" style="margin:2px 4px 2px 0">${esc(nameOf(id))} · ${byTeam[id].length}</button>`).join('') : '<span class="dim">—</span>';
+    td.querySelectorAll('.lw-open').forEach(b=>b.onclick=()=>openScorecards({ title:`${nameOf(b.dataset.team)} · week of ${shortDate2(td.dataset.week)}`, cards:byTeam[b.dataset.team], edit, done:()=>leagueWeeks(ctx) }));
+  });
+}
+function openScorecards({ title, cards, edit, done }){
+  sheet.classList.add('res-wide');
+  sheet.innerHTML=`<button class="sheet-close" id="x">✕</button>
+    <h3>Scorecard photos</h3><div class="sub">${esc(title)}</div>
+    <div class="sc-grid">${cards.map(c=>`<figure class="sc-fig" data-id="${esc(c.id)}">
+      ${c.url?`<a href="${esc(c.url)}" target="_blank" rel="noopener"><img src="${esc(c.url)}" alt="Scoreboard photo added ${esc(fmtTs(c.at))}" loading="lazy" /></a>`:'<div class="empty">This photo could not be loaded.</div>'}
+      <figcaption><span class="dim">Added ${esc(fmtTs(c.at))}</span>${edit?'<button type="button" class="btn btn-ghost btn-sm sc-del">Remove</button>':''}</figcaption></figure>`).join('')}</div>`;
+  overlay.classList.add('show');
+  const close=()=>{ sheet.classList.remove('res-wide'); closeSheet(); };
+  $('#x').onclick=close;
+  sheet.querySelectorAll('.sc-del').forEach(b=>b.onclick=()=>{
+    const fig=b.closest('.sc-fig');
+    confirmSheet({ title:'Remove this photo?', body:'<div class="dim" style="font-size:13px">The photo is deleted for good. The team can add another from My Account.</div>', okLabel:'Remove photo',
+      onOk:async()=>{ const r=await apiPost('/api/leagues?action=scorecard-remove', { id:fig.dataset.id });
+        if(!r.ok){ toast(r.error||'Could not remove that photo.','err'); return; }
+        toast('Photo removed','ok'); fig.remove(); if(!sheet.querySelector('.sc-fig')) close(); done(); } });
+  });
 }
 
 // Results are entered a week at a time, because that is the unit teams play in: the score is

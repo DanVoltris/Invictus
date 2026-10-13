@@ -114,6 +114,16 @@ function builder(table) {
 }
 mock.module(ROOT + 'node_modules/@supabase/supabase-js/dist/index.mjs', { namedExports: {
   createClient: () => ({ from: (t) => builder(t), rpc: async () => ({ data: null, error: null }),
+    // Storage: one private bucket of scorecard photos. It does not exist until it is created.
+    storage: {
+      createBucket: async (name, opts) => { S.buckets[name] = { ...opts, files: {} }; return { data: { name }, error: null }; },
+      from: (name) => ({
+        upload: async (path, bytes, opts) => { const bk = S.buckets[name]; if (!bk) return { data: null, error: { message: 'Bucket not found' } };
+          bk.files[path] = { bytes, type: opts.contentType }; return { data: { path }, error: null }; },
+        createSignedUrl: async (path, secs) => ({ data: { signedUrl: `https://storage.test/${name}/${path}?exp=${secs}` }, error: null }),
+        remove: async (paths) => { const bk = S.buckets[name]; (paths || []).forEach((x) => { if (bk) delete bk.files[x]; }); return { data: [], error: null }; },
+      }),
+    },
     auth: { getUser: async (tok) => (S.tokens[tok] ? { data: { user: { id: S.tokens[tok] } } } : { error: { message: 'bad jwt' }, data: {} }) } }),
 } });
 
@@ -170,7 +180,7 @@ const BAYS = [{ id: 'B1', name: 'Bay One' }, { id: 'B2', name: 'Bay Two' }];
 function world(extra = {}) {
   seq = 0;
   Object.assign(S, {
-    stripe: [], sessions: {}, intents: {}, fail: {}, missing0031: null, hideTeamRounds: false,
+    stripe: [], sessions: {}, intents: {}, buckets: {}, fail: {}, missing0031: null, hideTeamRounds: false,
     tokens: { 'tok-cap': 'user-cap', 'tok-friend': 'user-friend', 'tok-other': 'user-other', 'tok-admin': 'u-admin', 'tok-emp': 'u-emp' },
     db: {
       customers: [
@@ -1432,4 +1442,61 @@ test('rule reminders: each captain is told once, in the week before rosters lock
   // More than a week out, or already past: not due.
   lg.details.dates = { rosterLockWeek: 6, playoffsStart: addDays(-1) };
   assert.deepEqual(await db.leagueReminderTargets(today), []);
+});
+
+// ---- Scorecard photos (rule 5; migration 0042) -------------------------------------------------
+const JPEG = `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(600, 7)]).toString('base64')}`;
+const card = (body, who = cap) => run(leaguesApi, { query: { action: 'scorecard' }, body, ...who });
+
+test('scorecard photos: someone on the team adds the photo for a week they played; staff find it by week', async () => {
+  const w = ruleWorld();
+  const teamId = await ownTeam();
+  roundOn(teamId, addDays(1, w(1)));                               // week 1 played
+  roundOn(teamId, addDays(2, w(3)), { league_for_week: w(2) });    // week 2, made up in week 3
+
+  assert.equal((await card({ teamId, week: w(1), image: JPEG }, {})).code, 401, 'signed out');
+  assert.equal((await card({ teamId, week: w(1), image: JPEG }, other)).code, 403, 'not on the team');
+  // Not a photo, whatever it says it is; and far too large.
+  assert.equal((await card({ teamId, week: w(1), image: `data:image/jpeg;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}` })).code, 400);
+  assert.equal((await card({ teamId, week: w(1), image: 'data:text/html;base64,PGI+' })).code, 400);
+  assert.equal((await card({ teamId, week: w(1), image: `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF]), Buffer.alloc(4 * 1024 * 1024)]).toString('base64')}` })).code, 400);
+  // A week the team has not played has no scorecard.
+  const none = await card({ teamId, week: w(4), image: JPEG });
+  assert.equal(none.code, 409);
+  assert.match(none.out.error, /no league round for week 4/);
+  assert.equal(Object.keys(S.buckets).length, 0, 'nothing was stored for any of those');
+
+  // The real thing — the bucket is made, privately, on the first photo. A mid-week date finds its week.
+  const ok = await card({ teamId, week: addDays(3, w(1)), image: JPEG });
+  assert.equal(ok.code, 200, JSON.stringify(ok.out));
+  assert.deepEqual(ok.out.week, { start: w(1), number: 1 });
+  assert.equal(S.buckets['league-scorecards'].public, false);
+  const row = S.db.league_scorecards[0];
+  assert.equal(row.league_week, w(1));
+  assert.equal(row.content_type, 'image/jpeg');
+  assert.equal(row.uploaded_by, 'c-cap');
+  assert.match(row.path, new RegExp(`^L-team/${teamId}/${w(1)}-`));
+  assert.ok(S.buckets['league-scorecards'].files[row.path]);
+  // The make-up round's photo is filed under the week it counted for.
+  assert.equal((await card({ teamId, week: w(2), image: JPEG })).code, 200);
+  assert.equal(S.db.league_scorecards[1].booking_id, S.db.bookings[1].id);
+
+  // The team sees its own; a stranger does not; staff see the league's, by week.
+  const mine = await run(leaguesApi, { query: { action: 'scorecards' }, body: { teamId }, ...cap });
+  assert.deepEqual(mine.out.cards.map((c) => c.week), [w(1), w(2)]);
+  assert.match(mine.out.cards[0].url, /^https:\/\/storage\.test\/league-scorecards\//);
+  assert.equal((await run(leaguesApi, { query: { action: 'scorecards' }, body: { teamId }, ...other })).code, 403);
+  assert.equal((await run(leaguesApi, { query: { action: 'scorecards' }, body: { leagueId: 'L-team' }, ...cap })).code, 403, 'a customer cannot list the league');
+  const staff = await run(leaguesApi, { query: { action: 'scorecards' }, body: { leagueId: 'L-team' }, headers: { authorization: 'Bearer tok-admin' } });
+  assert.equal(staff.code, 200);
+  assert.deepEqual(staff.out.cards.map((c) => [c.teamId, c.week]), [[teamId, w(1)], [teamId, w(2)]]);
+
+  // Six a week at most; staff remove a wrong one, photo and row both.
+  for (let i = 0; i < 5; i++) assert.equal((await card({ teamId, week: w(1), image: JPEG })).code, 200);
+  assert.equal((await card({ teamId, week: w(1), image: JPEG })).code, 409);
+  assert.equal((await run(leaguesApi, { query: { action: 'scorecard-remove' }, body: { id: row.id }, ...cap })).code, 403);
+  const gone = await run(leaguesApi, { query: { action: 'scorecard-remove' }, body: { id: row.id }, headers: { authorization: 'Bearer tok-admin' } });
+  assert.equal(gone.code, 200);
+  assert.equal(S.buckets['league-scorecards'].files[row.path], undefined);
+  assert.equal(S.db.league_scorecards.some((c) => c.id === row.id), false);
 });

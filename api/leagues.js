@@ -4,7 +4,8 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          listTeamLeagues, teamLeagueById, leagueTeamById, createLeagueTeam, confirmLeagueTeamCheckout,
          createTeamInvite, teamInviteByToken, claimTeamInvite, teamsForCustomer, MIGRATION_0031,
          splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor,
-         soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos } from '../lib/db.js';
+         soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos,
+         teamMembershipFor, saveScorecard, listScorecards, removeScorecard } from '../lib/db.js';
 import { notifyTeamInvite, notifyLeaguePlaced } from '../lib/notify.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
 const L = globalThis.InvictusLeagues;
@@ -29,6 +30,9 @@ const L = globalThis.InvictusLeagues;
 //   POST ?action=join-solo      (signed in)     { leagueId } → Stripe Checkout for one golfer's share, or a free place
 //   POST ?action=place-solo     (staff)         { memberId, teamId } → that player is on that team
 //   POST ?action=team-from-solos (staff)        { leagueId, memberIds, name } → a new team of them
+//   POST ?action=scorecard      (on the team)   { teamId, week, image } → the scoreboard photo for that week's round, saved
+//   POST ?action=scorecards     (staff | team)  { leagueId } | { teamId } → the photos, each with a link good for an hour
+//   POST ?action=scorecard-remove (staff)       { id } → that photo is deleted
 //   POST ?action=invite         (captain/staff) { teamId, phone, name?, role? } → the link to send a friend (role 'sub' = substitute)
 //   POST ?action=invite-info    (public)        { token } → whose team, is it still open, what joining costs
 //   POST ?action=invite-claim   (signed in)     { token } → you're on the team, or Checkout for your seat
@@ -73,6 +77,9 @@ export default async function handler(req, res) {
     if (action === 'join-solo') return await joinSolo(req, res);
     if (action === 'place-solo') return await placeSoloAction(req, res);
     if (action === 'team-from-solos') return await teamFromSolosAction(req, res);
+    if (action === 'scorecard') return await scorecardUpload(req, res);
+    if (action === 'scorecards') return await scorecardList(req, res);
+    if (action === 'scorecard-remove') return await scorecardRemove(req, res);
     if (action === 'invite') return await invite(req, res);
     if (action === 'invite-info') return await inviteInfo(req, res);
     if (action === 'invite-claim') return await inviteClaim(req, res);
@@ -264,6 +271,62 @@ async function teamFromSolosAction(req, res) {
       teamName: r.team.name, leagueName: r.league.name, customerId: c.id });
   }
   return res.status(200).json({ ok: true, teamId: r.team.id, teamName: r.team.name, placed: r.placed.length });
+}
+
+// ----- Scorecard photos (rule 5; migration 0042) -----
+// The photo arrives as a data URL the page has already shrunk. Nothing about it is trusted: the
+// type is read from the bytes themselves, not from what the browser says it is.
+const MAX_PHOTO_BYTES = 3.5 * 1024 * 1024;
+function photoFrom(dataUrl) {
+  const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(String(dataUrl || ''));
+  if (!m) return { error: 'That file is not a photo we can read. Take the picture again, or choose a JPEG or PNG.' };
+  const bytes = Buffer.from(m[1], 'base64');
+  if (!bytes.length) return { error: 'That photo is empty. Take the picture again.' };
+  if (bytes.length > MAX_PHOTO_BYTES) return { error: 'That photo is too large. Take it again a little further back, or choose a smaller one.' };
+  const type = (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) ? 'image/jpeg'
+    : (bytes[0] === 0x89 && bytes.subarray(1, 4).toString('latin1') === 'PNG') ? 'image/png'
+    : (bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP') ? 'image/webp' : null;
+  if (!type) return { error: 'That file is not a photo we can read. Take the picture again, or choose a JPEG or PNG.' };
+  return { bytes, type };
+}
+
+// Anybody on the team's roster — a player or a substitute who filled in — may add the photo.
+async function scorecardUpload(req, res) {
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to add your scoreboard photo.' });
+  const { teamId, week, image } = req.body || {};
+  const m = await teamMembershipFor({ teamId: String(teamId || ''), customerId: me.id });
+  if (!m || !m.team) return res.status(404).json({ ok: false, error: 'That team no longer exists.' });
+  if (!m.member && !m.sub) return res.status(403).json({ ok: false, error: 'Only people on the team can add its scoreboard photo.' });
+  const photo = photoFrom(image);
+  if (photo.error) return res.status(400).json({ ok: false, error: photo.error });
+  const r = await saveScorecard({ teamId: m.team.id, weekISO: week, bytes: photo.bytes, contentType: photo.type, customerId: me.id });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  return res.status(200).json({ ok: true, id: r.id, week: r.week });
+}
+
+// Staff see every team's photos for a league; a customer sees their own team's.
+async function scorecardList(req, res) {
+  const { leagueId, teamId } = req.body || {};
+  if (leagueId) {
+    const ctx = await staffContext(req.headers && req.headers.authorization);
+    if (ctx.error) return res.status(403).json({ ok: false, error: 'Only staff can see every team’s scorecards.' });
+    const r = await listScorecards({ leagueId: String(leagueId) });
+    return res.status(r.error ? 500 : 200).json({ ok: !r.error, cards: r.cards, ...(r.unsupported ? { unsupported: true } : {}), ...(r.error ? { error: r.error } : {}) });
+  }
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to see your team’s scorecards.', cards: [] });
+  const m = await teamMembershipFor({ teamId: String(teamId || ''), customerId: me.id });
+  if (!m || !m.team || (!m.member && !m.sub)) return res.status(403).json({ ok: false, error: 'Only people on the team can see its scorecards.', cards: [] });
+  const r = await listScorecards({ teamId: m.team.id });
+  return res.status(r.error ? 500 : 200).json({ ok: !r.error, cards: r.cards, ...(r.unsupported ? { unsupported: true } : {}), ...(r.error ? { error: r.error } : {}) });
+}
+
+async function scorecardRemove(req, res) {
+  const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
+  if (ctx.error) return res.status(403).json({ ok: false, error: 'Only staff with the Bookings permission can remove a scorecard photo.' });
+  const r = await removeScorecard((req.body || {}).id);
+  return r.error ? res.status(r.code || 400).json({ ok: false, error: r.error }) : res.status(200).json({ ok: true });
 }
 
 // "Is that name free?" — asked before Checkout only. Returns the sentence to show, or null.
