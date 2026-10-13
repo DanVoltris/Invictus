@@ -53,6 +53,7 @@ const db = {
   declineWaitlistOffer: async () => ({}), runWaitlistSweep: async () => ({}),
   pendingWaitlistOffers: async () => [], markWaitlistOfferNotified: async () => ({}),
   leaguePlayerForRequest: async () => null,
+  leagueReminderTargets: async () => [],   // the rule reminders ride on this job; tests/league-teams.test.mjs owns them
 };
 mock.module(url('lib', 'db.js'), { namedExports: db });
 

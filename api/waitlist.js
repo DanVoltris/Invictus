@@ -5,9 +5,9 @@ import {
   createWaitlistEntry, waitlistEntryByToken, leaveWaitlist,
   waitlistOfferByToken, claimWaitlistOffer, declineWaitlistOffer,
   runWaitlistSweep, pendingWaitlistOffers, markWaitlistOfferNotified,
-  staffContext, leaguePlayerForRequest
+  staffContext, leaguePlayerForRequest, leagueReminderTargets
 } from '../lib/db.js';
-import { notifyWaitlistOffer, notifyWaitlistJoined, sendDue, venueIdentity, EMAIL_ENABLED } from '../lib/notify.js';
+import { notifyWaitlistOffer, notifyWaitlistJoined, sendDue, venueIdentity, EMAIL_ENABLED, notifyLeagueReminders } from '../lib/notify.js';
 
 // The waiting list. Dispatch on ?action= —
 //
@@ -471,9 +471,15 @@ async function outbox(req, res) {
   if (outboxRunning) return res.status(200).json({ ok: true, busy: true, outbox: null });
   outboxRunning = true;
   try {
+    // The league's rule reminders (a week before rosters lock, a week before the playoffs) ride on
+    // this daily run: whatever is due today is queued once and sent with the rest. A failure here
+    // must not stop the queue draining.
+    let reminders = null;
+    try { reminders = await notifyLeagueReminders(await leagueReminderTargets(), { sendNow: false }); }
+    catch (err) { console.error('league reminders:', err && err.message ? err.message : err); }
     const tally = await sendDue({ limit });
     // picked/sent/skipped/failed/retry — enough for a human to see the queue moving.
-    return res.status(200).json({ ok: true, busy: false, outbox: tally });
+    return res.status(200).json({ ok: true, busy: false, outbox: tally, leagueReminders: reminders });
   } catch (err) {
     console.error('outbox sweep:', err && err.message ? err.message : err);
     return res.status(500).json({ ok: false, error: 'The outbox drain failed. Check the server log.' });

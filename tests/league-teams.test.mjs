@@ -36,6 +36,8 @@ const UNIQUE = {
     && rows.some((r) => r.league_team_id === row.league_team_id && r.league_week === row.league_week && r.status !== 'cancelled')
     ? 'bookings_league_round_once' : null),
   league_members: (row, rows) => (rows.some((r) => r.league_id === row.league_id && r.customer_id === row.customer_id) ? 'league_members_once' : null),
+  // 0019: one outbox row per logical message — the dedupe key is what stops a second text.
+  notifications: (row, rows) => (row.dedupe_key && rows.some((r) => r.dedupe_key === row.dedupe_key) ? 'notifications_dedupe_key' : null),
   // 0036: one payment row per Checkout Session.
   league_seat_payments: (row, rows) => (row.stripe_session_id && rows.some((r) => r.stripe_session_id === row.stripe_session_id) ? 'league_seat_payments_session' : null),
 };
@@ -152,6 +154,7 @@ const db = await import(ROOT + 'lib/db.js');
 const { default: leaguesApi } = await import(ROOT + 'api/leagues.js');
 const { default: bookingApi } = await import(ROOT + 'api/booking.js');
 const { default: checkoutApi } = await import(ROOT + 'api/checkout.js');
+const notify = await import(ROOT + 'lib/notify.js');
 const { default: webhookApi } = await import(ROOT + 'api/webhook.js');
 const { default: seriesApi } = await import(ROOT + 'api/booking-series.js');
 const { winnipegTodayISO } = await import(ROOT + 'lib/booking.js');
@@ -1393,4 +1396,40 @@ test('the roster lock: after the lock week the captain adds nobody, an old invit
   const fresh = S.db.league_team_invites.at(-1);
   fresh.created_at = new Date().toISOString();
   assert.equal((await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: fresh.token }, ...other })).code, 200);
+});
+
+test('rule reminders: each captain is told once, in the week before rosters lock and before the playoffs', async () => {
+  const w = ruleWorld();
+  const lg = S.db.leagues[0];
+  const teamId = await ownTeam();
+  await db.createLeagueTeam({ leagueId: 'L-team', name: 'Birdies', captainCustomerId: 'c-other' });
+  await db.createLeagueTeam({ leagueId: 'L-team', name: 'No Captain' });
+  const today = winnipegTodayISO();
+
+  // Nothing set on the league: nobody is told anything.
+  assert.deepEqual(await db.leagueReminderTargets(today), []);
+
+  // Rosters lock at the end of week 3 (this week), playoffs start in 5 days.
+  lg.details.dates = { rosterLockWeek: 3, playoffsStart: addDays(5) };
+  const due = await db.leagueReminderTargets(today);
+  assert.deepEqual(due.map((d) => [d.kind, d.team.name]).sort(), [['playoffs', 'Aces'], ['playoffs', 'Birdies'], ['roster_lock', 'Aces'], ['roster_lock', 'Birdies']]);
+  assert.equal(due.find((d) => d.kind === 'roster_lock').on, addDays(6, w(3)));
+
+  const first = await notify.notifyLeagueReminders(due, { sendNow: false });
+  assert.deepEqual([first.due, first.queued], [4, 4]);
+  const rows = S.db.notifications.filter((n) => n.template === 'league.reminder');
+  assert.equal(rows.length, 4);
+  assert.deepEqual([...new Set(rows.map((n) => n.recipient))].sort(), ['+12045550199', '+12049906530']);
+  const text = (kind) => notify.TEMPLATES['league.reminder'].sms(rows.find((n) => n.payload.kind === kind && n.payload.teamName === 'Aces').payload, { name: 'Invictus Golf' });
+  assert.match(text('playoffs'), /playoffs start .*Substitutes can't play in the playoffs/);
+  assert.match(text('roster_lock'), /rosters for Winter Team League lock after .*end of week 3.*Aces/);
+
+  // The job runs again tomorrow (and the day after): nobody is texted twice.
+  const again = await notify.notifyLeagueReminders(await db.leagueReminderTargets(today), { sendNow: false });
+  assert.equal(again.queued, 0);
+  assert.equal(S.db.notifications.filter((n) => n.template === 'league.reminder').length, 4);
+
+  // More than a week out, or already past: not due.
+  lg.details.dates = { rosterLockWeek: 6, playoffsStart: addDays(-1) };
+  assert.deepEqual(await db.leagueReminderTargets(today), []);
 });
