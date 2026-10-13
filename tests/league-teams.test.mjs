@@ -69,7 +69,8 @@ function builder(table) {
         if (table === 'bookings' && row.booking_date) {
           const team = (S.db.league_teams || []).find((t) => t.id === row.league_team_id);
           const lg = team && (S.db.leagues || []).find((l) => l.id === team.league_id);
-          row.league_week = startOfWeek(row.booking_date, lg && lg.week_start != null ? lg.week_start : 1);
+          // 0042: a make-up round says which week it counts for; anything else is the week it is played in.
+          row.league_week = startOfWeek((row.league_team_id && row.league_for_week) || row.booking_date, lg && lg.week_start != null ? lg.week_start : 1);
         }
         return row;
       });
@@ -496,8 +497,12 @@ async function payRound(over, who = {}, name = 'Murad Cheway') {
   return { code: done.code, out: done.out, quote: q.out, booking: S.db.bookings.find((x) => x.id === (done.out && done.out.bookingId)) };
 }
 
+// These tests are about ONE week, so the season starts in it: there is no earlier week to make up.
+const seasonStartsAt = (iso, ws = 1) => { S.db.leagues[0].season_start = startOfWeek(iso, ws); };
+
 test('league round: any member books it at checkout, pays the bay less $5 an hour, and it counts for the week', async () => {
   world();
+  seasonStartsAt(nextWeek());
   const teamId = await ownTeam();
   await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '2045550116' }, ...cap });
   await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: S.db.league_team_invites[0].token }, ...friend });
@@ -510,7 +515,9 @@ test('league round: any member books it at checkout, pays the bay less $5 an hou
   assert.equal(r.quote.subtotalCents, 4500, 'the discount comes off before tax');
   assert.equal(r.quote.totalCents, 5040);
   assert.equal(r.quote.amount, 5040);
-  assert.deepEqual(r.quote.leagueRound, { teamId, teamName: 'Aces', leagueName: 'Winter Team League' });
+  assert.deepEqual(r.quote.leagueRound, { teamId, teamName: 'Aces', leagueName: 'Winter Team League',
+    week: { start: mondayOf(nextWeek()), end: addDays(6, mondayOf(nextWeek())), number: 1 }, makeup: false });
+  assert.equal(intentsMade()[0][1].metadata.leagueForWeek, '', 'not a make-up: it counts for the week it is played in');
   assert.equal(intentsMade()[0][1].metadata.leagueTeamId, teamId);
 
   const b = r.booking;
@@ -565,6 +572,7 @@ test('league round: somebody who is not on the team cannot book for it', async (
 
 test('league round: a second round in the same week is refused before any payment, and names the one they have', async () => {
   world();
+  seasonStartsAt(nextWeek());
   const teamId = await ownTeam();
   const first = await payRound({ teamId }, cap);
   assert.equal(first.code, 200, JSON.stringify(first.out));
@@ -977,6 +985,7 @@ test('a Sunday-start league: Tuesday then the following Sunday are two weeks; th
   S.db.leagues[0].week_start = 0;
   const teamId = await ownTeam();
   const { tue, sun, sat } = tueSunSat();
+  seasonStartsAt(tue, 0);
   const a = await payRound({ teamId, dateISO: tue }, cap);
   assert.equal(a.code, 200, JSON.stringify(a.out));
   const b = await payRound({ teamId, dateISO: sun }, cap);
@@ -996,6 +1005,7 @@ test('a league that says nothing still counts Monday to Sunday: Tuesday then Sun
   world();
   const teamId = await ownTeam();
   const { tue, sun } = tueSunSat();
+  seasonStartsAt(tue);
   assert.equal((await payRound({ teamId, dateISO: tue }, cap)).code, 200);
   const b = await payRound({ teamId, dateISO: sun }, cap);
   assert.equal(b.code, 409);
@@ -1253,4 +1263,134 @@ test('substitutes: somebody already playing in the league cannot also be one', a
   assert.match(r.out.error, /already in Winter Team League/);
   assert.equal(members(teamId, 'sub').length, 0);
   assert.equal(S.db.league_team_invites.at(-1).claimed_at ?? null, null, 'the invite is not spent on a refusal');
+});
+
+// ---- The league's own rules (2026-27): make-ups, the deadline, fees first, the roster lock ------
+// A season of six Monday weeks starting two weeks ago, so "today" is in week 3 and weeks 1 and 2
+// are already behind the team. w(n) is the Monday of week n.
+function ruleWorld(dates = {}) {
+  world();
+  const lg = S.db.leagues[0];
+  lg.season_start = mondayOf(addDays(-14)); lg.season_end = addDays(6 * 7 - 1, lg.season_start);
+  lg.details = { dates };
+  return (n) => addDays((n - 1) * 7, lg.season_start);
+}
+const roundOn = (teamId, dateISO, extra = {}) => S.db.bookings.push({ id: `bk-${++seq}`, bay_id: 'B2', booking_date: dateISO, start_min: 600, end_min: 780,
+  status: 'confirmed', league_team_id: teamId, league_week: mondayOf(extra.league_for_week || dateISO), ...extra });
+
+test('make-up rounds: a missed week is played first, in order, and a team that is up to date plays one a week', async () => {
+  const w = ruleWorld();
+  const teamId = await ownTeam();
+  roundOn(teamId, w(1));                       // week 1 was played; week 2 was missed; today is week 3
+  const day = addDays(2, w(4));                // a Wednesday in week 4, inside the regular booking window
+
+  // The first round they book that day is the make-up for week 2 — not week 4, not week 3.
+  const a = await payRound({ teamId, dateISO: day, startMin: 480, endMin: 660 }, cap);
+  assert.equal(a.code, 200, JSON.stringify(a.out));
+  assert.deepEqual([a.quote.leagueRound.week.number, a.quote.leagueRound.makeup], [2, true]);
+  assert.equal(a.booking.league_for_week, w(2));
+  assert.equal(a.booking.league_week, w(2), 'filed under the week it counts for');
+  assert.equal(a.quote.leagueDiscountCents, 1500, 'a make-up is a league round like any other: it gets the discount');
+
+  // Then week 3, then week 4 itself — three league rounds in one calendar week, each its own week.
+  const b = await payRound({ teamId, dateISO: day, startMin: 660, endMin: 840 }, cap);
+  assert.deepEqual([b.quote.leagueRound.week.number, b.quote.leagueRound.makeup], [3, true]);
+  const c = await payRound({ teamId, dateISO: addDays(1, day) }, cap);
+  assert.deepEqual([c.quote.leagueRound.week.number, c.quote.leagueRound.makeup], [4, false]);
+  assert.equal(c.booking.league_for_week ?? null, null);
+
+  // Up to date now: a fourth round that week is refused, and nobody plays ahead.
+  const d = await quote({ teamId, dateISO: addDays(2, day), bayId: 'B2' }, cap);
+  assert.equal(d.code, 409);
+  assert.equal(d.out.code, 'round_booked');
+  assert.equal(intentsMade().length, 3);
+
+  // My Account files each round under the week it counts for.
+  const weeks = (await run(leaguesApi, { query: { action: 'my-teams' }, ...cap })).out.teams[0].weeks;
+  assert.deepEqual(weeks.slice(0, 4).map((x) => [x.number, !!x.round, x.missed]), [[1, true, false], [2, true, false], [3, true, false], [4, true, false]]);
+  assert.equal(weeks[1].round.booking_date, day, 'week 2’s round was played in week 4');
+});
+
+test('make-up rounds: a holiday break is never owed, but can still be played in its own week', async () => {
+  const w = ruleWorld();
+  S.db.leagues[0].details.schedule = [{ from: w(2), to: addDays(6, w(2)), event: 'Break', optional: true }];
+  const teamId = await ownTeam();
+  roundOn(teamId, w(1));
+  // Week 2 was a break and was not played. A round this week is this week's, not a make-up for it.
+  const r = await quote({ teamId, dateISO: addDays(1) < addDays(7, w(3)) ? addDays(1) : w(3) }, cap);
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.deepEqual([r.out.leagueRound.week.number, r.out.leagueRound.makeup], [3, false]);
+});
+
+test('the regular-season deadline: rounds after it do not count, and no regular week can be made up', async () => {
+  const w = ruleWorld();
+  const lg = S.db.leagues[0];
+  // Regular season is weeks 1–3; playoffs start in week 5; week 4 belongs to neither.
+  lg.details.dates = { regularEnd: addDays(6, w(3)), playoffsStart: w(5) };
+  S.db.settings[0].booking_window = { regularDays: 10, leagueDays: 60 };
+  const teamId = await ownTeam();
+  roundOn(teamId, w(1));                       // week 2 missed, week 3 not played yet
+
+  const gap = await quote({ teamId, dateISO: addDays(1, w(4)) }, cap);
+  assert.equal(gap.code, 400);
+  assert.equal(gap.out.code, 'after_deadline');
+  assert.match(gap.out.error, /regular season ended on/);
+  assert.match(gap.out.error, /playoffs start/);
+
+  // A playoff week is its own round: the missed regular weeks are gone, not made up now.
+  const po = await quote({ teamId, dateISO: addDays(1, w(5)) }, cap);
+  assert.equal(po.code, 200, JSON.stringify(po.out));
+  assert.deepEqual([po.out.leagueRound.week.number, po.out.leagueRound.makeup], [5, false]);
+  assert.equal(intentsMade().length, 1);
+});
+
+test('fees before the first round: a team that still owes cannot book a league round until it is paid', async () => {
+  ruleWorld({ feesFirst: true });
+  // A team of two bought seat by seat; only the captain's seat is paid.
+  const made = await db.createLeagueTeam({ leagueId: 'L-team', name: 'Aces', captainCustomerId: 'c-cap', paidCents: 7500, stripeSessionId: 'cs_seed', seats: 2, shareCents: 7500 });
+  const owing = await quote({ teamId: made.teamId }, cap);
+  assert.equal(owing.code, 403);
+  assert.equal(owing.out.code, 'fees_unpaid');
+  assert.match(owing.out.error, /Aces still has \$75\.00 of its league fee to pay/);
+  assert.equal(intentsMade().length, 0);
+
+  S.db.league_seat_payments.push({ id: 'sp-2', team_id: made.teamId, league_id: 'L-team', seats: 1, amount_cents: 7500, method: 'counter' });
+  assert.equal((await quote({ teamId: made.teamId }, cap)).code, 200, 'paid up: the round books');
+
+  // The rule is the league's to switch on: without it an owing team books as before.
+  S.db.league_seat_payments.pop();
+  S.db.leagues[0].details.dates = {};
+  assert.equal((await quote({ teamId: made.teamId, bayId: 'B2' }, cap)).code, 200);
+});
+
+test('the roster lock: after the lock week the captain adds nobody, an old invite lapses, and staff still can', async () => {
+  const w = ruleWorld({ rosterLockWeek: 4 });          // today is week 3: not locked yet
+  const teamId = await ownTeam();
+  const before = await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '2045550116' }, ...cap });
+  assert.equal(before.code, 200, JSON.stringify(before.out));
+  const invite = S.db.league_team_invites.at(-1);
+  invite.created_at = new Date().toISOString();
+
+  // Move the season back so today is in week 5: rosters locked at the end of week 4.
+  const lg = S.db.leagues[0];
+  lg.season_start = mondayOf(addDays(-28)); lg.season_end = addDays(8 * 7 - 1, lg.season_start);
+  invite.created_at = `${addDays(-20)}T12:00:00Z`;       // …and that invite was sent back in week 2
+
+  for (const role of [undefined, 'sub']) {
+    const r = await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '2045550199', role }, ...cap });
+    assert.equal(r.code, 403);
+    assert.equal(r.out.code, 'roster_locked');
+    assert.match(r.out.error, /locked after week 4/);
+  }
+  const late = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: invite.token }, ...friend });
+  assert.equal(late.code, 409);
+  assert.equal(late.out.code, 'roster_locked');
+  assert.equal(S.db.league_members.filter((m) => m.customer_id === 'c-friend').length, 0);
+
+  // A correction is staff's to make: their invite goes out, and it can be accepted.
+  const byStaff = await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '2045550199' }, headers: { authorization: 'Bearer tok-admin' } });
+  assert.equal(byStaff.code, 200, JSON.stringify(byStaff.out));
+  const fresh = S.db.league_team_invites.at(-1);
+  fresh.created_at = new Date().toISOString();
+  assert.equal((await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: fresh.token }, ...other })).code, 200);
 });

@@ -289,7 +289,8 @@ async function invite(req, res) {
   // Only the captain may add to their own team — or staff with the Bookings permission, who add
   // players over the counter. A signed-in stranger is refused.
   const me = await accountCustomerForRequest(req);
-  if (!me || team.captain_customer_id !== me.id) {
+  const byCaptain = !!me && team.captain_customer_id === me.id;
+  if (!byCaptain) {
     const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
     if (ctx.error) {
       return res.status(me ? 403 : 401).json({ ok: false,
@@ -297,6 +298,16 @@ async function invite(req, res) {
     }
   }
 
+  // ROSTER LOCK (the league's own rule, set on the league form): after the lock week a captain can
+  // change nothing online. Staff still can — a correction is theirs to make.
+  if (byCaptain) {
+    const lg = await teamLeagueById(team.league_id);
+    const k = L.leagueDates(lg);
+    if (L.rosterLocked(lg, winnipegTodayISO())) {
+      return res.status(403).json({ ok: false, code: 'roster_locked',
+        error: `Rosters for ${(lg && lg.name) || 'this league'} locked after week ${k.rosterLockWeek} (${k.rosterLockOn}), so no more players or substitutes can be added. Call the shop if something needs correcting.` });
+    }
+  }
   const r = await createTeamInvite({ teamId: team.id, phone, name, invitedBy: me ? me.id : null, role: asSub ? 'sub' : 'player' });
   if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
   if (r.alreadyOnTeam) return res.status(200).json({ ok: true, alreadyOnTeam: true, link: null });
@@ -357,6 +368,16 @@ async function inviteClaim(req, res) {
   if (!isUuid(token)) return res.status(400).json({ ok: false, error: 'That invite link isn’t valid.' });
   const me = await accountCustomerForRequest(req);
   if (!me) return res.status(401).json({ ok: false, error: 'Sign in (or make an account) first, then open your invite link again.' });
+  // Roster lock: an invite sent before the lock and not accepted in time has lapsed. One made
+  // after it can only have come from staff, and stands.
+  const pending = await teamInviteByToken(token);
+  if (pending && pending.league && pending.invite && !pending.invite.claimed_at) {
+    const k = L.leagueDates(pending.league);
+    if (L.rosterLocked(pending.league, winnipegTodayISO()) && String(pending.invite.created_at || '').slice(0, 10) <= k.rosterLockOn) {
+      return res.status(409).json({ ok: false, code: 'roster_locked',
+        error: `Rosters for ${pending.league.name} locked after week ${k.rosterLockWeek} (${k.rosterLockOn}), so this invitation can no longer be used. Call the shop if something needs correcting.` });
+    }
+  }
   const r = await claimTeamInvite({ token, customerId: me.id });
   if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
   // No paid seat is waiting for them: their share first, through Checkout. The invite is spent and

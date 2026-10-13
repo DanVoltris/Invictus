@@ -2,7 +2,7 @@ import { priceForBooking, summaryFor, stripeStatus, stripeClient, normalizeSetti
 import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promoByCode, giftCardByCode, giftCardAvailable, leaguePlayerForRequest,
          confirmHold, insertBooking, upsertCustomer, bookingExistsForPI, setCustomerNote, recordConsent, clientIp,
          releaseHold, deferredHoldsReady, bookingExistsForSetupIntent, stripeCustomerForContact,
-         rememberStripeCustomer, crossDayProblem, accountCustomerForRequest, teamMembershipFor, teamRoundForWeek } from '../lib/db.js';
+         rememberStripeCustomer, crossDayProblem, accountCustomerForRequest, teamMembershipFor, leagueRoundTarget, teamMoneyFor } from '../lib/db.js';
 import { paymentPatchFor, releaseUnbookedHold, savedCardPatchFor, forgetSavedCard } from '../lib/holds.js';
 
 // One customer checkout, start to finish. Dispatch on ?action=, the same shape as
@@ -108,9 +108,30 @@ export async function createPaymentIntent(req, res) {
         return res.status(400).json({ code: 'outside_season',
           error: `${lg.name} runs ${lg.season_start || '…'} to ${lg.season_end || '…'}, so that date can’t be a league round. Book it as an ordinary session, or pick a date in the season.` });
       }
-      const existing = await teamRoundForWeek(m.team.id, dateISO, lg);
-      if (existing) return res.status(409).json(leagueRoundTaken(settings, m.team, existing));
-      leagueRound = { team: m.team, league: lg, discountCents: leagueRoundDiscountCents({ settings, startMin, endMin }) };
+      // The league's own rules, each one switched on by the manager on the league form
+      // (InvictusLeagues.leagueDates): fees paid before the first round, and the season deadline.
+      const L = globalThis.InvictusLeagues, rules = L.leagueDates(lg);
+      if (rules.feesFirst) {
+        const found = await teamMoneyFor(m.team.id);
+        const money = found && found.money;
+        const owed = money && money.split ? money.owedCents : ((lg.fee_cents > 0 && !(m.team.paid_cents > 0)) ? lg.fee_cents : 0);
+        if (owed > 0) {
+          return res.status(403).json({ code: 'fees_unpaid',
+            error: `${m.team.name} still has $${(owed / 100).toFixed(2)} of its league fee to pay, and the fee has to be paid in full before the team’s first league round. Pay it on My Account or at the desk, then book your round. You can still book this as an ordinary session.` });
+        }
+      }
+      // Rounds are played in order: this booking counts for the earliest week the team has not
+      // played — a missed week first — and for nothing once the regular-season deadline has passed.
+      const target = await leagueRoundTarget(m.team.id, dateISO, lg);
+      if (!target.ok && target.code === 'after_deadline') {
+        return res.status(400).json({ code: 'after_deadline',
+          error: `${lg.name}’s regular season ended on ${target.regularEnd}, and rounds after that date do not count`
+            + `${target.playoffsStart ? ` (playoffs start ${target.playoffsStart})` : ''}. Book this as an ordinary session.` });
+      }
+      if (!target.ok && target.existing) return res.status(409).json(leagueRoundTaken(settings, m.team, target.existing));
+      if (!target.ok) return res.status(400).json({ code: 'outside_season', error: `That date is not in ${lg.name}’s season, so it can’t be a league round.` });
+      leagueRound = { team: m.team, league: lg, week: target.week, makeup: !!target.makeup,
+        discountCents: leagueRoundDiscountCents({ settings, startMin, endMin }) };
     }
 
     // Cart hold: lock the slot for ~5 min while the customer checks out (see lib/db.js createHold).
@@ -191,6 +212,8 @@ export async function createPaymentIntent(req, res) {
       // The team this booking is the league round for. paymentPatchFor / savedCardPatchFor
       // (lib/holds.js) read it, so the client-side confirm and the webhook write the same row.
       leagueTeamId: leagueRound ? String(leagueRound.team.id) : '',
+      // Only for a make-up: the first day of the earlier week this round stands in for.
+      leagueForWeek: leagueRound && leagueRound.makeup ? String(leagueRound.week.start) : '',
       leagueDiscountCents: String(q.leagueDiscountCents || 0),
       subtotalCents: String(q.subtotalCents),
       taxPct: String(q.taxPct),
@@ -250,7 +273,8 @@ export async function createPaymentIntent(req, res) {
       memberPct: q.memberPct, memberDiscountCents: q.memberDiscountCents,
       promoDiscountCents: q.promoDiscountCents || 0, promoBlocked: q.promoBlocked || null,
       leagueDiscountCents: q.leagueDiscountCents || 0,
-      leagueRound: leagueRound ? { teamId: leagueRound.team.id, teamName: leagueRound.team.name, leagueName: leagueRound.league.name } : null,
+      leagueRound: leagueRound ? { teamId: leagueRound.team.id, teamName: leagueRound.team.name, leagueName: leagueRound.league.name,
+        week: { start: leagueRound.week.start, end: leagueRound.week.end, number: leagueRound.week.number }, makeup: leagueRound.makeup } : null,
       giftUsedCents: q.giftUsedCents || 0, expiresAt,
       subtotalCents: q.subtotalCents, taxPct: q.taxPct, taxCents: q.taxCents, totalCents: q.totalCents,
       // WHAT THE CUSTOMER MUST BE TOLD BEFORE THEY CONFIRM. `mode` is 'hold', 'save' or 'charge';

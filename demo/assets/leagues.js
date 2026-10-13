@@ -86,6 +86,63 @@
     return { played, total: all.length, left: all.length - played };
   }
 
+  // The league week a round COUNTS for. Normally the week it is played in; a make-up round
+  // (bookings.league_for_week, migration 0042) says which earlier week it stands in for.
+  function roundWeek(league, r) {
+    if (!r) return null;
+    if (r.league_for_week) return weekIn(league, r.league_for_week);
+    return r.booking_date ? weekIn(league, r.booking_date) : (r.league_week || null);
+  }
+
+  /* ----- The league's key dates and switches (leagues.details.dates) -----
+     Set by the manager on the league form; every one is optional, and a league that sets none
+     behaves exactly as it always has.
+       regularEnd      last day a regular-season round may be played (the deadline)
+       playoffsStart   first day of the playoffs — substitutes may not play from here on
+       rosterLockWeek  rosters lock at the end of this week of the season (4 = after week 4)
+       feesFirst       a team must have paid in full before it books a league round
+     rosterLockOn is worked out: the last day of week `rosterLockWeek`. */
+  const isoDay = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(Date.parse(`${v}T00:00:00Z`)) ? String(v) : null);
+  function leagueDates(league) {
+    const d = league && league.details && league.details.dates && typeof league.details.dates === 'object' ? league.details.dates : {};
+    const all = weeks(league), n = Math.floor(Number(d.rosterLockWeek));
+    const lock = n >= 1 && n <= all.length ? all[n - 1] : null;
+    return { regularEnd: isoDay(d.regularEnd), playoffsStart: isoDay(d.playoffsStart),
+      rosterLockWeek: lock ? n : null, rosterLockOn: lock ? lock.end : null, feesFirst: d.feesFirst === true };
+  }
+  // Are rosters locked on todayISO? (No lock week set = never.)
+  const rosterLocked = (league, todayISO) => { const k = leagueDates(league); return !!(k.rosterLockOn && todayISO > k.rosterLockOn); };
+  // Is dateISO in the playoffs? (No playoff date set = no.)
+  const inPlayoffs = (league, dateISO) => { const k = leagueDates(league); return !!(k.playoffsStart && dateISO >= k.playoffsStart); };
+
+  // WHICH WEEK WOULD A LEAGUE ROUND ON dateISO COUNT FOR? Rounds are played in order: the earliest
+  // week the team has not played, up to the week of the date itself — so a team that missed week 5
+  // plays week 5 next, then week 6, and a team that is up to date plays this week's and no more.
+  //   weeks   that team's season from teamWeeks() (each week with its `round`, if it has one)
+  // → { ok:true, week, makeup }                       makeup: it counts for an EARLIER week
+  //   { ok:false, code:'round_booked', existing }     nothing left to play: here is this week's round
+  //   { ok:false, code:'after_deadline', regularEnd, playoffsStart }
+  //   { ok:false, code:'outside_season' }
+  // A break week is never owed, so it is never a make-up — but a team may still play it in that
+  // week. Past the regular-season deadline no regular-season week can be played any more.
+  function roundTarget({ league, weeks: list = [], dateISO }) {
+    const wk = weekIn(league, dateISO);
+    if (!list.some((w) => w.start === wk)) return { ok: false, code: 'outside_season' };
+    const k = leagueDates(league);
+    const late = !!k.regularEnd && dateISO > k.regularEnd;
+    if (late && k.playoffsStart && dateISO < k.playoffsStart) {
+      return { ok: false, code: 'after_deadline', regularEnd: k.regularEnd, playoffsStart: k.playoffsStart };
+    }
+    // In the playoffs only playoff weeks are played: nothing from before them is made up.
+    const poWeek = k.playoffsStart && dateISO >= k.playoffsStart ? weekIn(league, k.playoffsStart) : null;
+    const open = list.filter((w) => w.start <= wk && !w.round && (!w.off || w.start === wk)
+      && !(late && w.end <= k.regularEnd) && !(poWeek && w.start < poWeek));
+    if (open.length) return { ok: true, week: open[0], makeup: open[0].start !== wk };
+    const here = list.find((w) => w.start === wk);
+    if (late && !here.round) return { ok: false, code: 'after_deadline', regularEnd: k.regularEnd, playoffsStart: k.playoffsStart };
+    return { ok: false, code: 'round_booked', existing: here.round || null };
+  }
+
   // One team's season: every week, and what they did with it.
   //   { start, end, number, current, past, round, missed }
   // `rounds` are that team's league bookings: [{ league_week, booking_date, start_min, end_min,
@@ -96,7 +153,7 @@
     // Filed by the day it was played, not by a stored league_week: the stored one only catches up
     // with a changed start day once migration 0040's trigger has re-stamped it.
     rounds.filter((r) => r && r.status !== 'cancelled')
-      .forEach((r) => { const k = r.booking_date ? weekIn(league, r.booking_date) : r.league_week; if (k && !byWeek.has(k)) byWeek.set(k, r); });
+      .forEach((r) => { const k = roundWeek(league, r); if (k && !byWeek.has(k)) byWeek.set(k, r); });
     return weeks(league).map((w) => {
       const round = byWeek.get(w.start) || null;
       const past = w.end < todayISO;
@@ -111,8 +168,7 @@
   function teamsWithoutRound({ league, todayISO, teams = [], rounds = [] }) {
     const week = currentWeek(league, todayISO);
     if (!week || week.off) return [];                       // a break: nobody is behind
-    const booked = new Set(rounds.filter((r) => r && r.status !== 'cancelled'
-      && (r.booking_date ? weekIn(league, r.booking_date) : r.league_week) === week.start)
+    const booked = new Set(rounds.filter((r) => r && r.status !== 'cancelled' && roundWeek(league, r) === week.start)
       .map((r) => r.league_team_id));
     return teams.filter((t) => !booked.has(t.id));
   }
@@ -281,6 +337,14 @@
       });
     }
     const ruleSections = rules.filter((r) => r.title || r.lines.length).slice(0, INFO_LIMITS.ruleSections);
+    // Key dates and switches (see leagueDates). Only what was actually set is kept, so a league
+    // with none of them has no `dates` at all and reads exactly as before.
+    const kd = d.dates && typeof d.dates === 'object' && !Array.isArray(d.dates) ? d.dates : {};
+    const lockN = Math.floor(Number(kd.rosterLockWeek));
+    const dates = { ...(isoDay(kd.regularEnd) ? { regularEnd: isoDay(kd.regularEnd) } : {}),
+      ...(isoDay(kd.playoffsStart) ? { playoffsStart: isoDay(kd.playoffsStart) } : {}),
+      ...(lockN >= 1 && lockN <= MAX_WEEKS ? { rosterLockWeek: lockN } : {}),
+      ...(kd.feesFirst === true || kd.feesFirst === 'true' ? { feesFirst: true } : {}) };
     const date = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(Date.parse(`${v}T00:00:00Z`)) ? String(v) : null);
     const schedule = (Array.isArray(d.schedule) ? d.schedule : []).map((w) => {
       const x = w && typeof w === 'object' ? w : {};
@@ -291,7 +355,8 @@
     }).filter((w) => w.from || w.event || w.course || w.note).slice(0, INFO_LIMITS.weeks);
     return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), eligibility: list(d.eligibility), format: list(d.format), rules: ruleSections, settings,
       challenges: list(d.challenges), schedule, notice: para(d.notice, INFO_LIMITS.notice),
-      awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize) };
+      awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize),
+      ...(Object.keys(dates).length ? { dates } : {}) };
   }
   // The rules back as the text the manager edits: "1. Heading", its rules one per line, a blank
   // line between sections. normalizeDetails({ rules: rulesText(x) }) gives x back.
@@ -329,5 +394,5 @@
   root.InvictusLeagues = { DAY_NAMES, timeLabel, scheduleLabel, weekOf, weeks, currentWeek, progress,
     teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName,
     seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
-    weekIn, weekStartOf, rulesText };
+    weekIn, weekStartOf, rulesText, roundWeek, leagueDates, rosterLocked, inPlayoffs, roundTarget };
 })(typeof window !== 'undefined' ? window : globalThis);
