@@ -622,16 +622,28 @@ export async function announcePendingOffers(req) {
       offerId: o.id,
       dateISO: o.booking_date, bayId: o.bay_id, bayName: bayName(settings, o.bay_id) || o.bay_id,
       startMin: o.start_min, endMin: o.end_min,
-      expiresText: clockText(o.expires_at, cfg.timezone),
+      expiresText: clockText(o.expires_at, cfg.timezone), expiresAt: o.expires_at,
       holdSlot: !!o.hold_booking_id,
       claimUrl, declineUrl: withToken(baseUrl(req, cfg, 'claim'), o.claim_token, 'no=1'),
       name: e.name, email: e.email, phone: e.phone,
       emailOk: e.email_ok, smsOk: e.sms_ok, customerId: e.customer_id,
     });
-    if (sent.channels.length) {
+    // "Notified" means a message actually went out — not that one was queued. Otherwise a text that
+    // failed (or was never allowed) left the bay held for somebody who was never told.
+    //   sent                       → notified
+    //   retrying, or already queued → leave it: the every-minute sweep retries, and a text whose
+    //                                 window has closed is never sent (lib/notify.js sendOne)
+    //   nothing can reach them      → pass the offer on now, so the next person hears about it
+    const outcomes = sent.sent || [];
+    if (outcomes.includes('sent')) {
       await markWaitlistOfferNotified(o.id, sent.channels);
       out.notified += 1;
+    } else if (outcomes.includes('retry') || (sent.channels.length && !outcomes.length)) {
+      out.retrying = (out.retrying || 0) + 1;
     } else {
+      const passed = await declineWaitlistOffer(o.claim_token, { leave: false });
+      console.warn(`waitlist: offer ${o.id} could not be delivered (${outcomes.join(', ') || 'no usable contact'}) — `
+        + (passed && passed.ok ? 'passed to the next person.' : 'could not pass it on.'));
       out.skipped += 1;
     }
   }
