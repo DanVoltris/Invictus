@@ -3579,11 +3579,20 @@ function promptSheet({ title, body = '', fields = [], okLabel, danger = false, o
   const close=()=>{ co.classList.remove('show'); cs.innerHTML=''; };
   $('#pfx').onclick=close; $('#pf-no').onclick=close; co.onclick=e=>{ if(e.target===co) close(); };
   const first=fields[0] && $('#pf-'+fields[0].id); if(first){ first.focus(); first.select&&first.select(); }
+  // One press, one save. A double-click, or Enter pressed twice, used to run onOk twice — and for
+  // "money collected" that wrote two payments and cleared a seat nobody had paid for.
+  let busy=false;
   $('#pf-yes').onclick=async()=>{
-    const values=Object.fromEntries(fields.map(f=>[f.id, $('#pf-'+f.id).value.trim()]));
-    const problem = onOk ? await onOk(values) : null;      // return a message to keep the form open
-    if(problem){ $('#pf-err').textContent=problem; return; }
-    close();
+    if(busy) return;
+    busy=true; const yes=$('#pf-yes'); yes.disabled=true;
+    try{
+      const values=Object.fromEntries(fields.map(f=>[f.id, $('#pf-'+f.id).value.trim()]));
+      const problem = onOk ? await onOk(values) : null;      // return a message to keep the form open
+      if(problem){ $('#pf-err').textContent=problem; return; }
+      close();
+    } finally {
+      busy=false; if(yes.isConnected) yes.disabled=false;
+    }
   };
   cs.querySelectorAll('input').forEach(i=>i.addEventListener('keydown',e=>{ if(e.key==='Enter') $('#pf-yes').click(); }));
 }
