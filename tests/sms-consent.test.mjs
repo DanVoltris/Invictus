@@ -204,6 +204,26 @@ test('hours checkout: paying with prepaid hours records the same tick the same w
   assert.equal(c.sms_consent_ip, '203.0.113.42');
 });
 
+test('hours checkout: the customer\'s own cart hold on the slot becomes the booking, not a clash', async () => {
+  world();
+  // What opening checkout does: a 5-minute hold on exactly this slot.
+  S.db.bookings.push({ id: 'hold-1', bay_id: SLOT.bayId, booking_date: SLOT.dateISO, start_min: SLOT.startMin, end_min: SLOT.endMin,
+    status: 'held', expires_at: new Date(Date.now() + 5 * 60000).toISOString() });
+  const r = await call(hourCards, { action: 'book', body: { ...SLOT, name: 'Murad' }, headers: { authorization: 'Bearer tok-murad' } });
+  assert.equal(r.out.ok, true, JSON.stringify(r.out));
+  assert.equal(S.db.bookings.length, 1, 'the hold was turned into the booking, not booked beside');
+  assert.deepEqual([S.db.bookings[0].status, S.db.bookings[0].source], ['confirmed', 'hours']);
+  assert.equal(me().hours_balance_min, 600 - 60, 'an hour came off the balance');
+});
+
+test('hours checkout: somebody else\'s booking overlapping the slot is still refused', async () => {
+  world();
+  S.db.bookings.push({ id: 'b-x', bay_id: SLOT.bayId, booking_date: SLOT.dateISO, start_min: SLOT.startMin + 30, end_min: SLOT.endMin + 30, status: 'confirmed' });
+  const r = await call(hourCards, { action: 'book', body: { ...SLOT, name: 'Murad' }, headers: { authorization: 'Bearer tok-murad' } });
+  assert.equal(r.code, 409);
+  assert.equal(me().hours_balance_min, 600, 'nothing spent');
+});
+
 test('hours checkout: no consent field, no change', async () => {
   world({ sms_consent: true, sms_consent_source: 'checkout' });
   const r = await call(hourCards, { action: 'book', body: { ...SLOT, name: 'Murad' },

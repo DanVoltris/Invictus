@@ -126,8 +126,12 @@ async function book(req, res) {
   // Past midnight (0038): the next day's closures, and last night's late sessions still in the bay.
   const spill = await crossDayProblem({ settings, dateISO, bayId, startMin, endMin });
   if (spill) return res.status(409).json({ ok: false, error: spill.error });
+  // The customer's own cart hold is not a clash. Opening checkout puts a 5-minute hold on exactly
+  // this slot, and bookWithHours turns that hold into the booking (confirmHold) — counting it here
+  // refused every "Use my hours" with "That time was just taken".
+  const ownHold = (b) => b.status === 'held' && b.start_min === Number(startMin) && b.end_min === Number(endMin);
   const clash = (await getBookingsForDate(dateISO))
-    .some((b) => b.bay_id === bayId && Number(startMin) < b.end_min && Number(endMin) > b.start_min);
+    .some((b) => b.bay_id === bayId && Number(startMin) < b.end_min && Number(endMin) > b.start_min && !ownHold(b));
   if (clash) return res.status(409).json({ ok: false, error: 'That time was just taken — pick another slot.' });
 
   const stg = normalizeSettings(await getSettings());
