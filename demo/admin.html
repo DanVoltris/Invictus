@@ -960,6 +960,7 @@
             <div><label>Bay</label><select class="input" id="lg-bay"><option value="">All bays</option></select></div>
             <div><label>Search</label><input class="input" id="lg-q" placeholder="Name / contact" /></div>
           </div>
+          <div class="dim" id="logs-count" style="font-size:13px;margin:0 0 8px"></div>
           <div class="tbl-scroll"><table id="logs-table"></table></div>
         </div>
       </div>
@@ -2731,28 +2732,44 @@ async function loadLogs(){
   const el=$(sel); if(el) el.addEventListener(sel==='#lg-q'?'input':'change', debounce(runLogsQuery,250));
 });
 function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; }
-let LOGS=[];
+let LOGS=[], LOGS_SEQ=0;
+const LOGS_SHOWN=1000;
+// Every booking that matches, fetched 1,000 at a time — not the first 500, which at this venue's
+// volume is barely two weeks. The search runs in the database too, so a name from months ago is
+// found even when the dates are cleared. Typing fires several queries; only the newest is drawn.
 async function runLogsQuery(){
-  let q=sb.from('bookings').select('*').order('booking_date',{ascending:false}).order('start_min');
+  const seq=++LOGS_SEQ;
   const from=$('#lg-from').value, to=$('#lg-to').value, st=$('#lg-status').value, bay=$('#lg-bay').value;
-  if(from) q=q.gte('booking_date',from);
-  if(to) q=q.lte('booking_date',to);
-  if(st) q=q.eq('status',st);
-  if(bay) q=q.eq('bay_id',bay);
-  const { data, error } = await q.limit(500);
-  if(error){ if(!isAuthError(error)) toast('Load failed: '+error.message,'err'); return; }
-  const term=$('#lg-q').value.trim().toLowerCase();
-  LOGS=(data||[]).filter(b=>!term || [b.customer_name,b.customer_email,b.customer_phone].some(x=>(x||'').toLowerCase().includes(term)));
+  // PostgREST's or() is comma- and bracket-delimited, so those (and wildcards) cannot be searched for.
+  const term=$('#lg-q').value.trim().replace(/[,()%*\\]/g,' ').replace(/\s+/g,' ').trim();
+  const PAGE=1000, rows=[];
+  for(let at=0; at<50000; at+=PAGE){
+    let q=sb.from('bookings').select('*').order('booking_date',{ascending:false}).order('start_min').order('id');
+    if(from) q=q.gte('booking_date',from);
+    if(to) q=q.lte('booking_date',to);
+    if(st) q=q.eq('status',st);
+    if(bay) q=q.eq('bay_id',bay);
+    if(term) q=q.or(['customer_name','customer_email','customer_phone'].map(c=>`${c}.ilike.*${term}*`).join(','));
+    const { data, error } = await q.range(at, at+PAGE-1);
+    if(seq!==LOGS_SEQ) return;
+    if(error){ if(!isAuthError(error)) toast('Load failed: '+error.message,'err'); return; }
+    rows.push(...(data||[]));
+    if(!data || data.length<PAGE) break;
+  }
+  LOGS=rows;
   renderLogs();
 }
 function tagPill(name){ const t=TAGS.find(x=>x.name===name); const col=t?t.color:'#B5B5B5';
   return `<span class="tagpill" style="color:${col};border-color:${col}55;background:${col}1a">${esc(name)}</span>`; }
 function renderLogs(){
-  const tbl=$('#logs-table');
-  if(!LOGS.length){ tbl.innerHTML='<tbody><tr><td class="empty">No bookings match these filters.</td></tr></tbody>'; return; }
+  const tbl=$('#logs-table'), n=LOGS.length;
+  $('#logs-count').textContent = !n ? '' : n>LOGS_SHOWN
+    ? `${n.toLocaleString()} bookings match. Showing the newest ${LOGS_SHOWN.toLocaleString()} — narrow the dates or search to see the rest. Export CSV includes all ${n.toLocaleString()}.`
+    : `${n.toLocaleString()} booking${n===1?'':'s'}`;
+  if(!n){ tbl.innerHTML='<tbody><tr><td class="empty">No bookings match these filters.</td></tr></tbody>'; return; }
   tbl.innerHTML=`<thead><tr>
     <th>Date</th><th>Time</th><th>Bay</th><th>Customer</th><th>Contact</th><th>Source</th><th>Paid</th><th>Status</th><th>Label / Tags</th>
-  </tr></thead><tbody>${LOGS.map(b=>`<tr>
+  </tr></thead><tbody>${LOGS.slice(0,LOGS_SHOWN).map(b=>`<tr>
     <td>${shortDate(b.booking_date)}</td>
     <td>${fmtMin(b.start_min)}–${fmtMin(b.end_min)}</td>
     <td>${esc(bayName(b.bay_id))}</td>
