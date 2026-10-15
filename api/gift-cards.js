@@ -514,7 +514,10 @@ async function redeem(req, res) {
   let pi;
   try { pi = await retrieveCheckoutIntent(stripe, b.paymentIntentId); }   // pi_… or a saved card's seti_…
   catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
-  if (pi.status !== 'succeeded') return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
+  // A card HOLD (requires_capture) is a finished checkout too: the customer is done and the booking
+  // is made. Settled now, as the webhook does — waiting for a capture days away would let the
+  // reservation lapse and hand the gift-card value back while the booking stands.
+  if (pi.status !== 'succeeded' && pi.status !== 'requires_capture') return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
 
   const reservations = await giftCardReservationsForRef(pi.id);
   if (!reservations.length) {

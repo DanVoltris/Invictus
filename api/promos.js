@@ -238,7 +238,9 @@ async function redeem(req, res) {
   let pi;
   try { pi = await retrieveCheckoutIntent(stripe, b.paymentIntentId); }   // pi_… or a saved card's seti_…
   catch (_) { return res.status(400).json({ ok: false, error: 'Payment not found.' }); }
-  if (pi.status !== 'succeeded') return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
+  // A card HOLD (requires_capture) is a finished checkout: count the use now, or the reservation
+  // lapses and a one-per-customer code can be used again while this booking stands.
+  if (pi.status !== 'succeeded' && pi.status !== 'requires_capture') return res.status(400).json({ ok: false, error: 'Payment is not complete.' });
 
   const rsv = await promoReservationById(b.reservationId);
   if (!rsv) return res.status(404).json({ ok: false, error: 'That reservation no longer exists.' });

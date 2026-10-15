@@ -155,6 +155,15 @@ test('(a) correctly signed event is processed — Vercel raw-stream path', async
   assert.ok(writes.some((w) => w.name === 'insertBooking'));
 });
 
+test('gift card: the webhook settles against what the CARD pays, as the reservation expects', async () => {
+  const raw = JSON.stringify(evt());
+  const res = await call(expressReq(raw, { 'stripe-signature': sign(raw) }));
+  assert.equal(res.statusCode, 200);
+  const g = writes.find((w) => w.name === 'redeemGiftCard');
+  assert.ok(g, 'the gift card is settled');
+  assert.equal(g.args[0].chargedCents, 5000, 'the PaymentIntent amount, not the $10 of gift value');
+});
+
 test('(b) unsigned request is rejected with 400 and nothing is written', async () => {
   quiet();
   const raw = JSON.stringify(evt());

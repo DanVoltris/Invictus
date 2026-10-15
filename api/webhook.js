@@ -256,7 +256,8 @@ async function recordSavedCardBooking(event, stripe) {
   // Settled now, not when the hold lands days later — the same reasoning as a hold's, below.
   const giftUsed = Number(md.giftUsedCents) || 0;
   if (giftUsed > 0 && md.giftCardId) {
-    const r = await redeemGiftCard({ cardId: md.giftCardId, ref: si.id, chargedCents: giftUsed, bookingId, note: `Booking ${slot.dateISO}` });
+    // What the saved card is due to be charged (metadata.chargeCents), as the reservation expects.
+    const r = await redeemGiftCard({ cardId: md.giftCardId, ref: si.id, chargedCents: Math.max(0, Number(md.chargeCents) || 0), bookingId, note: `Booking ${slot.dateISO}` });
     if (r && r.error) console.error(`⚠ gift card ${md.giftCardId} not settled for ${si.id}: ${r.error}`);
   }
   if (md.promoReservationId) {
@@ -362,7 +363,9 @@ async function recordPaidOrHeldBooking(event, stripe) {
   const giftUsed = Number(md.giftUsedCents) || 0;
   if (!error && giftUsed > 0 && md.giftCardId) {
     const r = await redeemGiftCard({
-      cardId: md.giftCardId, ref: pi.id, chargedCents: giftUsed, bookingId,
+      // chargedCents is what the CARD pays — the reservation's expected_charge_cents. Passing the
+      // gift amount here failed every check (charge_mismatch) and deleted the reservation.
+      cardId: md.giftCardId, ref: pi.id, chargedCents: pi.amount, bookingId,
       note: `Booking ${slot.dateISO}`,
     });
     if (r && r.error) console.error(`⚠ gift card ${md.giftCardId} not settled for ${pi.id}: ${r.error}`);
