@@ -5293,9 +5293,19 @@ function shortenBookingFlow(b, mins){
     },
   });
 }
-function matchCustomer(b){
-  const email=(b.customer_email||'').trim().toLowerCase(), phone=(b.customer_phone||'').trim(), name=(b.customer_name||'').trim().toLowerCase();
-  return CUSTOMERS.find(c=> (email&&c.email&&c.email.trim().toLowerCase()===email) || (phone&&c.phone&&c.phone.trim()===phone) || (name&&c.name&&c.name.trim().toLowerCase()===name) );
+// Who this booking belongs to — the same order the server uses (lib/db.js customerHoursByContact):
+// phone first, by its digits whatever the formatting, then email. A name alone is a guess, so it is
+// only used when the booking has no contact at all AND exactly one customer has that name. The
+// sheet spends this person's prepaid hours and signs their waiver, so a wrong guess costs a real
+// customer; finding nobody just means staff pick them by hand.
+function matchCustomer(b, list=CUSTOMERS){
+  const digits=p=>String(p||'').replace(/\D/g,'').slice(-10);
+  const email=(b.customer_email||'').trim().toLowerCase(), phone=digits(b.customer_phone), name=(b.customer_name||'').trim().toLowerCase().replace(/\s+/g,' ');
+  if(phone.length===10){ const c=list.find(c=>digits(c.phone)===phone); if(c) return c; }
+  if(email){ const c=list.find(c=>(c.email||'').trim().toLowerCase()===email); if(c) return c; }
+  if(phone || email || !name) return undefined;
+  const same=list.filter(c=>(c.name||'').trim().toLowerCase().replace(/\s+/g,' ')===name);
+  return same.length===1 ? same[0] : undefined;
 }
 // Waiver status for the reservation sheet: green "Signed", the legacy code if imported, else amber "Not signed".
 // Check-in is a status label staff pick; this is the one that means "they are here".
