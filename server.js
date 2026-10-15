@@ -56,6 +56,7 @@ app.use(express.json({ limit: '6mb' }));
 // (before static so clean URLs work)
 app.get('/admin', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'admin.html')));
 app.get('/manage', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'manage.html')));
+app.get('/waitlist', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'waitlist.html')));
 app.get('/waiver', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'waiver.html')));
 app.get('/leagues', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'leagues.html')));
 app.get('/membership', (_req, res) => res.redirect(301, '/leagues'));   // memberships were replaced by leagues

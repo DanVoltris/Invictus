@@ -52,6 +52,10 @@
       "destination": "/demo/manage.html"
     },
     {
+      "source": "/waitlist",
+      "destination": "/demo/waitlist.html"
+    },
+    {
       "source": "/waiver",
       "destination": "/demo/waiver.html"
     },
