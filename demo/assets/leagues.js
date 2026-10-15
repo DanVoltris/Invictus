@@ -120,7 +120,9 @@
   // plays week 5 next, then week 6, and a team that is up to date plays this week's and no more.
   //   weeks   that team's season from teamWeeks() (each week with its `round`, if it has one)
   // → { ok:true, week, makeup }                       makeup: it counts for an EARLIER week
-  //   { ok:false, code:'round_booked', existing }     nothing left to play: here is this week's round
+  //   { ok:false, code:'round_booked', existing, week, playedIn }   nothing left to play: here is this
+  //                                                   week's round (playedIn: the later week it is
+  //                                                   booked in, when it is not in this one)
   //   { ok:false, code:'after_deadline', regularEnd, playoffsStart }
   //   { ok:false, code:'outside_season' }
   // A break week is never owed, so it is never a make-up — but a team may still play it in that
@@ -140,7 +142,12 @@
     if (open.length) return { ok: true, week: open[0], makeup: open[0].start !== wk };
     const here = list.find((w) => w.start === wk);
     if (late && !here.round) return { ok: false, code: 'after_deadline', regularEnd: k.regularEnd, playoffsStart: k.playoffsStart };
-    return { ok: false, code: 'round_booked', existing: here.round || null };
+    // This week's round may be a booking on a LATER date standing in for it (booked ahead, so it
+    // took the earliest unplayed week). playedIn says which week that booking is really in, so the
+    // team can be told to move it if they want to play this week's round this week.
+    const r = here.round || null;
+    const at = r && r.booking_date ? list.find((w) => w.start === weekIn(league, r.booking_date)) : null;
+    return { ok: false, code: 'round_booked', existing: r, week: here, playedIn: at && at.start !== here.start ? at : null };
   }
 
   // One team's season: every week, and what they did with it.

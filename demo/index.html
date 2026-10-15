@@ -2371,6 +2371,8 @@ function renderLeagueBar(){
     if(n.code === 'after_deadline') return `<div class="lg-line"><b>${escHtml(t.teamName)}</b>: the regular season ended on ${escHtml(longDate(n.regularEnd))}${n.playoffsStart ? `, and playoffs start ${escHtml(longDate(n.playoffsStart))}` : ''}. A booking now is an ordinary session.</div>`;
     if(n.ok && n.makeup) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> has a missed round to make up: <b>week ${n.week.number}</b> (${escHtml(weekLabel(n.week))}). Your next league round counts for it, then you carry on with the weeks after. Pick any open time below and choose your team at checkout.</div>`;
     if(!c) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> — ${escHtml(t.leagueName)} is not running this week, so a booking now is an ordinary session.</div>`;
+    const later = c.round && c.round.booking_date && t.weeks.find(w => w.start === LEA.weekIn(t.league, c.round.booking_date) && w.start !== c.start);
+    if(later) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b>'s week ${c.number} round is booked for <b>${escHtml(roundLine(c.round))}</b>, in week ${later.number}. To play week ${c.number} this week instead, reschedule that booking first (cancel it, or call us to move it), then book a time below.</div>`;
     if(c.round) return `<div class="lg-line">✓ <b>${escHtml(t.teamName)}</b> has this week's round booked — <b>${escHtml(roundLine(c.round))}</b>. That is week ${c.number} of ${t.weeks.length} done; anything else you book here is an ordinary session.</div>`;
     return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> has not played week ${c.number} of ${t.weeks.length} yet. You have until ${escHtml(longDate(c.end))}. Pick any open time below and choose your team at checkout: it counts as your round and the <b>league discount</b> comes off the price. Any player on the team can book it.</div>`;
   });
@@ -2399,7 +2401,7 @@ function leagueChoices(){
     const base = { teamId:t.teamId, teamName:t.teamName, leagueName:t.leagueName, minMins:t.minMins, weeksTotal:t.weeks.length };
     if(n.ok) out.open.push({ ...base, week:n.week, round:null, makeup:!!n.makeup });
     else if(n.code === 'after_deadline') out.closed.push({ ...base, regularEnd:n.regularEnd, playoffsStart:n.playoffsStart });
-    else if(n.existing) out.taken.push({ ...base, week:(t.weeks.find(x => x.start === LEA.weekOf(day, t.weekStart)) || {}), round:n.existing });
+    else if(n.existing) out.taken.push({ ...base, week:(t.weeks.find(x => x.start === LEA.weekOf(day, t.weekStart)) || {}), round:n.existing, playedIn:n.playedIn || null });
   }
   return out;
 }
@@ -2453,7 +2455,10 @@ function renderLeaguePanel(){
     return;
   }
   if(taken.length || closed.length){
-    host.innerHTML = taken.map(t => `<div class="lg-panel is-note">
+    host.innerHTML = taken.map(t => t.playedIn ? `<div class="lg-panel is-note">
+      <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)}'s week ${t.week.number} round is booked for a later date</div>
+      <div class="lg-d">Your week ${t.week.number} round is booked for <b>${escHtml(roundLine(t.round))}</b>, which is in week ${t.playedIn.number}. To play week ${t.week.number} this week instead, <b>reschedule that booking first</b> (cancel it, or call us to move it), then book this time as your league round. Otherwise this one is an ordinary session at the normal price.</div>
+    </div>` : `<div class="lg-panel is-note">
       <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)} is up to date</div>
       <div class="lg-d">${t.week.number ? `Week ${t.week.number} is booked` : 'That week is booked'}: <b>${escHtml(roundLine(t.round))}</b>, and there is no missed week to make up. So this one is an ordinary session at the normal price.</div>
     </div>`).join('') + closed.map(t => `<div class="lg-panel is-note">

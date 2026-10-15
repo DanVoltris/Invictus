@@ -129,7 +129,7 @@ export async function createPaymentIntent(req, res) {
           error: `${lg.name}’s regular season ended on ${target.regularEnd}, and rounds after that date do not count`
             + `${target.playoffsStart ? ` (playoffs start ${target.playoffsStart})` : ''}. Book this as an ordinary session.` });
       }
-      if (!target.ok && target.existing) return res.status(409).json(leagueRoundTaken(settings, m.team, target.existing));
+      if (!target.ok && target.existing) return res.status(409).json(leagueRoundTaken(settings, m.team, target.existing, target));
       if (!target.ok) return res.status(400).json({ code: 'outside_season', error: `That date is not in ${lg.name}’s season, so it can’t be a league round.` });
       leagueRound = { team: m.team, league: lg, week: target.week, makeup: !!target.makeup,
         discountCents: leagueRoundDiscountCents({ settings, startMin, endMin }) };

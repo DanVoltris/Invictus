@@ -276,3 +276,43 @@ test('official rules: pasted text becomes numbered sections, and the form gets t
     [{ title: 'Deadlines', lines: ['February 20, 2027, is the deadline.', '2027 is the year.'] }]);
   assert.deepEqual(L.normalizeDetails({ rules: [null, { title: '  ', lines: [' '] }, 7] }).rules, []);
 });
+
+// ---- A round booked ahead counts for this week; trying to book this week says where it is ----
+// The rule (owner's call, 2026-10-15): a team that is up to date and books a date two weeks out has
+// booked THIS week's round, played late. Booking again this week is refused — but the team must be
+// told that their round for this week is the later booking, and that it has to be moved first.
+test('roundTarget: a round booked in a later week fills this week, and says which week it is really in', () => {
+  // Weeks 1 and 2 played; today is Wed of week 3 (Sep 30). They book Wed of week 5 (Oct 14).
+  const played = [{ booking_date: '2026-09-16', status: 'confirmed' }, { booking_date: '2026-09-23', status: 'confirmed' }];
+  let w = L.teamWeeks({ league: LG, todayISO: '2026-09-30', rounds: played });
+  const ahead = L.roundTarget({ league: LG, weeks: w, dateISO: '2026-10-14' });
+  assert.deepEqual([ahead.ok, ahead.week.number, ahead.makeup], [true, 3, true], 'unchanged rule: it counts for week 3');
+
+  // That booking is stored as week 3's round, played on Oct 14.
+  const later = { booking_date: '2026-10-14', league_for_week: '2026-09-28', start_min: 1140, end_min: 1320, bay_id: 'B2', status: 'confirmed' };
+  w = L.teamWeeks({ league: LG, todayISO: '2026-09-30', rounds: [...played, later] });
+  const now = L.roundTarget({ league: LG, weeks: w, dateISO: '2026-10-01' });
+  assert.equal(now.code, 'round_booked');
+  assert.equal(now.week.number, 3, 'the week they tried to book');
+  assert.equal(now.playedIn.number, 5, 'and the week its round is really booked in');
+  assert.equal(now.existing.booking_date, '2026-10-14');
+});
+
+test('roundTarget: a round played in its own week is not flagged as booked elsewhere', () => {
+  const rounds = ['2026-09-16', '2026-09-23', '2026-09-30'].map((d) => ({ booking_date: d, status: 'confirmed' }));
+  const w = L.teamWeeks({ league: LG, todayISO: '2026-09-28', rounds });
+  const r = L.roundTarget({ league: LG, weeks: w, dateISO: '2026-10-02' });
+  assert.equal(r.code, 'round_booked');
+  assert.equal(r.playedIn, null);
+});
+
+test('the refusal tells the team to reschedule the later booking first', async () => {
+  const { leagueRoundTaken } = await import(ROOT + 'lib/booking.js');
+  const settings = { bays: [{ id: 'B2', name: 'Birchwood Bay #2' }] };
+  const round = { id: 'b1', booking_date: '2026-10-14', start_min: 1140, end_min: 1320, bay_id: 'B2', league_week: '2026-09-28' };
+  const ahead = leagueRoundTaken(settings, { name: 'Bogey Boys' }, round, { week: { number: 3 }, playedIn: { number: 5 } });
+  assert.match(ahead.error, /Bogey Boys's week 3 round is already booked — for 2026-10-14, 7:00 PM to 10:00 PM in Birchwood Bay #2, which is in week 5/);
+  assert.match(ahead.error, /To play week 3 this week instead, reschedule that booking first/);
+  const same = leagueRoundTaken(settings, { name: 'Bogey Boys' }, round);
+  assert.match(same.error, /has already booked its league round for this week/, 'the ordinary case reads as before');
+});
