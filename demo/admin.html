@@ -2891,7 +2891,9 @@ function renderCustomers(){
     tr.style.cursor='pointer';
     tr.onclick=e=>{ if(e.target.closest('button')) return; openCustomer(c); };   // whole row opens the editor
     tr.querySelector('.cu-editbtn').onclick=()=>openCustomer(c);
-    tr.querySelector('.cu-del').onclick=async()=>{ if(await dbDelete('customers',id)){ toast('Customer deleted','ok'); loadCustomers(); } };
+    tr.querySelector('.cu-del').onclick=()=>confirmSheet({ title:'Delete this customer?', okLabel:'Delete customer',
+      body:`Delete <b>${esc((CUSTOMERS.find(x=>x.id===id)||{}).name||'this customer')}</b>? This removes their profile, their league place and their prepaid-hours and points history. Their bookings stay. It cannot be undone.`,
+      onOk:async()=>{ if(await dbDelete('customers',id)){ toast('Customer deleted','ok'); loadCustomers(); } } });
   });
 }
 // Grid view: one card per customer — click to open their profile (edit/delete/adjust live there).
@@ -3019,7 +3021,9 @@ function openCustomer(c){
     if(error){ toast(/duplicate|unique/i.test(error.message)?'A customer with that email already exists.':error.message,'err'); return; }
     closeSheet(); toast(isNew?'Customer added':'Customer saved','ok'); loadCustomers();
   };
-  if(!isNew) $('#c-del').onclick=async()=>{ if(await dbDelete('customers',c.id)){ closeSheet(); toast('Customer deleted','ok'); loadCustomers(); } };
+  if(!isNew) $('#c-del').onclick=()=>confirmSheet({ title:'Delete this customer?', okLabel:'Delete customer',
+    body:`Delete <b>${esc(c.name||'this customer')}</b>? This removes their profile, their league place and their prepaid-hours and points history. Their bookings stay. It cannot be undone.`,
+    onOk:async()=>{ if(await dbDelete('customers',c.id)){ closeSheet(); toast('Customer deleted','ok'); loadCustomers(); } } });
 }
 
 // Audit trail: every booking + cancellation tied to this customer (matched by email / phone / name).
@@ -5607,7 +5611,19 @@ function openManage(id){
       if(checkingIn && !waiverOnFile(cust)) waiverCheckInPrompt(b, cust);
     };
   }
-  if($('#s-cancel')) $('#s-cancel').onclick=async()=>{
+  // One click used to cancel, with no way back and nothing said about money. Ask first, and say
+  // what happens to it: a hold is released (never charged); money already taken is NOT refunded.
+  if($('#s-cancel')) $('#s-cancel').onclick=()=>{
+    const who=esc(b.customer_name||'This booking'), when=`${esc(dateLabel(b.booking_date))}, ${fmtMin(b.start_min)}–${fmtMin(b.end_min)}`;
+    const paid=isCaptured(b) ? (b.amount_cents||0) : (onlinePaid ? total : 0);
+    const money = isHeld(b) ? `The <b>${fmt(heldCents(b))}</b> hold on their card is released — they are never charged.`
+      : hasSavedCard(b) ? 'Nothing has been charged; their saved card is forgotten.'
+      : paid>0 ? `<b>They paid ${fmt(paid)}.</b> Cancelling does not refund it — refund it in Stripe if it is owed.`
+      : 'No payment was taken.';
+    confirmSheet({ title:'Cancel this booking?', okLabel:'Cancel booking', onOk:cancelBooking,
+      body:`${who} · ${when}<br><br>${money} The slot is freed for someone else.` });
+  };
+  const cancelBooking=async()=>{
     // A HELD booking has money reserved on the customer's card. Cancelling the row alone would
     // leave that hold in place for up to a week AND drop it off Holds to Charge, so nobody would
     // ever release it. Release FIRST: if that fails, the booking is still on the sheet and on the
