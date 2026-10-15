@@ -125,7 +125,7 @@ test('checkout: ticking the box records express consent — with the time, the I
   assert.equal(c.sms_unsub_at, null);
 });
 
-test('checkout: leaving the box unticked is recorded as a NO, and withdraws an earlier yes', async () => {
+test('checkout: leaving the box unticked is a NO to marketing texts, and withdraws an earlier yes — but it is not a STOP', async () => {
   world({ sms_consent: true, sms_consent_at: '2026-01-01T00:00:00.000Z', sms_consent_source: 'checkout' });
   const r = await call(confirmBooking, { body: {
     paymentIntentId: 'pi_1', name: 'Murad', email: 'murad@example.com', phone: '+12045550111',
@@ -134,9 +134,48 @@ test('checkout: leaving the box unticked is recorded as a NO, and withdraws an e
 
   assert.equal(r.out.ok, true);
   const c = me();
-  assert.equal(c.sms_consent, false, 'an untouched box is the customer saying no');
-  assert.ok(c.sms_unsub_at, 'and it stops the texts an earlier yes allowed');
+  assert.equal(c.sms_consent, false, 'an untouched box is the customer saying no to marketing texts');
+  assert.equal(c.sms_unsub_at, null, 'only a real STOP silences every text — the box starts empty, it is not an opt-out');
   assert.equal(c.sms_opt_in, true, 'the old UI preference is left alone — it was never consent');
+});
+
+// ========== receipts ==========================================================================
+// The browser's confirm usually beats Stripe's webhook, and only the webhook used to queue the
+// booking text — so most customers were never sent one. confirm-booking now queues it too, keyed
+// on the booking, so the two paths can never send it twice.
+const receipts = () => (S.db.notifications || []).filter((n) => n.template === 'booking.confirmed');
+
+test('receipt: confirm-booking queues the booking text, even with the consent box unticked', async () => {
+  world();
+  const r = await call(confirmBooking, { body: {
+    paymentIntentId: 'pi_1', name: 'Murad', email: 'murad@example.com', phone: '+12045550111', smsConsent: false,
+  } });
+  assert.equal(r.out.ok, true);
+  const sms = receipts().filter((n) => n.channel === 'sms');
+  assert.equal(sms.length, 1, 'one text for the booking');
+  assert.equal(sms[0].recipient, '+12045550111');
+  assert.equal(sms[0].dedupe_key, `booking.confirmed:sms:${r.out.bookingId}`, 'keyed on the booking, like the webhook');
+  assert.equal(sms[0].payload.paymentState, 'paid');
+});
+
+test('receipt: a held card is described as held, not paid', async () => {
+  world();
+  S.pi.status = 'requires_capture';
+  const r = await call(confirmBooking, { body: { paymentIntentId: 'pi_1', name: 'Murad', phone: '+12045550111' } });
+  assert.equal(r.out.ok, true);
+  assert.equal(receipts()[0].payload.paymentState, 'held');
+  const { TEMPLATES } = await import(ROOT + 'lib/notify.js');
+  const venue = { name: 'Invictus Golf', phone: '(204) 488-6177' };
+  const text = TEMPLATES['booking.confirmed'].sms(receipts()[0].payload, venue);
+  assert.match(text, /held on your card, charged at check-in/);
+  assert.doesNotMatch(text, /Paid/);
+});
+
+test('receipt: somebody who really texted STOP is still not sent one', async () => {
+  world({ sms_unsub_at: '2026-09-01T00:00:00.000Z' });
+  const r = await call(confirmBooking, { body: { paymentIntentId: 'pi_1', name: 'Murad', phone: '+12045550111' } });
+  assert.equal(r.out.ok, true, 'the booking itself is never refused over a message');
+  assert.equal(receipts().filter((n) => n.channel === 'sms').length, 0);
 });
 
 test('checkout: a request with no consent field changes nothing at all', async () => {

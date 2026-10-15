@@ -4,6 +4,7 @@ import { getSettings, getBookingsForDate, getOverridesForDate, createHold, promo
          releaseHold, deferredHoldsReady, bookingExistsForSetupIntent, stripeCustomerForContact,
          rememberStripeCustomer, crossDayProblem, accountCustomerForRequest, teamMembershipFor, leagueRoundTarget, teamMoneyFor } from '../lib/db.js';
 import { paymentPatchFor, releaseUnbookedHold, savedCardPatchFor, forgetSavedCard } from '../lib/holds.js';
+import { notifyBookingConfirmed } from '../lib/notify.js';
 
 // One customer checkout, start to finish. Dispatch on ?action=, the same shape as
 // api/gift-cards.js, api/leagues.js and api/waitlist.js:
@@ -418,8 +419,10 @@ export async function confirmBooking(req, res) {
     bookingId = ins.id;
   }
   await setCustomerNote({ bookingId, note });
-  await upsertCustomer({ name: n, email: e, phone: p, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+  const up = await upsertCustomer({ name: n, email: e, phone: p, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
   await saveSmsConsent(req, { name: n, email: e, phone: p, smsConsent });
+  await sendReceipt({ bookingId, slot, md, name: n, email: e, phone: p, customerId: up && up.id,
+    paymentState: held ? 'held' : 'paid', amountCents: held ? (patch.authorized_cents || pi.amount) : (patch.amount_cents || pi.amount) });
 
   // Loyalty points are retired: nothing is spent and nothing is earned here any more. Gift cards
   // and promo codes are still settled by api/webhook.js, exactly as before.
@@ -489,9 +492,11 @@ async function confirmSavedCard(req, res, stripe) {
     bookingId = ins.id;
   }
   await setCustomerNote({ bookingId, note });
-  await upsertCustomer({ name: n, email: e, phone: p, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
+  const up = await upsertCustomer({ name: n, email: e, phone: p, smsOptIn: typeof sms === 'boolean' ? sms : undefined });
   await rememberStripeCustomer({ email: e, phone: p, stripeCustomerId: saved.stripe_customer });
   await saveSmsConsent(req, { name: n, email: e, phone: p, smsConsent });
+  await sendReceipt({ bookingId, slot, md, name: n, email: e, phone: p, customerId: up && up.id,
+    paymentState: 'card_saved', amountCents: saved.deferred_cents });
 
   return res.status(200).json({
     ok: true, bookingId,
@@ -508,6 +513,23 @@ async function confirmSavedCard(req, res, stripe) {
 function leagueRoundOutcome(patch, dropped) {
   if (!patch || !patch.league_team_id) return null;
   return { counted: !dropped };
+}
+
+// The customer's booking text. The webhook queues the same one; both are keyed on the booking, so
+// whichever arrives first sends it and the other is a no-op (lib/notify.js dedupe). Until this was
+// here, the browser — which usually wins — wrote the booking and the webhook then found it and
+// returned, so most customers were never sent a confirmation at all. Best-effort: a booking that
+// has been paid for is never failed over a message.
+async function sendReceipt({ bookingId, slot, md, name, email, phone, customerId, paymentState, amountCents }) {
+  try {
+    await notifyBookingConfirmed({
+      bookingId, dateISO: slot.dateISO, bayId: slot.bayId, bayName: md.bayName,
+      startMin: slot.startMin, endMin: slot.endMin, players: Number(md.players) || null,
+      amountCents, paymentState, name, email, phone, customerId: customerId || null,
+    });
+  } catch (err) {
+    console.error('confirm-booking: receipt not queued —', err && err.message ? err.message : err);
+  }
 }
 
 // The consent tick, written where lib/notify.js looks for it. Three rules, all of them here:

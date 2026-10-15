@@ -378,7 +378,7 @@ async function recordPaidOrHeldBooking(event, stripe) {
     await notifyBookingConfirmed({
       bookingId, dateISO: slot.dateISO, bayId: slot.bayId, bayName: md.bayName,
       startMin: slot.startMin, endMin: slot.endMin, players: Number(md.players) || null,
-      amountCents: pi.amount, name, email, phone, customerId: up.id || null,
+      amountCents: pi.amount, paymentState: held ? 'held' : 'paid', name, email, phone, customerId: up.id || null,
     });
   }
 }
