@@ -382,6 +382,44 @@ test('invite: somebody already on the team is told so instead of being sent a de
   assert.equal(S.db.league_team_invites.length, 0);
 });
 
+test('invite-claim: a player already on another team is refused, not charged again and not moved', async () => {
+  world();
+  const teamId = await ownTeam();                                       // the captain's Aces
+  const theirs = await db.createLeagueTeam({ leagueId: 'L-team', name: 'Birdies', captainCustomerId: 'c-friend', paidCents: 30000, stripeSessionId: 'cs_birdies' });
+  await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '2045550116' }, ...cap });
+  const token = S.db.league_team_invites.at(-1).token;
+  const sessionsBefore = S.stripe.filter(([c]) => c === 'checkout.sessions.create').length;
+
+  const r = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token }, ...friend });
+  assert.equal(r.code, 409);
+  assert.match(r.out.error, /You already play for Birdies/);
+  assert.equal(S.stripe.filter(([c]) => c === 'checkout.sessions.create').length, sessionsBefore, 'not sent to pay a second time');
+  const row = S.db.league_members.find((m) => m.customer_id === 'c-friend');
+  assert.equal(row.team_id, theirs.teamId, 'still on their own team');
+  assert.ok(!S.db.league_team_invites.at(-1).claimed_at, 'the invite is not used up');
+});
+
+test('invite-claim: a solo player who already paid takes the seat with that payment', async () => {
+  world();
+  // Two seats bought seat by seat; the captain has paid one, so the second costs a share to join.
+  const made = await db.createLeagueTeam({ leagueId: 'L-team', name: 'Aces', captainCustomerId: 'c-cap', paidCents: 7500, stripeSessionId: 'cs_seed', seats: 2, shareCents: 7500 });
+  await soloSignUp(other);
+  const paidSolo = S.db.league_members.find((m) => m.customer_id === 'c-other');
+  await run(leaguesApi, { query: { action: 'invite' }, body: { teamId: made.teamId, phone: '2045550199' }, ...cap });
+  const token = S.db.league_team_invites.at(-1).token;
+  const sessionsBefore = S.stripe.filter(([c]) => c === 'checkout.sessions.create').length;
+
+  const r = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token }, ...other });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.ok(!r.out.payRequired, 'no second payment');
+  assert.equal(S.stripe.filter(([c]) => c === 'checkout.sessions.create').length, sessionsBefore);
+  const rows = S.db.league_members.filter((m) => m.customer_id === 'c-other');
+  assert.equal(rows.length, 1, 'one roster row, the solo one, now on the team');
+  assert.equal(rows[0].team_id, made.teamId);
+  assert.equal(rows[0].paid_cents, paidSolo.paid_cents, 'what they paid is still on record');
+  assert.ok(S.db.league_team_invites.at(-1).claimed_at, 'the invite is spent');
+});
+
 test('invite-info: public, and it says only what the person who tapped the link needs', async () => {
   world();
   const teamId = await ownTeam();
