@@ -258,7 +258,8 @@
         status: b.status,
         status_label: b.status_label || null,
         source: b.source || 'online',
-        amount_cents: Number(b.amount_cents) || 0,
+        // Money KEPT: what was paid less anything refunded since (a shortened session, a cancel).
+        amount_cents: Math.max(0, (Number(b.amount_cents) || 0) - (Number(b.refunded_cents) || 0)),
         is_block: b.status === 'blocked',
         is_cancelled: b.status === 'cancelled',
         is_no_show: isNoShowLabel(b.status_label),
@@ -323,6 +324,9 @@
     const live = inRange.filter((f) => !f.is_block && !f.is_cancelled);
     const blocks = inRange.filter((f) => f.is_block);
     const cancelled = inRange.filter((f) => f.is_cancelled);
+    // A cancelled booking can still have earned money (a late cancel kept, a capture before the
+    // cancel). It is not a session — no minutes, no booking count — but it is revenue.
+    const kept = cancelled.filter((f) => f.amount_cents > 0);
 
     const windows = {
       allDay: { startMin: 0, endMin: 1440 },
@@ -353,9 +357,15 @@
         bookedMin += m;
         bookings += 1;
         perBayBooked[f.bay_id] = (perBayBooked[f.bay_id] || 0) + m;
-        // Revenue is pro-rated by the share of the session inside the window, so a
-        // 3pm-6pm booking contributes only its 4pm-6pm slice to prime-time revenue.
-        revenueCents += f.minutes > 0 ? Math.round(f.amount_cents * m / f.minutes) : f.amount_cents;
+      }
+      // Revenue is pro-rated by the share of the session inside the window, so a 3pm-6pm booking
+      // contributes only its 4pm-6pm slice to prime-time revenue. The all-day figure takes every
+      // session whole: one running past midnight (end_min > 1440) is still one session's money,
+      // not the half of it that falls before midnight.
+      for (const f of [...live, ...kept]) {
+        if (key === 'allDay') { revenueCents += f.amount_cents; continue; }
+        const m = overlap(f.start_min, f.end_min, win.startMin, win.endMin);
+        if (m > 0) revenueCents += f.minutes > 0 ? Math.round(f.amount_cents * m / f.minutes) : f.amount_cents;
       }
 
       utilisation[key] = {
@@ -410,7 +420,7 @@
         member: memberCount,
         guest: live.length - memberCount,
         memberPct: pct(memberCount, live.length),
-        memberRevenueCents: live.filter((f) => f.is_member).reduce((s, f) => s + f.amount_cents, 0),
+        memberRevenueCents: [...live, ...kept].filter((f) => f.is_member).reduce((s, f) => s + f.amount_cents, 0),
       },
       channel: Object.assign({}, channel, {
         walkInPct: pct(channel.walkIn, live.length),
@@ -466,6 +476,7 @@
       if (f.is_no_show) row.noShows += 1;
     }
     for (const f of cancelled) touch(bucketOf(f.booking_date, bucket)).cancelled += 1;
+    for (const f of kept) touch(bucketOf(f.booking_date, bucket)).revenueCents += f.amount_cents;
     const volume = [...series.values()]
       .sort((a, b) => (a.bucket < b.bucket ? -1 : a.bucket > b.bucket ? 1 : 0))
       .map((r) => Object.assign(r, { utilisationPct: pct(r.minutes, r.availableMin) }));
@@ -492,7 +503,7 @@
 
   const MISSING_COLUMN = /column .* does not exist|does not exist|schema cache|42703/i;
 
-  const BOOKING_COLS = 'id,bay_id,booking_date,start_min,end_min,status,status_label,source,amount_cents,customer_email,customer_phone,created_at';
+  const BOOKING_COLS = 'id,bay_id,booking_date,start_min,end_min,status,status_label,source,amount_cents,refunded_cents,customer_email,customer_phone,created_at';
   const BOOKING_COLS_BASE = 'id,bay_id,booking_date,start_min,end_min,status,source,amount_cents,customer_email,customer_phone,created_at';
   const CUSTOMER_COLS = 'id,email,phone';
   const CUSTOMER_COLS_BASE = 'id,email,phone';
