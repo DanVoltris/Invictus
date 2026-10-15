@@ -10,7 +10,7 @@ import {
   markGiftCardDelivered, recordGiftCardAttempt, giftCardAttemptsBlocked,
   bookWithGiftCard, customerHoursByContact, upsertCustomer,
   reservePromo, releasePromo, redeemPromo, customerKeyFor, isLeaguePlayer, leaguePlayerForRequest
-, crossDayProblem } from '../lib/db.js';
+, crossDayProblem, bookingIdForPayment } from '../lib/db.js';
 import { notifyGiftCard } from '../lib/notify.js';
 import { retrieveCheckoutIntent } from '../lib/holds.js';
 
@@ -528,10 +528,12 @@ async function redeem(req, res) {
 
   let redeemedCents = 0, already = 0;
   const results = [];
+  // The booking this payment became, so the debit is tied to it and a cancellation can give it back.
+  const paidFor = b.bookingId || await bookingIdForPayment(pi.id);
   for (const r of reservations) {
     const out = await redeemGiftCard({
       cardId: r.gift_card_id, ref: pi.id, chargedCents: pi.amount,
-      bookingId: b.bookingId || r.booking_id || null,
+      bookingId: paidFor || r.booking_id || null,
       note: (pi.metadata && pi.metadata.dateISO) ? `Booking ${pi.metadata.dateISO}` : 'Booking',
     });
     if (out.already) { already += 1; results.push({ already: true, balanceCents: out.balance }); continue; }

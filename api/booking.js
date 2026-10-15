@@ -1,4 +1,4 @@
-import { admin, getSettings } from '../lib/db.js';
+import { admin, getSettings, creditBackOnCancel } from '../lib/db.js';
 import { normalizeSettings, bayName, fmtMin, hoursUntilBooking, winnipegTodayISO,
          stripeStatus, stripeClient } from '../lib/booking.js';
 import { issueRefund } from '../lib/refunds.js';
@@ -135,10 +135,25 @@ async function cancel(req, res) {
   //                         the path in lib/refunds.js, exactly as before.
   //   'card_saved' / 'hold_failed'  a far-ahead booking whose card was only SAVED (migration 0035).
   //                         Never charged either: releasing just forgets the card.
+  // Gift-card value and prepaid hours spent on it come back too — before, only a card was refunded,
+  // and a booking paid entirely with either was told "nothing to refund".
+  const credit = creditMessage(await creditBackOnCancel(id));
   if (NEVER_CHARGED.includes(data.payment_state)) {
-    return res.status(200).json({ ok: true, release: await releaseOnSelfCancel(id) });
+    return res.status(200).json({ ok: true, release: await releaseOnSelfCancel(id), ...(credit && { credit }) });
   }
-  res.status(200).json({ ok: true, refund: await refundOnSelfCancel(id) });
+  const refund = await refundOnSelfCancel(id);
+  // "Nothing to refund" is only true of the card when something else paid for it.
+  if (credit && refund.status === 'none') refund.message = 'Your booking is cancelled.';
+  res.status(200).json({ ok: true, refund, ...(credit && { credit }) });
+}
+
+// What came back besides money on a card, in the customer's words — or null when nothing did.
+function creditMessage(c) {
+  if (!c || (!c.giftCents && !c.hoursMin)) return null;
+  const parts = [];
+  if (c.giftCents) parts.push(`$${(c.giftCents / 100).toFixed(2)} back on your gift card`);
+  if (c.hoursMin) parts.push(`${+(c.hoursMin / 60).toFixed(2)} prepaid hour${c.hoursMin === 60 ? '' : 's'} back on your account`);
+  return { giftCents: c.giftCents, hoursMin: c.hoursMin, message: `We've put ${parts.join(' and ')}.` };
 }
 
 // The release half of the cancellation above — the hold version of refundOnSelfCancel. Same

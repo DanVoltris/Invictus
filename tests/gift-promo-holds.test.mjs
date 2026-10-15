@@ -24,6 +24,7 @@ mock.module(ROOT + 'lib/db.js', { namedExports: {
   redeemGiftCard: rec('redeemGiftCard', { redeemed: 1000, balance: 4000 }),
   promoReservationById: async (id) => (id === 'pr_1' ? { id: 'pr_1', status: 'reserved' } : null),
   redeemPromo: rec('redeemPromo', { ok: true }),
+  bookingIdForPayment: async () => 'bk_from_pi',
 } });
 const { default: gift } = await import(ROOT + 'api/gift-cards.js');
 const { default: promos } = await import(ROOT + 'api/promos.js');
@@ -42,6 +43,7 @@ test('gift card: a held booking is debited at checkout, against what the card pa
   assert.equal(r.out.redeemedCents, 1000);
   const [, args] = calls.find(([n]) => n === 'redeemGiftCard');
   assert.equal(args.chargedCents, 3480, 'the card amount — what the reservation expects');
+  assert.equal(args.bookingId, 'bk_from_pi', 'tied to the booking, so a cancellation can give it back');
 });
 
 test('promo: a held booking counts the use', async () => {

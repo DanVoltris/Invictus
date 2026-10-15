@@ -112,10 +112,13 @@ async function doCancel(b){
     // cancellation with a `refund` object whose `message` is already written for the customer
     // (refunded / recorded but not sent / nothing to refund), and that message is shown verbatim.
     // When it isn't there, this page says nothing about money at all.
-    const rf = r.refund || {};
-    const moneyNote = rf.message
+    // A card that was only HELD answers with `release`, not `refund`; gift-card value and prepaid
+    // hours given back arrive as `credit`. Each message is the server's, shown as written.
+    const rf = r.refund || r.release || {};
+    const moneyNote = (rf.message
       ? `<div class="note ${rf.status==='pending' ? 'warn' : 'info'}" style="text-align:left">${esc(rf.message)}</div>`
-      : '';
+      : '') + (r.credit && r.credit.message
+      ? `<div class="note info" style="text-align:left">${esc(r.credit.message)}</div>` : '');
     render(`<div class="center">
       <div class="big" style="color:var(--ok)">✓</div>
       <h1>Booking cancelled</h1>
