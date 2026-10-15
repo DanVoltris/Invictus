@@ -201,6 +201,7 @@
   .hold-timer.warn { background:rgba(229,57,53,.10); border-color:rgba(229,57,53,.45); color:#B3261E; }
   .toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(12px); background:#14161A; border:1px solid rgba(255,255,255,.14); color:#fff; padding:11px 18px; border-radius:10px; font-size:14px; z-index:200; opacity:0; pointer-events:none; transition:.2s; max-width:90vw; text-align:center; box-shadow:0 8px 30px rgba(16,24,40,.28); }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.is-notice { pointer-events:auto; cursor:pointer; }
   .cell.buffer { color: var(--dim); cursor: not-allowed; border-color: var(--border);
     background: repeating-linear-gradient(45deg,#F0F2F5,#F0F2F5 6px,#E6E9EE 6px,#E6E9EE 12px); }
   .cell.buffer .price { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
@@ -1685,6 +1686,16 @@ function toast(msg){
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'), 3800);
 }
 
+// A message that must not vanish on its own — it is about their money. Stays until dismissed.
+function notice(msg){
+  toast(msg);
+  const t=$('#toast'); clearTimeout(t._h);
+  t.classList.add('is-notice'); t.setAttribute('role','alert'); t.tabIndex=0; t.title='Dismiss';
+  const close=()=>{ t.classList.remove('show','is-notice'); t.removeAttribute('role'); t.removeAttribute('tabindex'); t.title=''; t.onclick=t.onkeydown=null; };
+  t.onclick=close; t.onkeydown=e=>{ if(e.key==='Enter'||e.key==='Escape'||e.key===' '){ e.preventDefault(); close(); } };
+  t.focus();
+}
+
 /* The line above the Pay button, and the Pay button's own label. Both are driven by the one value
    payModeOf() returned, so they can never disagree with each other.
 
@@ -1901,6 +1912,8 @@ $('#sc-pay').onclick=async ()=>{
           sms: $('#sc-sms') ? $('#sc-sms').checked : undefined,
           smsConsent: smsConsentGiven() }) })).json();
       }catch(e){ /* the card is saved; the webhook backup can still write the booking */ }
+      const lost=notSavedMessage(conf);
+      if(lost){ showNotSaved(lost, btn); return; }
       await settleCredits(setupIntent.id);
       $('#pay-overlay').classList.remove('show');
       showConfirmation($('#sc-name').value.trim()||'Guest', amountCents, 'save');
@@ -1935,12 +1948,32 @@ $('#sc-pay').onclick=async ()=>{
         sms: $('#sc-sms') ? $('#sc-sms').checked : undefined,
         smsConsent: smsConsentGiven() }) })).json();
     }catch(e){ /* payment already succeeded; the webhook backup can still catch it */ }
+    const lost=notSavedMessage(conf);
+    if(lost){ showNotSaved(lost, btn); return; }
     await settleCredits(paymentIntent.id);
     $('#pay-overlay').classList.remove('show');
     showConfirmation($('#sc-name').value.trim()||'Guest', paymentIntent.amount, payModeOfPI(paymentIntent));
     noteLeagueRound(conf);
   }else{ btn.innerHTML=label; btn.disabled=false; }
 };
+
+/* confirm-booking's answer. Only an explicit "not saved" is a failure: no answer at all (the
+   connection dropped) still confirms, because the payment went through and the webhook backup
+   writes the booking. */
+function notSavedMessage(conf){
+  return conf && conf.ok===false ? (conf.error || 'We could not save your booking — please contact the shop.') : null;
+}
+/* The payment went through but the booking was not saved — the slot went to someone else while
+   they were paying. Say so in the server's own words (it knows whether the card was held,
+   released or charged) instead of confirming a bay they do not have. That payment is spent, so
+   the button stays off; closing the sheet starts a clean checkout. */
+function showNotSaved(msg, btn){
+  HELD=null; holdActive=false; stopHoldTimer();
+  releaseCredits();
+  elements=null;
+  $('#pay-error').textContent=msg;
+  btn.textContent='Not booked';
+}
 
 /* Turn the reservations into real debits, now that Stripe says the payment succeeded. Both
    endpoints re-read the PaymentIntent from Stripe and both are idempotent, so calling them from
@@ -2028,6 +2061,8 @@ async function handleReturn(){
         let r=null;
         try{ r=await (await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ paymentIntentId: setupIntent.id }) })).json(); }catch(e){}
         HELD=null; holdActive=false; stopHoldTimer(); piCache=null;
+        const lost=notSavedMessage(r);
+        if(lost){ notice(lost); history.replaceState({}, '', location.pathname); return; }
         $('#conf-code').textContent='JH-'+Math.abs([...setupIntent.id].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7)).toString(36).slice(0,6).toUpperCase();
         $('#conf-msg').textContent=confMsg('', 'save', ((r && r.amountCents) || 0)/100);
         $('#conf-recap').innerHTML=(r && r.amountCents) ? moneyLine('save', r.amountCents/100) : '';
@@ -2046,8 +2081,10 @@ async function handleReturn(){
     // at checkout without the money having moved.
     if(paymentIntent && (paymentIntent.status==='succeeded' || paymentIntent.status==='requires_capture')){
       // Confirm the booking on return too (billing details are pulled server-side from the charge).
-      try{ await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ paymentIntentId: paymentIntent.id }) }); }catch(e){}
-      showStripeConfirmation(paymentIntent);
+      let r=null;
+      try{ r=await (await fetch('/api/confirm-booking',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ paymentIntentId: paymentIntent.id }) })).json(); }catch(e){}
+      const lost=notSavedMessage(r);
+      if(lost) notice(lost); else showStripeConfirmation(paymentIntent);
     }
   }catch(e){}
   history.replaceState({}, '', location.pathname);
