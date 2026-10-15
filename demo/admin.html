@@ -3974,6 +3974,16 @@ function leagueTeamsBoard(ctx){
           if(!r.ok){ toast(r.error||'Could not place that player.','err'); reload(); return; }
           toast(`${row.name} is on ${r.teamName}${r.grew?' — a seat was added for them':''}`,'ok'); await loadLeagueIndex(); reload(); return;
         }
+        // From one team to another: the same size rule the server applies everywhere else — a
+        // team holds the seats its captain bought (else the league's team size); subs take none.
+        if(to && row.role!=='sub'){
+          const dest=teams.find(x=>x.id===to), size=dest&&(dest.seats||league.team_size);
+          const onIt=active.filter(x=>x.team_id===to && x.role!=='sub').length;
+          if(size && onIt>=size){
+            toast(`${dest.name} is full — it holds ${size} player${size===1?'':'s'}. Move or remove someone from it first.`,'err');
+            e.target.value=row.team_id||''; return;
+          }
+        }
         if(await dbUpdate('league_members',row.id,{ team_id:to })){ toast('Player moved','ok'); reload(); }
       };
       p.querySelector('.tb-remove').onclick=()=>removePlayer(ctx,row);
