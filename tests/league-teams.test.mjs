@@ -890,6 +890,28 @@ test('the team fills up while a friend is paying: they are refunded in full and 
   assert.equal(S.db.league_seat_payments.length, 2, 'the refunded payment is not a seat');
 });
 
+test('the captain pays every seat while a friend is on Checkout: the friend joins and is refunded in full', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-pair', 'Duo', 2);   // one seat left, $100
+  const token = await inviteToken(teamId, '2045550116');
+  const claim = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token }, ...friend });
+  assert.equal(claim.out.payRequired, true, 'the friend is sent to pay for the open seat');
+
+  // Meanwhile the captain covers it.
+  const pay = await run(leaguesApi, { query: { action: 'pay-seats' }, body: { teamId, seats: 1 }, ...cap });
+  assert.equal((await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId: sessionOf(pay.out.url) }, ...cap })).code, 200);
+  const seatsBefore = S.db.league_seat_payments.length;
+
+  const done = await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId: sessionOf(claim.out.url) }, ...friend });
+  assert.equal(done.code, 200, JSON.stringify(done.out));
+  const refund = S.stripe.find((c) => c[0] === 'refunds.create');
+  assert.ok(refund, 'the friend\'s payment is refunded');
+  assert.equal(refund[1].payment_intent, `pi_${sessionOf(claim.out.url)}`);
+  assert.equal(S.db.league_seat_payments.length, seatsBefore, 'not recorded as a third seat on a two-seat team');
+  assert.ok(S.db.league_members.some((x) => x.customer_id === 'c-friend' && x.team_id === teamId), 'and they are on the team');
+  assert.equal((await db.teamMoneyFor(teamId)).money.paidSeats, 2);
+});
+
 test('what the captain owes: unpaid seats × share, due once the season has started', async () => {
   seatWorld();
   const teamId = await buySplitTeam('L-range', 'Quad', 4);
