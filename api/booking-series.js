@@ -944,8 +944,10 @@ async function leagueCollect(req, res) {
 
 // ----- end ----------------------------------------------------------------------------------
 //
-// Stop a recurrence. Everything still ahead is cancelled; what has already been played is left
-// exactly as it is. The series is marked 'ended' so the horizon pass stops picking it up.
+// Stop a recurrence. The series is marked 'ended' so the horizon pass stops booking new dates.
+//   keepBooked: true   that is all — dates already booked stand ("Stop repeating")
+//   otherwise          everything still ahead is cancelled too ("Cancel the whole series"),
+//                      including an occurrence moved to another date; the past is left alone.
 async function end(req, res) {
   if (!(await staff(req, res, 'booking.write'))) return;
   const b = req.body || {};
@@ -955,8 +957,11 @@ async function end(req, res) {
   if (!s) return res.status(404).json({ ok: false, error: 'No such series.' });
 
   const from = isDate(b.fromDate) ? b.fromDate : winnipegTodayISO();
-  const occ = await seriesOccurrences(id, s.until_date || s.materialised_through);
-  const ahead = occ.filter((o) => o.state === 'booked' && o.occurrence_date >= from && o.detail && o.detail.groupId);
+  const occ = b.keepBooked ? [] : await seriesOccurrences(id, s.until_date || s.materialised_through);
+  // A moved occurrence is ahead or behind by the date it was moved TO, not its recurrence date.
+  const ahead = occ.filter((o) => o.detail && o.detail.groupId && (
+    (o.state === 'booked' && o.occurrence_date >= from)
+    || (o.state === 'moved' && String(o.detail.bookingDate || '') >= from)));
 
   const cancelled = [];
   for (const o of ahead) {

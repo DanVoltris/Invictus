@@ -315,3 +315,34 @@ test('…but a customer can still never price (so never book) a past date', asyn
   assert.throws(() => priceForBooking({ dateISO: past, bayId: 'B1', startMin: 600, endMin: 660 }), /Date in the past/);
   assert.ok(priceForBooking({ dateISO: past, bayId: 'B1', startMin: 600, endMin: 660, allowPast: true }) > 0, 'only the staff path opts in');
 });
+
+// ----- the series sheet's two buttons ------------------------------------------------------------
+// "Stop repeating" promised "dates already booked are left exactly as they are" but cancelled them;
+// "Cancel the whole series" called ?action=cancel, which takes one occurrence, and always failed.
+// Both are ?action=end now: keepBooked stops new dates only; without it everything ahead goes,
+// including an occurrence moved to another date (which end used to miss).
+test('series end: keepBooked stops the series and cancels nothing', async () => {
+  returns.seriesById = async () => ({ id: SID, status: 'active' });
+  returns.seriesOccurrences = async () => [{ occurrence_date: '2099-01-01', state: 'booked', detail: { groupId: GID } }];
+  try {
+    const r = await call(series, { action: 'end', token: 'tok-admin', body: { seriesId: SID, keepBooked: true } });
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    assert.equal(r.body.cancelledCount, 0);
+    assert.deepEqual(writes(), ['updateSeries'], 'marked ended, nothing cancelled');
+  } finally { delete returns.seriesById; delete returns.seriesOccurrences; }
+});
+
+test('series end: the whole-series cancel also takes a date that was moved, and leaves the past', async () => {
+  const moved = '33333333-3333-4333-8333-333333333333', past = '44444444-4444-4444-8444-444444444444';
+  returns.seriesById = async () => ({ id: SID, status: 'active' });
+  returns.seriesOccurrences = async () => [
+    { occurrence_date: '2099-01-01', state: 'booked', detail: { groupId: GID } },
+    { occurrence_date: '2099-01-08', state: 'moved',  detail: { groupId: moved, bookingDate: '2099-01-09' } },
+    { occurrence_date: '2000-01-01', state: 'booked', detail: { groupId: past } },
+  ];
+  try {
+    const r = await call(series, { action: 'end', token: 'tok-admin', body: { seriesId: SID } });
+    assert.equal(r.code, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.cancelled.map((c) => c.groupId).sort(), [GID, moved].sort());
+  } finally { delete returns.seriesById; delete returns.seriesOccurrences; }
+});

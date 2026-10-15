@@ -7776,21 +7776,23 @@ async function openSeries(seriesId){
     $('#bk-date').value=btn.dataset.d; dpSync('#bk-date'); loadSchedule();
   });
 
-  const seriesAction=(action, title, body, okLabel, done)=>confirmSheet({
+  const seriesAction=(action, title, body, okLabel, done, extra={})=>confirmSheet({
     title, body, okLabel,
     onOk:async()=>{
       // Ending or cancelling a series rewrites many bookings at once and is refunded through
       // Stripe, so it is the server's job, not a browser round of table updates.
       const r = DEMO_MODE ? { ok:true, cancelled:upcoming.length }
-                          : await apiPost('/api/booking-series?action='+action, { seriesId });
+                          : await apiPost('/api/booking-series?action='+action, { seriesId, ...extra });
       if(!r.ok){ toast(r.error||'That could not be done.','err'); return; }
       closeSheet(); toast(done,'ok'); loadSchedule();
     },
   });
   if($('#s-end')) $('#s-end').onclick=()=>seriesAction('end','Stop this series?',
     `<div class="dim" style="font-size:13px">${esc(s.label||'This series')} stops repeating. Dates already booked are left exactly as they are.</div>`,
-    'Stop repeating','Series stopped — nothing new will be booked');
-  if($('#s-kill')) $('#s-kill').onclick=()=>seriesAction('cancel','Cancel the whole series?',
+    'Stop repeating','Series stopped — nothing new will be booked', { keepBooked:true });
+  // "end" without keepBooked is the cancel: there is no series-wide ?action=cancel (that one takes
+  // a single occurrence), which is why this button used to fail with "Invalid booking id".
+  if($('#s-kill')) $('#s-kill').onclick=()=>seriesAction('end','Cancel the whole series?',
     `<div class="dim" style="font-size:13px">${upcoming.length} booking${upcoming.length===1?'':'s'} still to come ${upcoming.length===1?'is':'are'} cancelled and the bays freed. Sessions already played are untouched.</div>`,
     'Cancel every date ahead','Series cancelled');
 }
