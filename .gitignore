@@ -5,3 +5,6 @@ node_modules/
 .tmp/
 .env.bak-*
 .env*
+
+# Local-only SQL that carries a secret (e.g. the waitlist sweep schedule). Never commit.
+*.local.sql
