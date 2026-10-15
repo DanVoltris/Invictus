@@ -1446,6 +1446,26 @@ test('the roster lock: after the lock week the captain adds nobody, an old invit
   assert.equal((await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: fresh.token }, ...other })).code, 200);
 });
 
+test('the roster lock: a captain invite sent on the evening of lock day lapses too (Winnipeg date, not UTC)', async () => {
+  ruleWorld({ rosterLockWeek: 4 });
+  const teamId = await ownTeam();
+  await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '2045550116' }, ...cap });
+  const invite = S.db.league_team_invites.at(-1);
+  const lg = S.db.leagues[0];
+  lg.season_start = mondayOf(addDays(-28)); lg.season_end = addDays(8 * 7 - 1, lg.season_start);   // today is in week 5
+  const lockOn = globalThis.InvictusLeagues.leagueDates(lg).rosterLockOn;
+  // 8 PM on lock day in Winnipeg is already the next day in UTC.
+  const eightPm = ['-05:00', '-06:00'].map((z) => new Date(`${lockOn}T20:00:00${z}`).toISOString())
+    .find((iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Winnipeg' }).format(new Date(iso)) === lockOn);
+  assert.ok(eightPm.slice(0, 10) > lockOn, 'the case in question: its UTC date is after the lock');
+  invite.created_at = eightPm;
+
+  const late = await run(leaguesApi, { query: { action: 'invite-claim' }, body: { token: invite.token }, ...friend });
+  assert.equal(late.code, 409);
+  assert.equal(late.out.code, 'roster_locked');
+  assert.equal(S.db.league_members.filter((m) => m.customer_id === 'c-friend').length, 0);
+});
+
 test('rule reminders: each captain is told once, in the week before rosters lock and before the playoffs', async () => {
   const w = ruleWorld();
   const lg = S.db.leagues[0];

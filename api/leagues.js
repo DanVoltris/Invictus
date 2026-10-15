@@ -1,4 +1,4 @@
-import { stripeStatus, stripeClient, normalizeSettings, winnipegTodayISO } from '../lib/booking.js';
+import { stripeStatus, stripeClient, normalizeSettings, winnipegTodayISO, winnipegDateOf } from '../lib/booking.js';
 import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmLeagueCheckout, leaguesForCustomer,
          customerHoursByContact, isLeaguePlayer, normPhone, accountCustomerForRequest, staffContext,
          listTeamLeagues, teamLeagueById, leagueTeamById, createLeagueTeam, confirmLeagueTeamCheckout,
@@ -436,7 +436,10 @@ async function inviteClaim(req, res) {
   const pending = await teamInviteByToken(token);
   if (pending && pending.league && pending.invite && !pending.invite.claimed_at) {
     const k = L.leagueDates(pending.league);
-    if (L.rosterLocked(pending.league, winnipegTodayISO()) && String(pending.invite.created_at || '').slice(0, 10) <= k.rosterLockOn) {
+    // The day the invite was made, in Winnipeg: one sent at 8 PM on lock day is stamped tomorrow in
+    // UTC, and read that way it looked like a staff invite from after the lock and never lapsed.
+    const made = pending.invite.created_at ? winnipegDateOf(pending.invite.created_at) : '';
+    if (L.rosterLocked(pending.league, winnipegTodayISO()) && made <= k.rosterLockOn) {
       return res.status(409).json({ ok: false, code: 'roster_locked',
         error: `Rosters for ${pending.league.name} locked after week ${k.rosterLockWeek} (${k.rosterLockOn}), so this invitation can no longer be used. Call the shop if something needs correcting.` });
     }
