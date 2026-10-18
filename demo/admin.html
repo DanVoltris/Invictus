@@ -3874,13 +3874,20 @@ function leagueTeamsBoard(ctx){
       <div><b>${esc(x.name)}</b> <span class="pill info">Sub</span><div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
       ${edit?`<button class="btn btn-ghost btn-sm tb-remove" aria-label="Remove ${esc(x.name)} as a substitute">✕</button>`:''}
     </div>`;
+  // Is the person behind an invite actually on the team? An accepted invite whose person is not
+  // (the Oct 2026 bug, or a payment that never settled) gets the same two buttons as a waiting one.
+  const inviteOnTeam=i=>!!i.claimed_customer_id && active.some(m=>m.customer_id===i.claimed_customer_id && m.team_id===i.team_id);
   const inviteRow=i=>{
+    const on=inviteOnTeam(i), t=teams.find(x=>x.id===i.team_id), split=!!(t && t.seats && t.share_cents>0);
     const state = i.revoked_at ? '<span class="pill cancelled">Withdrawn</span>'
-      : i.claimed_at ? `<span class="pill confirmed">Joined ${esc(shortDate2(String(i.claimed_at).slice(0,10)))}</span>`
+      : on ? `<span class="pill confirmed">Joined ${esc(shortDate2(String(i.claimed_at).slice(0,10)))}</span>`
+      : i.claimed_at ? '<span class="pill warn">Accepted — not on the team</span>'
       : '<span class="pill warn">Waiting</span>';
+    const add = edit && !i.revoked_at && !on
+      ? `${i.role!=='sub' && split && can('money.write') ? '<button class="btn btn-ghost btn-sm tb-counter">Paid at counter</button>' : ''}<button class="btn btn-ghost btn-sm tb-addinv">Add to team</button>` : '';
     return `<div class="tb-player" data-invite="${i.id}">
       <div><b>${esc(i.name||fmtPhone(i.phone)||i.phone)}</b>${i.role==='sub'?' <span class="pill info">Sub</span>':''}<div class="dim" style="font-size:12px">${esc(fmtPhone(i.phone)||i.phone)} · invited ${esc(shortDate2(String(i.created_at).slice(0,10)))}</div></div>
-      <div class="row" style="gap:6px;flex-wrap:nowrap;align-items:center">${state}${edit&&!i.claimed_at&&!i.revoked_at?'<button class="btn btn-ghost btn-sm tb-revoke">Withdraw</button>':''}</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end">${state}${add}${edit&&!i.claimed_at&&!i.revoked_at?'<button class="btn btn-ghost btn-sm tb-revoke">Withdraw</button>':''}</div>
     </div>`; };
   const payLine=t=>{
     if(!mig31.cols) return '<div class="dim" style="font-size:12.5px;padding:6px 0">Payment needs migration 0031.</div>';
@@ -4006,6 +4013,20 @@ function leagueTeamsBoard(ctx){
     });
     el.querySelectorAll('.tb-player[data-invite]').forEach(p=>{
       const inv=(invites||[]).find(i=>i.id===p.dataset.invite);
+      const who=esc(inv.name||fmtPhone(inv.phone)||inv.phone), share=money(team.share_cents||0);
+      const addInvitee=async(paidAtCounter)=>{
+        const r=await apiPost('/api/leagues?action=add-invitee', { inviteId:inv.id, paidAtCounter });
+        if(!r.ok){ toast(r.error||'Could not add them.','err'); return; }
+        toast(r.already ? `${inv.name||'They'} were already on ${r.teamName}` : paidAtCounter ? `${share} recorded — ${inv.name||'they'} are on ${r.teamName}` : `${inv.name||'They'} are on ${r.teamName}`,'ok');
+        await loadLeagueIndex(); reload();
+      };
+      // Money taken on the shop's POS first; this only records it and seats them.
+      if(p.querySelector('.tb-counter')) p.querySelector('.tb-counter').onclick=()=>confirmSheet({ title:'Paid at the counter?',
+        body:`<div style="line-height:1.55">Record <b>${share}</b> paid at the shop for <b>${who}</b>, and add them to <b>${esc(team.name)}</b>.<br><br><span class="dim">Take the payment on the POS first — this does not charge anything.</span></div>`,
+        okLabel:`Record ${share} and add`, onOk:()=>addInvitee(true) });
+      if(p.querySelector('.tb-addinv')) p.querySelector('.tb-addinv').onclick=()=>confirmSheet({ title:'Add to the team?',
+        body:`<div style="line-height:1.55">Add <b>${who}</b> to <b>${esc(team.name)}</b> on a seat that is already paid — by them online, or by the captain.<br><br><span class="dim">If nobody has paid for their seat this is refused: take their share on the POS and use “Paid at counter”.</span></div>`,
+        okLabel:'Add to team', onOk:()=>addInvitee(false) });
       if(p.querySelector('.tb-revoke')) p.querySelector('.tb-revoke').onclick=()=>confirmSheet({ title:'Withdraw this invite?',
         body:`<div class="dim" style="font-size:13px">The link texted to ${esc(fmtPhone(inv.phone)||inv.phone)} stops working. The captain can invite them again.</div>`,
         okLabel:'Withdraw invite', onOk:async()=>{ if(await dbUpdate('league_team_invites',inv.id,{ revoked_at:new Date().toISOString() })){ toast('Invite withdrawn','ok'); reload(); } } });

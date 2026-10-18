@@ -912,6 +912,59 @@ test('the captain pays every seat while a friend is on Checkout: the friend join
   assert.equal((await db.teamMoneyFor(teamId)).money.paidSeats, 2);
 });
 
+// ---- Staff add an invited person: paid at the counter (POS), or a seat already paid --------------
+const addInvitee = (token, body) => run(leaguesApi, { query: { action: 'add-invitee' }, body, headers: { authorization: `Bearer ${token}` } });
+
+test('staff: paid at the counter — the share is recorded as a counter payment and they are on the team', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-pair', 'Duo', 2);   // one unpaid seat, $100
+  await inviteToken(teamId, '2045550116');
+  const inv = S.db.league_team_invites.at(-1);
+
+  const unpaid = await addInvitee('tok-admin', { inviteId: inv.id });
+  assert.equal(unpaid.code, 409, 'nobody has paid for that seat');
+  assert.match(unpaid.out.error, /Take their 100\.00 share on the POS/);
+
+  const r = await addInvitee('tok-admin', { inviteId: inv.id, paidAtCounter: true });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.paidCents, 10000);
+  const pay = S.db.league_seat_payments.at(-1);
+  assert.deepEqual([pay.method, pay.seats, pay.amount_cents, pay.for_customer_id], ['counter', 1, 10000, 'c-friend']);
+  const m = S.db.league_members.find((x) => x.customer_id === 'c-friend');
+  assert.deepEqual([m.team_id, m.status, m.source], [teamId, 'active', 'staff']);
+  assert.ok(inv.claimed_at, 'the invite is used up');
+  assert.equal((await db.teamMoneyFor(teamId)).money.unpaidSeats, 0);
+
+  const again = await addInvitee('tok-admin', { inviteId: inv.id, paidAtCounter: true });
+  assert.equal(again.out.already, true, 'pressing it twice records nothing more');
+  assert.equal(S.db.league_seat_payments.filter((x) => x.for_customer_id === 'c-friend').length, 1);
+});
+
+test('staff: someone who paid online but was never added goes straight on — no second payment', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-pair', 'Duo', 2);
+  await inviteToken(teamId, '2045550116');
+  const inv = S.db.league_team_invites.at(-1);
+  // What the invite bug left behind: the invite used, their share paid, and no roster row.
+  inv.claimed_at = new Date().toISOString(); inv.claimed_customer_id = 'c-friend';
+  S.db.league_seat_payments.push({ id: 'sp-x', team_id: teamId, league_id: 'L-pair', seats: 1, amount_cents: 10000, method: 'stripe', for_customer_id: 'c-friend' });
+
+  const r = await addInvitee('tok-admin', { inviteId: inv.id });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.paidCents, 10000);
+  assert.equal(S.db.league_seat_payments.length, 2, "the captain's seat + their own; nothing new");
+  assert.ok(S.db.league_members.some((x) => x.customer_id === 'c-friend' && x.team_id === teamId));
+});
+
+test('staff: recording money needs the Money permission; customers cannot use it at all', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-pair', 'Duo', 2);
+  await inviteToken(teamId, '2045550116');
+  const inv = S.db.league_team_invites.at(-1);
+  assert.equal((await run(leaguesApi, { query: { action: 'add-invitee' }, body: { inviteId: inv.id, paidAtCounter: true }, ...friend })).code, 403);
+  assert.equal(S.db.league_seat_payments.length, 1);
+});
+
 test('what the captain owes: unpaid seats × share, due once the season has started', async () => {
   seatWorld();
   const teamId = await buySplitTeam('L-range', 'Quad', 4);

@@ -4,7 +4,7 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          listTeamLeagues, teamLeagueById, leagueTeamById, createLeagueTeam, confirmLeagueTeamCheckout,
          createTeamInvite, teamInviteByToken, claimTeamInvite, teamsForCustomer, MIGRATION_0031,
          splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor,
-         soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos,
+         soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos, staffAddInvitee,
          teamMembershipFor, saveScorecard, listScorecards, removeScorecard } from '../lib/db.js';
 import { notifyTeamInvite, notifyLeaguePlaced } from '../lib/notify.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
@@ -76,6 +76,7 @@ export default async function handler(req, res) {
     if (action === 'buy-team') return await buyTeam(req, res);
     if (action === 'join-solo') return await joinSolo(req, res);
     if (action === 'place-solo') return await placeSoloAction(req, res);
+    if (action === 'add-invitee') return await addInviteeAction(req, res);
     if (action === 'team-from-solos') return await teamFromSolosAction(req, res);
     if (action === 'scorecard') return await scorecardUpload(req, res);
     if (action === 'scorecards') return await scorecardList(req, res);
@@ -254,6 +255,22 @@ async function placeSoloAction(req, res) {
       teamName: r.team.name, leagueName: r.league && r.league.name, customerId: r.customer.id });
   }
   return res.status(200).json({ ok: true, teamId: r.team.id, teamName: r.team.name, grew: !!r.grew, already: !!r.already });
+}
+
+// Staff only: put an invited person on their team — after taking their share on the POS
+// (paidAtCounter, needs Money), or when their seat is already paid (needs Bookings).
+//   POST ?action=add-invitee   { inviteId, paidAtCounter? }
+async function addInviteeAction(req, res) {
+  const b = req.body || {};
+  const ctx = await staffContext(req.headers && req.headers.authorization, b.paidAtCounter ? 'money.write' : 'booking.write');
+  if (ctx.error) return res.status(403).json({ ok: false, error: b.paidAtCounter
+    ? 'Recording a payment needs a staff login with the Money permission.'
+    : 'Only staff with the Bookings permission can add players to teams.' });
+  if (!b.inviteId || String(b.inviteId).length > 64) return res.status(400).json({ ok: false, error: 'Which invite?' });
+  const by = (ctx.user && ctx.user.email) || (ctx.staff && ctx.staff.email) || 'staff';
+  const r = await staffAddInvitee({ inviteId: b.inviteId, paidAtCounter: !!b.paidAtCounter, by });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  return res.status(200).json({ ok: true, already: !!r.already, teamName: r.team.name, paidCents: r.paidCents || 0 });
 }
 
 // Staff only: a new team made of players who have none.
