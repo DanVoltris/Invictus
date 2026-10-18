@@ -1390,7 +1390,10 @@ test('make-up rounds: a holiday break is never owed, but can still be played in 
   const teamId = await ownTeam();
   roundOn(teamId, w(1));
   // Week 2 was a break and was not played. A round this week is this week's, not a make-up for it.
-  const r = await quote({ teamId, dateISO: addDays(1) < addDays(7, w(3)) ? addDays(1) : w(3) }, cap);
+  // A day of week 3 that has not passed: tomorrow, or late today when today is the week's last day
+  // (it used to fall back to week 3's first day, which is in the past on a Sunday).
+  const late = !(addDays(1) < addDays(7, w(3)));
+  const r = await quote({ teamId, dateISO: late ? addDays(0) : addDays(1), ...(late ? { startMin: 1380, endMin: 1440 } : {}) }, cap);
   assert.equal(r.code, 200, JSON.stringify(r.out));
   assert.deepEqual([r.out.leagueRound.week.number, r.out.leagueRound.makeup], [3, false]);
 });
