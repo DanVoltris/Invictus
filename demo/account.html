@@ -89,6 +89,8 @@
   .lg-table tr.is-you td:first-child{box-shadow:inset 3px 0 0 var(--orange)}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
   .chip{font-size:12.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--near-black);color:var(--muted)}
+  .chip .inv-x{margin-left:6px;border:none;background:none;color:var(--orange);font:inherit;font-weight:700;cursor:pointer;padding:0}
+  .chip .inv-x:focus-visible{outline:2px solid var(--orange);outline-offset:2px;border-radius:4px}
   .chip.is-you{border-color:rgba(240,82,61,.5);color:var(--white);font-weight:700}
   .team-h{font-family:'Space Grotesk';font-weight:700;font-size:13px;margin:12px 0 2px}
   .lg-tiles{margin:6px 0 12px}
@@ -535,6 +537,21 @@ async function viewProfile(justInherited){
    customer who has no team — anything else is, because it could be hiding a team they do have. */
 // One way in to the leagues API. The account session travels with it; on localhost the no-login
 // dev account stands in for that session (server.js, /api/dev/my-account).
+// A pending invitation the captain can take back while nobody has used it. Two taps, not a browser
+// dialog: the first asks, the second withdraws.
+const invChip = i => `<span class="chip" data-inv-chip>${esc(i.name)}${i.id ? `<button type="button" class="inv-x" data-inv="${esc(i.id)}" aria-label="Withdraw the invitation to ${esc(i.name)}">Withdraw</button>` : ''}</span>`;
+document.addEventListener('click', async e => {
+  const btn = e.target.closest && e.target.closest('.inv-x');
+  if(!btn) return;
+  if(btn.dataset.armed !== '1'){ btn.dataset.armed = '1'; btn.textContent = 'Tap again to withdraw'; return; }
+  btn.disabled = true; btn.textContent = 'Withdrawing…';
+  const r = await leaguesPost('invite-withdraw', { inviteId: btn.dataset.inv });
+  const chip = btn.closest('[data-inv-chip]');
+  if(r.ok){ chip.textContent = chip.firstChild.textContent + ' — withdrawn'; chip.style.opacity = '.6'; return; }
+  btn.disabled = false; btn.dataset.armed = ''; btn.textContent = 'Withdraw';
+  chip.insertAdjacentHTML('afterend', `<div class="err" role="alert" style="flex-basis:100%">${esc(r.error || 'Could not withdraw it. Try again, or call the shop.')}</div>`);
+});
+
 async function leaguesPost(action, body, token){
   const local = ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
   if(!token){
@@ -823,7 +840,7 @@ function teamCard(t, idx, opts){
       + `${st.freeSeats ? ` — ${st.freeSeats} paid seat${st.freeSeats===1?' is':'s are'} waiting, so the next ${st.freeSeats===1?'friend joins':st.freeSeats+' friends join'} free` : ''}.`;
     let capPart = '';
     if(iAmCaptain && st.unpaidSeats){
-      const invited = (st.invited || []).length ? ` Still to accept: ${(st.invited||[]).map(i => esc(i.name)).join(', ')}.` : '';
+      const invited = (st.invited || []).length ? ` Still to accept:</div><div class="chips">${(st.invited||[]).map(invChip).join('')}</div><div class="lg-note is-owed" style="margin-top:6px">` : '';
       capPart = `<div class="lg-note is-owed" style="margin-top:10px"><b>${money(st.owedCents)} unpaid</b> for ${st.unpaidSeats} seat${st.unpaidSeats===1?'':'s'}.
           Each friend pays their own ${money(st.shareCents)} when they accept your invite.${invited}
           ${st.due ? ' <b>The season has started, so the shop will collect whatever is still unpaid from you</b> — or pay for the seats now.'
@@ -846,7 +863,7 @@ function teamCard(t, idx, opts){
   const subLeft = sb ? Math.max(0, subMax - subList.length - subWaiting.length) : 0;
   const subsBlock = (subList.length || subWaiting.length) ? `<div class="sec-title">Substitutes</div>
       ${subList.length ? `<div class="chips">${subList.map(p => `<span class="chip${p.isMe?' is-you':''}">${esc(p.name)} · sub${p.isMe?' (you)':''}</span>`).join('')}</div>` : ''}
-      ${subWaiting.length ? `<div class="sub" style="margin:8px 0 0">Still to accept: ${subWaiting.map(i => esc(i.name)).join(', ')}.</div>` : ''}` : '';
+      ${subWaiting.length ? `<div class="sub" style="margin:8px 0 0">Still to accept:</div><div class="chips">${subWaiting.map(i => iAmCaptain ? invChip(i) : `<span class="chip">${esc(i.name)}</span>`).join('')}</div>` : ''}` : '';
   // What this invite can be for: a teammate while there is room, a substitute while fewer than
   // three are named. The form opens on whichever is possible.
   const canPlayer = room !== 0, canSub = !!(sb && sb.canInvite !== false && subLeft > 0);

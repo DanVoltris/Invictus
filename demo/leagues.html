@@ -736,7 +736,19 @@ async function inviteView(token){
       : `<a class="btn btn-primary" href="${esc(signInHref(back))}">Create an account to join</a>
          <div class="fine">You need an account so the team knows who you are. It takes about a minute — we text you a code — and we bring you straight back to this invitation.</div>`}
     <a class="btn btn-ghost" href="/leagues">See the leagues first</a>
+    <button type="button" class="btn btn-ghost" id="i-decline">No thanks — decline this invitation</button>
   </div>`);
+
+  // Saying no, from their own link — only while nobody has used it (a paid seat is the shop's to undo).
+  $('#i-decline').onclick = async () => {
+    const btn = $('#i-decline'), err = $('#i-err');
+    if(btn.dataset.armed !== '1'){ btn.dataset.armed = '1'; btn.textContent = 'Tap again to decline'; return; }
+    btn.disabled = true; btn.textContent = 'Declining…';
+    const j = await leaguesApi('invite-decline', { token });
+    if(j.ok){ inviteProblem('Invitation declined', `You declined the invitation to ${team}. ${by} can invite somebody else.`); return; }
+    btn.disabled = false; btn.dataset.armed = ''; btn.textContent = 'No thanks — decline this invitation';
+    err.textContent = j.error || 'Could not decline it just now. Try again, or call the shop.';
+  };
 
   if(SIGNED_IN) $('#i-join').onclick = async () => {
     const btn = $('#i-join'), err = $('#i-err');

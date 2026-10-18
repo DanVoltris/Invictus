@@ -965,6 +965,34 @@ test('staff: recording money needs the Money permission; customers cannot use it
   assert.equal(S.db.league_seat_payments.length, 1);
 });
 
+// ---- Withdrawing an invitation: the captain, or the person invited, while nobody has used it --------
+test('invitations: the captain withdraws one, the invited person declines one — never once it is used', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-range', 'Trio', 3);
+  const t1 = await inviteToken(teamId, '2045550116');
+  const t2 = await inviteToken(teamId, '2045550199');
+  const [i1, i2] = S.db.league_team_invites.filter((i) => i.team_id === teamId);
+
+  const notCap = await run(leaguesApi, { query: { action: 'invite-withdraw' }, body: { inviteId: i1.id }, ...friend });
+  assert.equal(notCap.code, 403, 'only the captain');
+  const w = await run(leaguesApi, { query: { action: 'invite-withdraw' }, body: { inviteId: i1.id }, ...cap });
+  assert.equal(w.code, 200, JSON.stringify(w.out));
+  assert.ok(i1.revoked_at, 'withdrawn');
+  assert.equal((await run(leaguesApi, { query: { action: 'invite-info' }, body: { token: t1 } })).out.revoked, true, 'the link now says so');
+
+  const d = await run(leaguesApi, { query: { action: 'invite-decline' }, body: { token: t2 } });
+  assert.equal(d.code, 200, JSON.stringify(d.out));
+  assert.ok(i2.revoked_at, 'declined from their own link, no sign-in needed');
+
+  // Used: joined (or paid) — not theirs to undo.
+  const t3 = await inviteToken(teamId, '2045550177');
+  const i3 = S.db.league_team_invites.at(-1);
+  i3.claimed_at = new Date().toISOString(); i3.claimed_customer_id = 'c-friend';
+  assert.equal((await run(leaguesApi, { query: { action: 'invite-decline' }, body: { token: t3 } })).code, 409);
+  assert.equal((await run(leaguesApi, { query: { action: 'invite-withdraw' }, body: { inviteId: i3.id }, ...cap })).code, 409);
+  assert.equal(i3.revoked_at, undefined);
+});
+
 test('what the captain owes: unpaid seats × share, due once the season has started', async () => {
   seatWorld();
   const teamId = await buySplitTeam('L-range', 'Quad', 4);

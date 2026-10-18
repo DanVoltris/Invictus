@@ -4,7 +4,7 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          listTeamLeagues, teamLeagueById, leagueTeamById, createLeagueTeam, confirmLeagueTeamCheckout,
          createTeamInvite, teamInviteByToken, claimTeamInvite, teamsForCustomer, MIGRATION_0031,
          splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor,
-         soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos, staffAddInvitee,
+         soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos, staffAddInvitee, withdrawTeamInvite,
          teamMembershipFor, saveScorecard, listScorecards, removeScorecard } from '../lib/db.js';
 import { notifyTeamInvite, notifyLeaguePlaced } from '../lib/notify.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
@@ -77,6 +77,8 @@ export default async function handler(req, res) {
     if (action === 'join-solo') return await joinSolo(req, res);
     if (action === 'place-solo') return await placeSoloAction(req, res);
     if (action === 'add-invitee') return await addInviteeAction(req, res);
+    if (action === 'invite-withdraw') return await inviteWithdraw(req, res);
+    if (action === 'invite-decline') return await inviteDecline(req, res);
     if (action === 'team-from-solos') return await teamFromSolosAction(req, res);
     if (action === 'scorecard') return await scorecardUpload(req, res);
     if (action === 'scorecards') return await scorecardList(req, res);
@@ -255,6 +257,26 @@ async function placeSoloAction(req, res) {
       teamName: r.team.name, leagueName: r.league && r.league.name, customerId: r.customer.id });
   }
   return res.status(200).json({ ok: true, teamId: r.team.id, teamName: r.team.name, grew: !!r.grew, already: !!r.already });
+}
+
+// The captain takes back an invitation nobody has used yet.   POST ?action=invite-withdraw { inviteId }
+async function inviteWithdraw(req, res) {
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in again to manage your team.' });
+  const id = (req.body || {}).inviteId;
+  if (!id || String(id).length > 64) return res.status(400).json({ ok: false, error: 'Which invitation?' });
+  const r = await withdrawTeamInvite({ inviteId: id, customerId: me.id });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  return res.status(200).json({ ok: true, already: !!r.already });
+}
+
+// The person invited says no, from their own link.   POST ?action=invite-decline { token }
+async function inviteDecline(req, res) {
+  const token = (req.body || {}).token;
+  if (!isUuid(token)) return res.status(400).json({ ok: false, error: 'That invitation link isn’t valid.' });
+  const r = await withdrawTeamInvite({ token });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  return res.status(200).json({ ok: true, already: !!r.already });
 }
 
 // Staff only: put an invited person on their team — after taking their share on the POS
