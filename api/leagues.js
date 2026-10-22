@@ -5,6 +5,7 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          createTeamInvite, teamInviteByToken, claimTeamInvite, teamsForCustomer, MIGRATION_0031,
          splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor,
          soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos, staffAddInvitee, withdrawTeamInvite,
+         teamInviteForResend, notificationOutcome,
          teamMembershipFor, saveScorecard, listScorecards, removeScorecard } from '../lib/db.js';
 import { notifyTeamInvite, notifyLeaguePlaced } from '../lib/notify.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
@@ -79,6 +80,7 @@ export default async function handler(req, res) {
     if (action === 'add-invitee') return await addInviteeAction(req, res);
     if (action === 'invite-withdraw') return await inviteWithdraw(req, res);
     if (action === 'invite-decline') return await inviteDecline(req, res);
+    if (action === 'invite-resend') return await inviteResendAction(req, res);
     if (action === 'team-from-solos') return await teamFromSolosAction(req, res);
     if (action === 'scorecard') return await scorecardUpload(req, res);
     if (action === 'scorecards') return await scorecardList(req, res);
@@ -295,6 +297,35 @@ async function addInviteeAction(req, res) {
   return res.status(200).json({ ok: true, already: !!r.already, teamName: r.team.name, paidCents: r.paidCents || 0 });
 }
 
+// Staff only: text an unused invitation again — the first text never arrived (Twilio was down
+// Oct 20–21, 2026), or the person lost it. Same message, same link.
+//   POST ?action=invite-resend   { inviteId }
+async function inviteResendAction(req, res) {
+  const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
+  if (ctx.error) return res.status(403).json({ ok: false, error: 'Only staff with the Bookings permission can resend invitations.' });
+  const id = (req.body || {}).inviteId;
+  if (!id || String(id).length > 64) return res.status(400).json({ ok: false, error: 'Which invite?' });
+  const r = await teamInviteForResend(id);
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+
+  const out = await notifyTeamInvite({
+    inviteId: r.invite.id, phone: r.invite.phone, name: r.invite.name, link: inviteLink(req, r.invite.token),
+    teamName: r.team.name, leagueName: r.league && r.league.name, invitedBy: r.invitedByName,
+    weeklyMins: r.league && r.league.weekly_min_mins, role: r.invite.role === 'sub' ? 'sub' : 'player', again: true,
+  });
+  if (out.sms && out.sms.already) {
+    return res.status(429).json({ ok: false, error: 'It was resent less than 2 minutes ago. Give it a moment to arrive before sending another.' });
+  }
+  if (!out.sms || !out.sms.row) {
+    return res.status(503).json({ ok: false, error: `The text could not be queued${out.sms && out.sms.error ? `: ${out.sms.error}` : ''}.` });
+  }
+  if (out.sent[0] === 'sent') return res.status(200).json({ ok: true, sent: true, phone: r.invite.phone });
+  // Not delivered: say why in the provider's own words (e.g. Twilio's "account is not active").
+  const row = await notificationOutcome(out.sms.row.id);
+  const why = (row && row.last_error) || 'the text service did not accept it';
+  return res.status(502).json({ ok: false, error: `The text did not go out — ${why}. ${out.sent[0] === 'retry' ? 'It will be retried automatically.' : 'Send them the link another way, or try again later.'}` });
+}
+
 // Staff only: a new team made of players who have none.
 async function teamFromSolosAction(req, res) {
   const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
@@ -422,6 +453,9 @@ async function invite(req, res) {
     teamName: team.name, leagueName: r.league && r.league.name,
     invitedBy: me ? me.name : null, weeklyMins: r.league && r.league.weekly_min_mins,
     role: r.invite.role === 'sub' ? 'sub' : 'player',
+    // The same number invited again: text it again, rather than let the first text's dedupe key
+    // swallow it while the captain is told it was resent.
+    again: !!r.already,
   });
   return res.status(200).json({ ok: true, link, resent: !!r.already, role: r.invite.role === 'sub' ? 'sub' : 'player' });
 }

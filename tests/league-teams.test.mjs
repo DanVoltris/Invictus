@@ -993,6 +993,81 @@ test('invitations: the captain withdraws one, the invited person declines one â€
   assert.equal(i3.revoked_at, undefined);
 });
 
+// ---- Texting an invitation again: staff "Resend text", and the captain inviting the same number ----
+// Twilio switched on and captured for one test, on a clock fixed mid-way through a two-minute window.
+function twilioOn(t) {
+  const texts = [], real = globalThis.fetch, tw = { status: 201 };
+  S.db.settings[0].venue = { name: 'Invictus Golf', address: '123 Main St, Winnipeg MB', email: 'hello@invictus.test' };
+  Object.assign(process.env, { TWILIO_ACCOUNT_SID: 'AC_test', TWILIO_AUTH_TOKEN: 'tok_test', TWILIO_FROM: '+12045550000' });
+  globalThis.fetch = async (url, init) => {
+    texts.push(new URLSearchParams(init.body));
+    return { ok: tw.status < 300, status: tw.status,
+      json: async () => (tw.status < 300 ? { sid: 'SM_test' } : { message: 'Authentication failed, account is not active' }) };
+  };
+  const start = Math.floor(Date.now() / notify.INVITE_RESEND_MS) * notify.INVITE_RESEND_MS + notify.INVITE_RESEND_MS / 2;
+  mock.timers.enable({ apis: ['Date'], now: start });
+  t.after(() => {
+    mock.timers.reset(); globalThis.fetch = real;
+    for (const k of ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM']) delete process.env[k];
+  });
+  return { texts, tw, later: (n = 1) => mock.timers.setTime(start + n * notify.INVITE_RESEND_MS) };
+}
+const resend = (token, inviteId) => run(leaguesApi, { query: { action: 'invite-resend' }, body: { inviteId }, headers: { authorization: `Bearer ${token}` } });
+
+test('staff "Resend text": the same text and link again, once per two minutes, and never for a used or withdrawn invite', async (t) => {
+  world();
+  const tw = twilioOn(t);
+  const teamId = await ownTeam();
+  const first = await run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '(204) 555-0116', name: 'Sam' }, ...cap });
+  const inv = S.db.league_team_invites[0];
+  assert.equal(tw.texts.length, 1, 'the original invite text');
+
+  const r = await resend('tok-emp', inv.id);   // an employee: the Bookings permission is enough
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(tw.texts.length, 2);
+  assert.ok(tw.texts[1].get('Body').includes(first.out.link), 'the same link as the first text');
+  assert.match(tw.texts[1].get('Body'), /Murad Cheway/, 'still signed with the captain who sent it');
+
+  const twice = await resend('tok-emp', inv.id);
+  assert.equal(twice.code, 429, 'a second tap inside two minutes sends nothing');
+  assert.equal(tw.texts.length, 2);
+  tw.later(1);
+  assert.equal((await resend('tok-emp', inv.id)).code, 200, 'two minutes on, it can be sent again');
+  assert.equal(tw.texts.length, 3);
+
+  // Twilio refusing: staff are told why, in Twilio's words.
+  tw.tw.status = 401; tw.later(2);
+  const down = await resend('tok-emp', inv.id);
+  assert.equal(down.code, 502);
+  assert.match(down.out.error, /did not go out.*account is not active/);
+
+  // Not staff: refused, the captain included (they re-invite from My Account instead).
+  tw.tw.status = 201; tw.later(3);
+  assert.equal((await resend('tok-cap', inv.id)).code, 403);
+  assert.equal((await resend('tok-friend', inv.id)).code, 403);
+
+  // Used, or withdrawn: nothing to resend.
+  inv.claimed_at = new Date().toISOString();
+  assert.equal((await resend('tok-emp', inv.id)).code, 409);
+  delete inv.claimed_at; inv.revoked_at = new Date().toISOString();
+  assert.equal((await resend('tok-emp', inv.id)).code, 409);
+  assert.equal(tw.texts.length, 4, 'nothing sent by any of the refusals');
+});
+
+test('the captain inviting the same number again really texts again (it used to say "resent" and send nothing)', async (t) => {
+  world();
+  const tw = twilioOn(t);
+  const teamId = await ownTeam();
+  const invite = () => run(leaguesApi, { query: { action: 'invite' }, body: { teamId, phone: '(204) 555-0116', name: 'Sam' }, ...cap });
+  await invite();
+  const again = await invite();
+  assert.equal(again.out.resent, true);
+  assert.equal(tw.texts.length, 2, 'the second invite went out');
+  await invite();
+  assert.equal(tw.texts.length, 2, 'a third tap inside two minutes does not text them again');
+  assert.equal(S.db.league_team_invites.length, 1, 'still the one invite and link');
+});
+
 test('what the captain owes: unpaid seats Ã— share, due once the season has started', async () => {
   seatWorld();
   const teamId = await buySplitTeam('L-range', 'Quad', 4);
