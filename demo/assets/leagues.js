@@ -484,7 +484,9 @@
       const played = teams.filter((t) => strokes.get(t.id).has(n)).map((t) => ({ id: t.id, s: strokes.get(t.id).get(n) }))
         .sort((a, b) => a.s - b.s);
       const m = new Map(placeRows(played, (a, b) => a.s === b.s).map((p) => [p.id, { strokes: p.s, place: p.rank, points: pointsFor(st, p.rank) }]));
-      if (qualClosed) {
+      // Nobody at all has a result for the week: the scores were never entered — not a week every
+      // team missed — so nobody is given last place for it.
+      if (qualClosed && played.length) {
         const last = played.length + 1;
         teams.forEach((t) => { if (!m.has(t.id)) m.set(t.id, { strokes: null, place: last, points: pointsFor(st, last), missed: true }); });
       }

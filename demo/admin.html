@@ -3781,7 +3781,11 @@ function leagueOverview(ctx){
   const pr=LG().progress(league, today), cur=LG().currentWeek(league, today);
   const paid=teams.filter(teamPaid), collected=teams.reduce((s,t)=>s+(t.paid_cents||0),0);
   const rows=LG().standings({ league, teams, members, results });
-  const leader=rows.find(x=>x.played);
+  const sgd=LG().stagedStandings({ league, teams, results, todayISO:today });
+  const leader=sgd ? null : rows.find(x=>x.played);
+  const sgLead=sgd && (sgd.phase==='divisions'
+    ? sgd.divisions.map(d=>{ const top=d.standings.find(r=>r.final!=null); return top?`Div ${d.division}: ${esc(top.name)} · ${top.final}`:''; }).filter(Boolean).join(' · ')
+    : (sgd.qualifiers.rows[0] && sgd.qualifiers.rows[0].total ? `${esc(sgd.qualifiers.rows[0].name)} · ${sgd.qualifiers.rows[0].total} qualifier points` : ''));
   const late = mig31.rounds && league.team_mode ? LG().teamsWithoutRound({ league, todayISO:today, teams, rounds }) : [];
   const tile=(k,v,sub)=>`<div class="card"><div class="stat-k">${k}</div><div class="stat-v">${v}</div><div class="stat-s">${sub}</div></div>`;
   // Booking a round is free bay time, so it needs the same permission a price does.
@@ -3802,7 +3806,7 @@ function leagueOverview(ctx){
           <span><b>${late.length} team${late.length===1?' has':'s have'} not booked a round this week</b> (week ${cur.number}, ${esc(weekLabel(cur))}).${late.map(chaseRow).join('')}</span></div>`
       : `<div class="kv"><span class="k">This week</span><span>All ${teams.length} team${teams.length===1?'':'s'} have booked their round ✓</span></div>`}
     <div class="kv"><span class="k">Weekly round</span><span>${esc(LG().scheduleLabel(league))}</span></div>
-    <div class="kv"><span class="k">${league.team_mode?'Leading team':'Leader'}</span><span>${leader?`${esc(leader.name)} · ${league.scoring==='strokes'?leader.average+' average':leader.total+' points'}`:'No results yet'}</span></div>
+    <div class="kv"><span class="k">${league.team_mode?'Leading team':'Leader'}</span><span>${sgd ? (sgLead||'No results yet') : leader?`${esc(leader.name)} · ${league.scoring==='strokes'?leader.average+' average':leader.total+' points'}`:'No results yet'}</span></div>
     <div class="kv"><span class="k">Sign-up</span><span>${league.join_online?'Online (Leagues page) and staff':'Staff only'}</span></div>
     <div class="kv" style="border:none"><span class="k">Scoring</span><span>${league.scoring==='strokes'?'Strokes — lowest average wins':'Points — most points wins'}</span></div>
     ${mig31Flag(mig31.cols && mig31.invites && mig31.rounds)}
@@ -4364,8 +4368,11 @@ function leagueResults(ctx){
   const weekFor=d=>LG().weekIn(league,d);
   const scoreFor=(wStart,key)=>{ const r=results.find(x=>weekFor(x.played_on)===wStart && (league.team_mode?x.team_id:x.customer_id)===key); return r?Number(r.score):null; };
   const scored=new Set(results.map(r=>weekFor(r.played_on)));
-  const cols=all.filter(w=>w.end<today || scored.has(w.start));                      // weeks already gone, plus any with scores
-  const pickable=all.filter(w=>w.start<=LG().weekIn(league,today) || scored.has(w.start));  // never next month's results
+  // A catch-up week has no round of its own, so it never takes a score. A week a team played early
+  // (staff booked it ahead) can be scored as soon as that round exists.
+  const early=new Set((rounds||[]).filter(x=>x.status!=='cancelled').map(x=>roundWeek(x,league)).filter(s=>s>LG().weekIn(league,today)));
+  const cols=all.filter(w=>!w.catchup && (w.end<today || scored.has(w.start)));                      // weeks already gone, plus any with scores
+  const pickable=all.filter(w=>!w.catchup && (w.start<=LG().weekIn(league,today) || scored.has(w.start) || early.has(w.start)));  // never next month's results
   const weekAt=s=>all.find(w=>w.start===s);
   // Before the season starts there is no week to enter yet. Say when it opens, rather than show an
   // empty week list over a score table that cannot be saved.

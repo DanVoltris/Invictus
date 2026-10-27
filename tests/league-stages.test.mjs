@@ -167,3 +167,10 @@ test('a league without stages is unchanged', () => {
   assert.equal(L.stagedStandings({ league: WL, teams: [], results: [] }), null);
   assert.ok(L.normalizeDetails({ stages: { qualifiers: [1, 8], ranking: [11, 14], playoffs: [15, 18] } }).stages);
 });
+
+test('a qualifier week with no scores entered at all is not "everyone missed it"', () => {
+  const teams = ['A', 'B'].map((x) => T(x));
+  const s = L.stagedStandings({ league: STAGED, teams, results: [res('A', 1, 50), res('B', 1, 52)], todayISO: '2027-01-10' });
+  const w2 = s.qualifiers.rows.map((r) => r.weeks.find((w) => w.week === 2));
+  assert.ok(w2.every((w) => w.pending && !w.points), 'week 2 has no scores yet: nobody gets last place for it');
+});

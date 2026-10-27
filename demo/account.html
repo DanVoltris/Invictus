@@ -811,7 +811,7 @@ function teamCard(t, idx, opts){
   const locked = L.rosterLocked(lg, today);
   const notes = [];
   if(nextRound.ok && nextRound.makeup){
-    notes.push(['is-owed', `<b>Week ${nextRound.week.number} to make up.</b> Your team missed week ${nextRound.week.number} (${esc(shortDate(nextRound.week.start))} – ${esc(shortDate(nextRound.week.end))}). Rounds are played in order, so the next league round you book counts for it, and then you carry on with the weeks after.${kd.regularEnd ? ` Every regular-season round has to be played by ${esc(fmtDate(kd.regularEnd))}.` : ''} <a href="/?league-round=1" style="color:var(--orange);font-weight:600">Book the make-up round</a>`]);
+    notes.push(['is-owed', `<b>Week ${nextRound.week.number} to make up.</b> Your team missed week ${nextRound.week.number} (${esc(shortDate(nextRound.week.start))} – ${esc(shortDate(nextRound.week.end))}). Rounds are played in order, so the next league round you book counts for it, and then you carry on with the weeks after.${kd.qualifiersEnd && nextRound.week.end <= kd.qualifiersEnd ? ` Qualifier weeks have to be made up by ${esc(fmtDate(kd.qualifiersEnd))} — after that they can’t be played and score last place.` : kd.regularEnd ? ` Every regular-season round has to be played by ${esc(fmtDate(kd.regularEnd))}.` : kd.playoffMakeups ? ` Missed weeks can be made up until the season ends — a team that hasn’t played every week by then does not finish.` : ''} <a href="/?league-round=1" style="color:var(--orange);font-weight:600">Book the make-up round</a>`]);
   }
   if(kd.rosterLockOn){
     const d = daysTo(kd.rosterLockOn);
