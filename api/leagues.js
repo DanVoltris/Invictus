@@ -606,6 +606,8 @@ async function payShare(req, res) {
 
 // Staff only: text a player they have just put on a team — which team, and their share to pay.
 //   POST ?action=member-added   { leagueId, customerId, again? }
+// `again` is the Teams tab's "Resend text": a reminder to pay, so it is sent only while they still
+// owe their share, and no more than once every two minutes.
 async function memberAdded(req, res) {
   const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
   if (ctx.error) return res.status(403).json({ ok: false, error: 'Only staff with the Bookings permission can do this.' });
@@ -614,6 +616,7 @@ async function memberAdded(req, res) {
   const r = await memberShareNotice({ leagueId: b.leagueId, customerId: b.customerId });
   if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
   if (r.sub) return res.status(200).json({ ok: true, texted: false, reason: 'Substitutes pay nothing, so no text was sent.' });
+  if (b.again && !r.owedCents) return res.status(200).json({ ok: true, texted: false, reason: 'Their seat is already paid for, so no reminder was sent.' });
   const phone = r.customer && r.customer.phone;
   if (!phone) return res.status(200).json({ ok: true, texted: false, reason: 'They have no mobile number on file, so no text was sent.' });
   const out = await notifyLeagueAdded({
@@ -622,7 +625,8 @@ async function memberAdded(req, res) {
     teamName: r.team.name, leagueName: r.league.name, shareCents: r.owedCents,
     link: `${siteOrigin(req)}/account`, again: !!b.again,
   });
-  if (out.sms && out.sms.already) return res.status(200).json({ ok: true, texted: false, reason: 'They were already sent this text.' });
+  if (out.sms && out.sms.already) return res.status(200).json({ ok: true, texted: false, reason: b.again
+    ? 'A reminder went out less than 2 minutes ago. Give it a moment to arrive.' : 'They were already sent this text.' });
   if (!out.sms || !out.sms.row) return res.status(200).json({ ok: true, texted: false, reason: 'The text could not be queued.' });
   if (out.sent[0] === 'sent') return res.status(200).json({ ok: true, texted: true, owedCents: r.owedCents });
   // Not delivered: say why in the provider's own words, as invite-resend does.

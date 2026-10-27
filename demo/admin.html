@@ -3946,6 +3946,7 @@ function leagueTeamsBoard(ctx){
     return `<div class="tb-player" data-id="${x.id}">
       <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}${ownSeat?' <span class="pill confirmed">Paid own seat</span>':''}${soloPaid?` <span class="pill confirmed">Paid ${esc(money(x.paid_cents))}</span>`:''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
       ${edit?`<div class="row" style="gap:6px;flex-wrap:nowrap;align-items:center">
+        ${team&&!ownSeat&&!soloPaid&&!(x.paid_cents>0)&&league.fee_cents>0&&x.phone?'<button class="btn btn-ghost btn-sm tb-remind" aria-label="Text '+esc(x.name)+' a reminder to pay their share">Resend text</button>':''}
         ${team&&!isCap&&mig31.cols?'<button class="btn btn-ghost btn-sm tb-cap" aria-label="Make '+esc(x.name)+' the captain">Make captain</button>':''}
         <select class="input tb-move" aria-label="Move ${esc(x.name)} to a team" style="padding:6px 9px;font-size:12.5px;min-width:120px">${moveOpts(x.team_id)}</select>
         <button class="btn btn-ghost btn-sm tb-remove" aria-label="Remove ${esc(x.name)} from the league">✕</button></div>`:''}
@@ -4094,6 +4095,14 @@ function leagueTeamsBoard(ctx){
       p.querySelector('.tb-remove').onclick=()=>removePlayer(ctx,row);
       if(p.querySelector('.tb-cap')) p.querySelector('.tb-cap').onclick=async()=>{
         if(await dbUpdate('league_teams',team.id,{ captain_customer_id:row.customer_id })){ toast(`${row.name} is now the captain`,'ok'); reload(); }
+      };
+      // "Resend text": the team's name and their share, again. The server checks they still owe it.
+      if(p.querySelector('.tb-remind')) p.querySelector('.tb-remind').onclick=async(e)=>{
+        const b=e.currentTarget; b.disabled=true; b.textContent='Sending…';
+        const r=await apiPost('/api/leagues?action=member-added', { leagueId:league.id, customerId:row.customer_id, again:true });
+        b.disabled=false; b.textContent='Resend text';
+        if(r && r.texted) toast(`Texted ${row.name}${r.owedCents?` a reminder to pay their ${money(r.owedCents)} share`:''}`,'ok');
+        else toast((r && (r.reason||r.error)) || 'The text could not be sent.','err');
       };
     });
     el.querySelectorAll('.tb-player[data-invite]').forEach(p=>{
