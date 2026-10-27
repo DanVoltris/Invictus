@@ -2987,7 +2987,7 @@ function openCustomer(c){
     </div><div class="sub" style="margin:6px 0 0">Add hours (in-person card sale) or use hours (redeem in person).</div></div>`}
     <div class="grid2">
       <div class="field"><label>Address</label><input class="input" id="c-address" value="${esc(c.address||'')}" maxlength="200" placeholder="Optional" /></div>
-      <div class="field"><label>Career</label><input class="input" id="c-career" value="${esc(c.career||'')}" maxlength="120" placeholder="Optional" /></div>
+      <div class="field"><label>Career</label><input class="input" id="c-career" value="${esc(c.career||'')}" maxlength="120" required placeholder="What they do for work" /></div>
     </div>
     <div class="field"><label>Notes</label><input class="input" id="c-notes" value="${esc(c.notes||'')}" placeholder="Optional" /></div>
     ${isNew?'':`<div class="field" style="margin-bottom:0"><label>Booking history</label><div class="cust-history" id="c-hist"><div class="dim" style="font-size:13px;padding:6px 0">Loading…</div></div></div>`}
@@ -3008,6 +3008,7 @@ function openCustomer(c){
     if($('#c-hsub')) $('#c-hsub').onclick=()=>doAdj(-1);
   }
   $('#c-save').onclick=async()=>{
+    if(!$('#c-career').value.trim()){ toast('Enter their career — what they do for work.','err'); $('#c-career').focus(); return; }
     const patch={ name:$('#c-name').value.trim()||null, email:$('#c-email').value.trim()||null,
       phone:$('#c-phone').value.trim()||null, notes:$('#c-notes').value.trim()||null,
       membership_flag:null };   // saving from the editor confirms the data — clears the review badge

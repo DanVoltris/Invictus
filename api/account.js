@@ -250,7 +250,9 @@ async function register(req, res, db) {
   const email = String(b.email || '').trim().toLowerCase();
   const password = String(b.password || '');
   const token = String(b.token || '');
+  const career = String(b.career || '').trim().slice(0, 120);
   if (!token) return json(res, 400, { error: 'Verify your phone number first.' });
+  if (!career) return json(res, 400, { error: 'Tell us your career — what you do for work.' });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: 'Enter a valid email address.' });
   if (password.length < 8) return json(res, 400, { error: 'Use a password of at least 8 characters.' });
 
@@ -315,11 +317,10 @@ async function register(req, res, db) {
     customerId = data.id;
   }
 
-  // Address and career (migration 0027), both optional. A separate update after the account is
+  // Address (optional) and career (required above), migration 0027. A separate update after the account is
   // linked, so a database without those columns still finishes the sign-up.
   const profile = {};
   const address = String(b.address || '').trim().slice(0, 200);
-  const career = String(b.career || '').trim().slice(0, 120);
   if (address) profile.address = address;
   if (career) profile.career = career;
   if (customerId && Object.keys(profile).length) {

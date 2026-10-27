@@ -447,8 +447,8 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     <input class="input" id="n-name" type="text" autocomplete="name" placeholder="First and last name" value="${esc(name||'')}" />
     <label class="fld" for="n-address" style="margin-top:14px">Address <span class="opt">(optional)</span></label>
     <input class="input" id="n-address" type="text" autocomplete="street-address" maxlength="200" placeholder="Street, city, postal code" />
-    <label class="fld" for="n-career" style="margin-top:14px">Career <span class="opt">(optional)</span></label>
-    <input class="input" id="n-career" type="text" autocomplete="organization-title" maxlength="120" placeholder="What you do for work" />
+    <label class="fld" for="n-career" style="margin-top:14px">Career</label>
+    <input class="input" id="n-career" type="text" autocomplete="organization-title" maxlength="120" required placeholder="What you do for work" />
     <label class="fld" for="n-email" style="margin-top:14px">Email</label>
     <input class="input" id="n-email" name="email" type="email" autocomplete="username" placeholder="you@example.com" value="${esc(knownEmail||'')}"${knownEmail ? ' readonly aria-describedby="n-email-why"' : ''} />
     ${knownEmail ? `<div class="ph-hint" id="n-email-why">This is the email we have on file for you. <button type="button" class="linkish" id="n-email-unlock">Not your email? Use a different one</button></div>` : ''}
@@ -468,11 +468,13 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     const nm = ($('#n-name').value||'').trim();
     const email = ($('#n-email').value||'').trim().toLowerCase();
     const password = $('#n-pass').value||'';
+    const career = ($('#n-career').value||'').trim();
+    if(!career){ setErr('#n-err','Tell us your career — what you do for work.'); $('#n-career').focus(); return; }
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ setErr('#n-err','Enter a valid email address.'); return; }
     if(password.length < 8){ setErr('#n-err','Use a password of at least 8 characters.'); return; }
     $('#n-go').disabled = true; $('#n-go').textContent = 'Creating…';
     const r = await api('register', { token: FLOW.token, email, password, name: nm,
-      address: ($('#n-address').value||'').trim(), career: ($('#n-career').value||'').trim() });
+      address: ($('#n-address').value||'').trim(), career });
     if(!r.ok){
       $('#n-go').disabled = false; $('#n-go').textContent = 'Create account';
       // The email we filled in already has a login — often a family member sharing it. Let them
@@ -1089,14 +1091,15 @@ function drawDetails(c, dev, editing){
   host.innerHTML = `
     <label class="fld" for="d-address">Address <span class="opt">(optional)</span></label>
     <input class="input" id="d-address" type="text" autocomplete="street-address" maxlength="200" value="${esc(c.address||'')}" placeholder="Street, city, postal code" />
-    <label class="fld" for="d-career" style="margin-top:12px">Career <span class="opt">(optional)</span></label>
-    <input class="input" id="d-career" type="text" autocomplete="organization-title" maxlength="120" value="${esc(c.career||'')}" placeholder="What you do for work" />
+    <label class="fld" for="d-career" style="margin-top:12px">Career</label>
+    <input class="input" id="d-career" type="text" autocomplete="organization-title" maxlength="120" required value="${esc(c.career||'')}" placeholder="What you do for work" />
     <div class="err" id="d-err"></div>
     <div class="row2"><button class="btn btn-primary" id="d-save">Save</button><button class="btn btn-ghost" id="d-cancel">Cancel</button></div>`;
   $('#d-cancel').onclick = () => drawDetails(c, dev);
   $('#d-address').focus();
   $('#d-save').onclick = async () => {
     const patch = { address: $('#d-address').value.trim() || null, career: $('#d-career').value.trim() || null };
+    if(!patch.career){ setErr('#d-err', 'Tell us your career — what you do for work.'); $('#d-career').focus(); return; }
     $('#d-save').disabled = true; $('#d-save').textContent = 'Saving…';
     let error = null;
     if(dev){
