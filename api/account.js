@@ -35,7 +35,7 @@
 //   somebody holding the phone can reach.
 import crypto from 'node:crypto';
 import { getSettings, admin, customerHoursByContact, normPhone, saveBookingFeedback, accountCustomerForRequest } from '../lib/db.js';
-import { contestRules, contestStatus, contestSpin, contestQuestion, contestAnswer, contestRewards } from '../lib/contest.js';
+import { contestEnabled, contestRules, contestStatus, contestSpin, contestQuestion, contestAnswer, contestRewards } from '../lib/contest.js';
 import { suggestAddresses, verifyAddress } from '../lib/address.js';
 import { enqueue, sendOne, venueIdentity } from '../lib/notify.js';
 
@@ -376,6 +376,7 @@ async function register(req, res, db) {
 // ---- 6. Spin the Wheel ---------------------------------------------------
 // The rules are public; everything else is the signed-in customer's own.
 async function contest(action, req, res, db) {
+  if (!contestEnabled()) return json(res, 404, { error: 'Not found.' });   // switched off: CONTEST_ENABLED
   const settings = await getSettings();
   if (action === 'contest-rules') return json(res, 200, await contestRules(db, settings));
   const cust = await accountCustomerForRequest(req);

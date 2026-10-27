@@ -200,6 +200,8 @@ function countdown(iso){
 async function load(){
   $('#err').textContent = '';
   const r = await api('contest-status');
+  // Switched off (CONTEST_ENABLED): nothing of the contest is shown.
+  if(r.status === 404){ document.querySelector('.wrap').innerHTML = '<h1 class="title" style="margin-top:40px">Not available</h1><p class="status">This page is not available. <a href="/">Back to booking</a></p>'; return; }
   if(!r.ok && r.status !== 200){ setStatus(''); $('#err').textContent = r.error || 'Could not load the contest.'; return; }
   ST = r;
   drawWheel(r.prizes);

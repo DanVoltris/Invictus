@@ -138,7 +138,10 @@ function draw(r){
 
 (async () => {
   try{
-    const r = await (await fetch('/api/account?action=contest-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })).json();
+    const res = await fetch('/api/account?action=contest-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    // Switched off (CONTEST_ENABLED): nothing of the contest is shown.
+    if(res.status === 404){ $('#rules').innerHTML = '<p>This page is not available. <a href="/">Back to booking</a></p>'; return; }
+    const r = await res.json();
     if(!r || !r.ok) throw new Error();
     draw(r);
   }catch(e){ $('#rules').innerHTML = '<p>The rules could not be loaded. Please reload the page.</p>'; }

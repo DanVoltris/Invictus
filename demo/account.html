@@ -245,6 +245,7 @@ async function supa(){
   if (SB) return SB;
   const cfg = await (await fetch('/api/config')).json();
   if (!cfg.supabase || !window.supabase) return null;
+  CONTEST_ON = !!cfg.contestEnabled;
   SB = window.supabase.createClient(cfg.supabase.url, cfg.supabase.anonKey,
     { auth:{ persistSession:true, autoRefreshToken:true, storageKey:'invictus-customer' } });
   return SB;
@@ -458,7 +459,7 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     </div>
     <label class="fld" for="n-dob" style="margin-top:14px">Date of birth</label>
     <input class="input" id="n-dob" type="date" autocomplete="bday" min="1900-01-01" max="${todayISO()}" required />
-    <label class="fld" for="n-address" style="margin-top:14px">Address <span class="opt">(optional — needed for Spin the Wheel)</span></label>
+    <label class="fld" for="n-address" style="margin-top:14px">Address <span class="opt">(optional${CONTEST_ON ? ' — needed for Spin the Wheel' : ''})</span></label>
     <input class="input" id="n-address" type="text" maxlength="200" placeholder="Start typing your street address" aria-describedby="n-address-hint" />
     <div class="ph-hint" id="n-address-hint">Choose your address from the list as you type.</div>
     <label class="fld" for="n-career" style="margin-top:14px">Career</label>
@@ -1135,7 +1136,10 @@ const contestMissing = c => {
 const addrNote = c => !String(c.address||'').trim() ? ''
   : !c.address_verified_at ? 'Not confirmed — edit it and choose it from the suggestions'
   : c.address_province === 'MB' ? '✓ Confirmed Manitoba address' : 'Outside Manitoba';
-const fromContest = () => new URLSearchParams(location.search).get('details') === 'contest';
+// Spin the Wheel is switched on and off on the server (CONTEST_ENABLED, via /api/config). Off, My
+// Account says nothing about it: no Rewards card, no contest wording on the details.
+let CONTEST_ON = false;
+const fromContest = () => CONTEST_ON && new URLSearchParams(location.search).get('details') === 'contest';
 let SESSION_TOKEN = null;   // for the address actions; refreshed whenever the editor opens
 function drawDetails(c, dev, editing){
   const host = $('#details'); if(!host) return;
@@ -1164,7 +1168,7 @@ function drawDetails(c, dev, editing){
     ${c.date_of_birth
       ? `<input class="input" id="d-dob" type="text" readonly value="${esc(dobText)}" aria-describedby="d-dob-why" /><div class="ph-hint" id="d-dob-why">To correct your date of birth, ask our staff.</div>`
       : `<input class="input" id="d-dob" type="date" autocomplete="bday" min="1900-01-01" max="${todayISO()}" /><div class="ph-hint">It can't be changed once saved, so check it carefully.</div>`}
-    <label class="fld" for="d-address" style="margin-top:12px">Address <span class="opt">(needed for Spin the Wheel)</span></label>
+    <label class="fld" for="d-address" style="margin-top:12px">Address${CONTEST_ON ? ' <span class="opt">(needed for Spin the Wheel)</span>' : ''}</label>
     <input class="input" id="d-address" type="text" maxlength="200" value="${esc(c.address||'')}" placeholder="Start typing your street address" aria-describedby="d-address-hint" />
     <div class="ph-hint" id="d-address-hint">${esc(addrNote(c) || 'Choose your address from the list as you type.')}</div>
     <label class="fld" for="d-career" style="margin-top:12px">Career</label>
@@ -1230,7 +1234,7 @@ function drawDetails(c, dev, editing){
    returnedToPool }], minor }. Shown only once the person has won something; until then the card
    is a one-line invitation to the wheel, and nothing at all if the contest is not set up. */
 async function loadRewards(){
-  const host = $('#rewards'); if(!host) return;
+  const host = $('#rewards'); if(!host || !CONTEST_ON) return;
   let r = null;
   try{
     const sb = await supa(); const { data:{ session } } = await sb.auth.getSession();

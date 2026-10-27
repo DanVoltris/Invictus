@@ -1497,6 +1497,7 @@ let LEAGUE_OWED = { rows:[], at:0 };
 // long an authorisation survives. Filled in by boot() from /api/config — never assumed, because
 // a wrong number here would be a promise the bank does not keep. See holdWindowText().
 let HOLD_WINDOW = { holdDays:null, chargeAheadDays:null };
+let CONTEST_ON = false;    // Spin the Wheel tabs — the server's CONTEST_ENABLED switch, from /api/config
 let HOLD_CHANGES = false;   // "Change amount" on holds — the server's HOLD_AMOUNT_CHANGES switch, from /api/config
 
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -1520,6 +1521,7 @@ async function boot(){
   // only ever enabled on test keys (lib/booking.js stripeStatus), and the key it hands back says
   // which kind it is — so with live keys there is nothing here to claim.
   STRIPE_TEST_MODE = !!(cfg.stripeEnabled && /^pk_test_/.test(cfg.publishableKey||''));
+  CONTEST_ON = !!cfg.contestEnabled;
   // The hold/charge cut-off belongs to the server (lib/booking.js holdSettings). It is read from
   // settings.pay.hold, which this portal loads anyway — but if /api/config starts reporting the
   // rules directly, that answer wins, because it is the copy actually in force.
@@ -1922,7 +1924,7 @@ const TABS = [
   { id:'promos',                             label:'Promo Codes',        load:loadPromos },
   { id:'logs',                               label:'Booking Logs',       load:loadLogs },
   { id:'customers',                          label:'Search Customers',   load:loadCustomers },
-  { id:'contestrewards',                     label:'Contest Rewards',    load:loadContestRewards },
+  { id:'contestrewards',                     label:'Contest Rewards',    load:loadContestRewards, when:()=>CONTEST_ON },
   { id:'bays',        group:'Configuration', label:'Bays',               load:loadBaysTab,        cap:'config.write' },
   { id:'prices',                             label:'Prices',             load:loadPricesTab,      cap:'config.write' },
   { id:'overrides',                          label:'Schedule Overrides', load:loadOverridesTab,   cap:'config.write' },
@@ -1931,7 +1933,7 @@ const TABS = [
   { id:'tags',                               label:'Tags',               load:loadTags,           cap:'config.write' },
   { id:'paysettings',                        label:'Payment Settings',   load:loadPaySettings,    cap:'config.write' },
   { id:'venue',                              label:'Venue Identity',     load:loadVenueTab,       cap:'config.write' },
-  { id:'contest',                            label:'Contest Setup',      load:loadContestSetup,   cap:'contest.manage' },
+  { id:'contest',                            label:'Contest Setup',      load:loadContestSetup,   cap:'contest.manage', when:()=>CONTEST_ON },
   { id:'staff',       group:'Access',        label:'Staff & Roles',      load:loadStaffTab,       cap:'staff.manage' },
 ];
 const DEFAULT_TAB = 'bookings';
@@ -1947,6 +1949,7 @@ function renderSideNav(){
   TABS.forEach(t=>{
     if(t.group) pending=t.group;
     if(t.cap && !can(t.cap)) return;
+    if(t.when && !t.when()) return;      // switched off on the server (Spin the Wheel: CONTEST_ENABLED)
     if(pending){ out+=`<div class="side-cap">${esc(pending)}</div>`; pending=null; }
     // Holds carries its own count: money that has not been taken yet should be visible from
     // whatever screen the person happens to be on, not only from its own tab.
@@ -3052,19 +3055,19 @@ function openCustomer(c){
     </div><div class="sub" style="margin:6px 0 0">Add hours (in-person card sale) or use hours (redeem in person).</div></div>`}
     <div class="grid2">
       <div class="field"><label>Address ${!c.address ? '' : c.address_verified_at ? (c.address_province==='MB' ? '<span class="pill confirmed">Confirmed MB</span>' : `<span class="pill warn">Confirmed · ${esc(c.address_province||'')}</span>`) : '<span class="pill cancelled">Not confirmed</span>'}</label><input class="input" id="c-address" value="${esc(c.address||'')}" maxlength="200" placeholder="Optional" />
-        <div class="dim" style="font-size:12px;margin-top:6px">Changing it here leaves it unconfirmed. For Spin the Wheel the customer confirms it in My Account by choosing it from the suggestions.</div></div>
+        <div class="dim" style="font-size:12px;margin-top:6px">Changing it here leaves it unconfirmed. The customer confirms it in My Account by choosing it from the suggestions.</div></div>
       <div class="field"><label>Career</label><input class="input" id="c-career" value="${esc(c.career||'')}" maxlength="120" required placeholder="What they do for work" /></div>
     </div>
     <div class="field"><label>Notes</label><input class="input" id="c-notes" value="${esc(c.notes||'')}" placeholder="Optional" /></div>
     ${isNew?'':`<div class="field" style="margin-bottom:0"><label>Booking history</label><div class="cust-history" id="c-hist"><div class="dim" style="font-size:13px;padding:6px 0">Loading…</div></div></div>`}
-    ${isNew?'':`<div class="field" style="margin:14px 0 0"><label>Contest rewards</label><div class="tbl-scroll" id="c-rewards"><div class="dim" style="font-size:13px;padding:6px 0">Loading…</div></div></div>`}
+    ${isNew||!CONTEST_ON?'':`<div class="field" style="margin:14px 0 0"><label>Contest rewards</label><div class="tbl-scroll" id="c-rewards"><div class="dim" style="font-size:13px;padding:6px 0">Loading…</div></div></div>`}
     <button class="btn btn-primary" id="c-save" style="width:100%;margin-top:16px">${isNew?'Add customer':'Save changes'}</button>
     ${isNew?'':'<button class="btn btn-danger" id="c-del" style="width:100%;margin-top:10px">Delete customer</button>'}`;
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
   enhanceSelects(sheet);
   if(!isNew) loadCustHistory(c,'c-hist');
-  if(!isNew) loadCustRewards(c,'c-rewards');
+  if(!isNew && CONTEST_ON) loadCustRewards(c,'c-rewards');
   if(!isNew){
     const doAdj=async(sign)=>{
       const hrs=+$('#c-hadj').value; if(!(hrs>0)){ toast('Enter hours to adjust','err'); return; }
@@ -7525,7 +7528,8 @@ async function loadStaffTab(){
     $('#st-matrix').innerHTML=''; $('#st-audit').innerHTML='';
     return;
   }
-  STAFF_ROWS=sq.data||[]; STAFF_CAPS=cq.data||[]; STAFF_PERMS=pq.data||[];
+  // The Contest permission is listed only while Spin the Wheel is switched on (CONTEST_ENABLED).
+  STAFF_ROWS=sq.data||[]; STAFF_CAPS=(cq.data||[]).filter(c=>CONTEST_ON || c.key!=='contest.manage'); STAFF_PERMS=pq.data||[];
   renderStaffTable();
   renderStaffMatrix();
   loadAuditLog();
