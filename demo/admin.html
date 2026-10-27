@@ -3362,6 +3362,11 @@ function openLeagueEditor(x){
       <div class="field"><label for="li-regend">Regular season ends <span class="dim">(last day a regular round counts)</span></label><input class="input" id="li-regend" type="date" value="${esc((info.dates||{}).regularEnd||'')}" /></div>
       <div class="field"><label for="li-playoffs">Playoffs start <span class="dim">(no substitutes from this day)</span></label><input class="input" id="li-playoffs" type="date" value="${esc((info.dates||{}).playoffsStart||'')}" /></div>
     </div>
+    <div class="grid2">
+      <div class="field"><label for="li-qualend">Qualifiers close <span class="dim">(after this day, rounds for weeks ending by it can never be played — divisions are split)</span></label><input class="input" id="li-qualend" type="date" value="${esc((info.dates||{}).qualifiersEnd||'')}" /></div>
+      <div></div>
+    </div>
+    ${switchRow('li-pomakeups','Catch up into the playoffs','A team may still play a missed round from before the playoffs during them, in order, until the season ends.',!!(info.dates||{}).playoffMakeups)}
     <div class="field"><label for="li-lock">Rosters lock after week <span class="dim">(captains can’t add players or substitutes after it; staff still can)</span></label><input class="input" id="li-lock" type="number" min="1" max="60" step="1" style="max-width:140px" placeholder="e.g. 4" value="${esc((info.dates||{}).rosterLockWeek||'')}" /></div>
     ${switchRow('li-fees','Fees before the first round','A team that still owes any of its league fee can’t book a league round until it is paid in full.',!!(info.dates||{}).feesFirst)}
     <div class="dim" style="font-size:12.5px;margin:8px 0 14px">Captains are texted a week before rosters lock and a week before the playoffs. A team that missed a week plays that round first, then the next (make-up rounds), up to the regular-season deadline.</div>
@@ -3383,6 +3388,7 @@ function openLeagueEditor(x){
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
   enhanceSelects(sheet); buildDatePicker($('#le-from')); buildDatePicker($('#le-to'));
+  sheet.querySelectorAll('#li-regend,#li-playoffs,#li-qualend').forEach(el=>{ if(el.type==='date') buildDatePicker(el); });
   wireChips($('#le-bays'), bays);
   // What a captain will be offered, recalculated as the manager types.
   const splitText=()=>{
@@ -3397,7 +3403,7 @@ function openLeagueEditor(x){
   let weeks=info.schedule.map(w=>({ ...w }));
   const readWeeks=()=>[...sheet.querySelectorAll('.li-week')].map(r=>({ ...Object.fromEntries(
     ['from','to','phase','event','course','location','note'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])),
-    optional: r.querySelector('[data-k="optional"]').checked }));
+    optional: r.querySelector('[data-k="optional"]').checked, catchup: r.querySelector('[data-k="catchup"]').checked }));
   const drawWeeks=()=>{
     const host=$('#li-weeks'); if(!host) return;
     host.innerHTML=weeks.map((w,i)=>`<div class="li-week">
@@ -3414,6 +3420,9 @@ function openLeagueEditor(x){
       <label class="row lea-switch li-week-off">
         <span class="switch"><input type="checkbox" data-k="optional" ${w.optional?'checked':''} /><span class="track"></span></span>
         <span><b>No league play required</b><span class="dim" style="display:block;font-size:12px">A break. Teams can still play, but not playing is not a missed week and nobody is chased.</span></span></label>
+      <label class="row lea-switch li-week-off">
+        <span class="switch"><input type="checkbox" data-k="catchup" ${w.catchup?'checked':''} /><span class="track"></span></span>
+        <span><b>Catch-up weeks</b><span class="dim" style="display:block;font-size:12px">No course of its own: a round played here only makes up a week the team missed. A team that is up to date plays nothing.</span></span></label>
       </div>`).join('') || '<div class="dim" style="font-size:12.5px;margin-bottom:8px">No weeks yet.</div>';
     host.querySelectorAll('input[type="date"]').forEach(buildDatePicker);
     host.querySelectorAll('.li-week-del').forEach(b=>b.onclick=()=>{ weeks=readWeeks(); weeks.splice(+b.dataset.i,1); drawWeeks(); });
@@ -3454,7 +3463,8 @@ function openLeagueEditor(x){
       details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value, rules:$('#li-rules').value,
         settings:$('#li-settings').value, challenges:$('#li-challenges').value,
         schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value,
-        dates:{ regularEnd:$('#li-regend').value, playoffsStart:$('#li-playoffs').value, rosterLockWeek:$('#li-lock').value, feesFirst:$('#li-fees').checked } });
+        dates:{ regularEnd:$('#li-regend').value, playoffsStart:$('#li-playoffs').value, rosterLockWeek:$('#li-lock').value, feesFirst:$('#li-fees').checked,
+          qualifiersEnd:$('#li-qualend').value, playoffMakeups:$('#li-pomakeups').checked } });
       const kd=details.dates||{};
       if(kd.regularEnd && kd.playoffsStart && kd.playoffsStart<=kd.regularEnd) return err('Playoffs have to start after the regular season ends.');
       if($('#li-lock').value.trim() && !kd.rosterLockWeek) return err('“Rosters lock after week” needs a whole week number, like 4.');
@@ -3555,7 +3565,7 @@ const leagueTeamLabel = id => { const t=LG_TEAM_BY_ID[id]; return t ? `${t.leagu
 // { ok:true } or { error:'…', clash } — `clash` is the round already holding that week, so the
 // caller can offer to open it. The week is re-read from the database every time, never from the
 // day the Tee Sheet happens to be showing, so a cancellation elsewhere frees it immediately.
-async function checkLeagueRound(teamId, dateISO, ignoreBookingId){
+async function checkLeagueRound(teamId, dateISO, ignoreBookingId, pick){
   const t=LG_TEAM_BY_ID[teamId];
   if(!t) return { error:'That team isn’t on a current league any more. Pick another team, or reopen the league to check its season dates.' };
   const lg=t.league;
@@ -3576,15 +3586,20 @@ async function checkLeagueRound(teamId, dateISO, ignoreBookingId){
   const rounds=(q.data||[]).filter(x=>String(x.id)!==String(ignoreBookingId));
   const weeks=LG().teamWeeks({ league:lg, todayISO:today, rounds });
   const here=weeks.find(w=>w.start===LG().weekIn(lg, dateISO));
-  let tgt=LG().roundTarget({ league:lg, weeks, dateISO });
+  let tgt=LG().roundTarget({ league:lg, weeks, dateISO, pick:pick||null });
   // Before 0042 there is nowhere to record a make-up: a round can only be the week it is played in.
   if(tgt.ok && tgt.makeup && !LG42.makeups) tgt = here && here.round ? { ok:false, code:'round_booked', existing:here.round } : { ok:true, week:here, makeup:false };
   if(!tgt.ok){
-    if(tgt.code==='after_deadline') return { error:`${lg.name}’s regular season ended on ${shortDate2(tgt.regularEnd)}, so a round on ${dateLabel(dateISO)} does not count${tgt.playoffsStart?` (playoffs start ${shortDate2(tgt.playoffsStart)})`:''}.` };
+    if(tgt.code==='after_deadline') return { error:pick
+      ? `That week of ${lg.name} is closed — its deadline (${shortDate2(tgt.regularEnd)}) has passed.`
+      : `${lg.name}’s regular season ended on ${shortDate2(tgt.regularEnd)}, so a round on ${dateLabel(dateISO)} does not count${tgt.playoffsStart?` (playoffs start ${shortDate2(tgt.playoffsStart)})`:''}.` };
+    if(tgt.code==='catchup_only') return { error:pick
+      ? 'That is a catch-up week: it has no round of its own. Pick the week the team is playing.'
+      : `${dateLabel(dateISO)} is in a catch-up week, and ${t.name} has no missed round to catch up — nothing to play this week.` };
     if(tgt.existing) return { error:`${t.name} already has a round this week — ${roundText(tgt.existing)} — and no missed week to make up.`, clash:tgt.existing };
     return { error:`${dateLabel(dateISO)} is not in ${lg.name}’s season.` };
   }
-  return { ok:true, week:tgt.week, team:t, makeup:!!tgt.makeup, forWeek: tgt.makeup ? tgt.week.start : null };
+  return { ok:true, week:tgt.week, team:t, makeup:!!tgt.makeup, early:!!tgt.early, forWeek: tgt.makeup ? tgt.week.start : null };
 }
 
 // One place to say no. With a clash it offers to open the round that already holds the week.
@@ -3617,7 +3632,7 @@ async function reportRoundDuplicate(teamId, dateISO, ignoreBookingId){
 //   · no current team league, and this booking isn't a round → nothing to show
 //   · migration 0031 not applied → the league page's own note, and no control
 //   · booking.write without money.write → the team is shown, but can't be set or cleared
-function leagueRoundFieldHTML(id, currentTeamId){
+function leagueRoundFieldHTML(id, currentTeamId, pickWeek){
   const cur=currentTeamId||'';
   if(!LG_TEAMS.length && !cur) return '';
   if(!LG31.rounds) return `<div class="field"><label>League round</label>${mig31Flag(false)}</div>`;
@@ -3629,9 +3644,25 @@ function leagueRoundFieldHTML(id, currentTeamId){
     .concat(LG_TEAMS.map(t=>`<option value="${esc(t.id)}" ${t.id===cur?'selected':''}>${esc(t.league.name)} · ${esc(t.name)}</option>`));
   // A round on a league whose season has ended still has to be removable from here.
   if(cur && !known) opts.push(`<option value="${esc(cur)}" selected>Team from a finished league</option>`);
+  // Which week it counts for: automatic (the earliest week the team owes), or a later week picked
+  // by staff — a team away that week plays it early. Catch-up weeks have no round of their own.
+  const leagues=[...new Map(LG_TEAMS.map(t=>[t.league.id,t.league])).values()];
+  const wkOpts=['<option value="">Automatic — the next week they owe</option>'].concat(leagues.flatMap(lg=>
+    LG().weeks(lg).filter(w=>!w.catchup).map(w=>`<option value="${esc(lg.id+'|'+w.start)}" ${pickWeek&&pickWeek===w.start?'selected':''}>${leagues.length>1?esc(lg.name)+' · ':''}Week ${w.number} · ${esc(shortDate2(w.start))}–${esc(shortDate2(w.end))}</option>`)));
   return `<div class="field"><label for="${id}">League round</label>
     <select class="input" id="${id}">${opts.join('')}</select>
-    <div class="dim" style="font-size:12px;margin-top:6px">Mark this as a team’s round for the week. The team pays for the bay as usual, less the league discount (${leagueOffPerHourCents()?'$'+(leagueOffPerHourCents()/100).toFixed(2)+' an hour':'none set'}). Each team plays one round a week.</div></div>`;
+    <div class="dim" style="font-size:12px;margin-top:6px">Mark this as a team’s round for the week. The team pays for the bay as usual, less the league discount (${leagueOffPerHourCents()?'$'+(leagueOffPerHourCents()/100).toFixed(2)+' an hour':'none set'}). Each team plays one round a week.</div></div>
+    <div class="field"><label for="${id}-wk">Counts for week</label>
+    <select class="input" id="${id}-wk">${wkOpts.join('')}</select>
+    <div class="dim" style="font-size:12px;margin-top:6px">Leave on automatic: a team plays a missed week first. Pick a later week only to let a team play it early.</div></div>`;
+}
+// The week picked beside a league-round picker, as the week's start date — or null for automatic.
+function pickedLeagueWeek(id, teamId){
+  const v=($('#'+id+'-wk')&&$('#'+id+'-wk').value)||'';
+  if(!v) return { pick:null };
+  const [lgId, start]=v.split('|'), t=LG_TEAM_BY_ID[teamId];
+  if(t && t.league.id!==lgId) return { error:'That week belongs to a different league from the team you picked.' };
+  return { pick:start };
 }
 
 // A small form on top of whatever sheet is open (confirmSheet's overlay). confirmSheet empties itself
@@ -4342,10 +4373,10 @@ function leagueResults(ctx){
       The <b>Weeks</b> tab lists every week of the season.</div>`;
     return;
   }
-  // The day that team booked in that week, so the record matches when they really played.
-  const playedOn=(key,w)=>{ if(!league.team_mode) return w.end<today?w.end:w.start;
-    const r=(rounds||[]).find(x=>x.league_team_id===key && x.status!=='cancelled' && roundWeek(x,league)===w.start);
-    return r?r.booking_date:w.start; };
+  // A team's result is filed under the WEEK it counts for (its start), not the day the round was
+  // played: a make-up played in a later week, or a round played early, would otherwise be scored as
+  // that other week's course — and be wiped when that week's results were saved.
+  const playedOn=(key,w)=>{ if(!league.team_mode) return w.end<today?w.end:w.start; return w.start; };
   host.innerHTML=`
     ${cols.length?`<div class="sec-h" style="margin-top:0">Season so far <span class="dim" style="text-transform:none;letter-spacing:0;font-weight:500">— click a week to edit it</span></div>
     <div class="tbl-scroll"><table class="lr-grid"><thead><tr><th>${league.team_mode?'Team':'Player'}</th>${cols.map(w=>`<th class="lr-col"><button type="button" class="link-btn lr-pick" data-week="${w.start}" title="${esc('Week '+w.number+' · '+weekLabel(w))}">W${w.number}</button></th>`).join('')}</tr></thead>
@@ -5260,11 +5291,14 @@ function openAdd(bayId,startMin,dateISO){
       status_label: type==='blocked'?null:(($('#s-status')?.value||'').trim()||null),
       note: ($('#s-note')?.value||'').trim()||null };
     if(teamId){
-      const chk=await checkLeagueRound(teamId, date, null);
+      const pw=pickedLeagueWeek('s-team', teamId);
+      if(pw.error){ toast(pw.error,'err'); return; }
+      const chk=await checkLeagueRound(teamId, date, null, pw.pick);
       if(!chk.ok){ leagueRoundRefused(chk, teamId); return; }
       row.league_team_id=teamId;   // the tag only: a league round is paid for like any booking
-      if(chk.forWeek) row.league_for_week=chk.forWeek;          // a make-up: the missed week it counts for
-      if(chk.makeup) toast(`This is ${chk.team.name}’s make-up round for week ${chk.week.number}`,'ok');
+      if(chk.forWeek) row.league_for_week=chk.forWeek;          // a make-up (or played early): the week it counts for
+      if(chk.early) toast(`This is ${chk.team.name}’s week ${chk.week.number} round, played early`,'ok');
+      else if(chk.makeup) toast(`This is ${chk.team.name}’s make-up round for week ${chk.week.number}`,'ok');
     }
     $('#s-add').disabled=true;
     let r=await sb.from('bookings').insert(row);
@@ -5596,7 +5630,7 @@ function openManage(id){
       const btns=SHORTEN_STEPS.filter(([m])=>m<=shortenRoom(b)).map(([m,l])=>`<button type="button" class="btn btn-ghost btn-sm m-shorten" data-m="${m}">${l}</button>`).join('');
       return `<div class="kv"><span class="k">Shorten</span><span class="row" style="gap:6px;justify-content:flex-end">${btns||'<span class="dim">Already the shortest a booking can be</span>'}</span></div>`; })() : ''}
     <div class="kv" style="border:none"><span class="k">Bay</span><span>${esc(bayName(b.bay_id))}${baySim?` <span class="dim">· ${esc(baySim)}</span>`:''}</span></div>
-    ${leagueRoundFieldHTML('m-team', b.league_team_id)}
+    ${leagueRoundFieldHTML('m-team', b.league_team_id, b.league_for_week||null)}
     ${seriesBlockHTML(b)}
 
     <div class="sec-h">Charges</div>
@@ -5720,9 +5754,12 @@ function openManage(id){
       // Marking or un-marking a team's league round, if this person may change prices at all.
       const teamSel=$('#m-team');
       const wasTeam=b.league_team_id||null, nowTeam=teamSel ? (teamSel.value||null) : wasTeam;
-      if(teamSel && nowTeam!==wasTeam){
+      const pw=nowTeam ? pickedLeagueWeek('m-team', nowTeam) : { pick:null };
+      if(pw.error){ toast(pw.error,'err'); return; }
+      const weekChanged=!!nowTeam && nowTeam===wasTeam && (pw.pick||null)!==(b.league_for_week||null);
+      if(teamSel && (nowTeam!==wasTeam || weekChanged)){
         if(nowTeam){
-          const chk=await checkLeagueRound(nowTeam, b.booking_date, b.id);
+          const chk=await checkLeagueRound(nowTeam, b.booking_date, b.id, pw.pick);
           if(!chk.ok){ leagueRoundRefused(chk, nowTeam); return; }
           patch.league_team_id=nowTeam;                          // the tag only: what was paid stays as it is
           if(LG42.makeups) patch.league_for_week=chk.forWeek||null;   // a make-up counts for the week it missed

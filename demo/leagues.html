@@ -428,7 +428,7 @@ function leaguePageHTML(lg, { back }){
             <thead><tr><th scope="col">Wk</th><th scope="col">Dates</th><th scope="col">Course</th><th scope="col">Event and notes</th></tr></thead>
             ${L.schedulePhases(d.schedule).map(ph => `<tbody>
               ${ph.phase ? `<tr class="sc-phase"><th colspan="4" scope="colgroup">${esc(ph.phase)}</th></tr>` : ''}
-              ${ph.weeks.map(w => `<tr${w.optional ? ' class="is-break"' : ''}>
+              ${ph.weeks.map(w => `<tr${w.optional || w.catchup ? ' class="is-break"' : ''}>
                 <td class="sc-n">${esc(weekNo(w))}</td>
                 <td class="sc-d">${esc(L.dateRangeLabel(w.from, w.to) || 'To be announced')}</td>
                 <td class="sc-c"><b>${esc(w.course || 'To be announced')}</b>${w.location ? `<span>${esc(w.location)}</span>` : ''}</td>

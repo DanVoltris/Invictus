@@ -53,9 +53,12 @@
   // Breaks: schedule rows marked "no league play required" (leagues.details.schedule[].optional —
   // a holiday fortnight, say). A league week that falls wholly inside one is `off`: a team may
   // still play it, but not playing is never a missed week and nobody is chased for it.
+  // Catch-up weeks (schedule[].catchup): a break with no course of its own. A round played in one
+  // only ever counts for an earlier week the team missed; a team that is up to date plays nothing.
   function breakRanges(league) {
     const rows = league && league.details && Array.isArray(league.details.schedule) ? league.details.schedule : [];
-    return rows.filter((r) => r && r.optional && r.from).map((r) => ({ from: String(r.from), to: String(r.to || r.from) }));
+    return rows.filter((r) => r && (r.optional || r.catchup) && r.from)
+      .map((r) => ({ from: String(r.from), to: String(r.to || r.from), catchup: !!r.catchup }));
   }
 
   // Every week of the season: { start, end, number } (+ off: true on a break). A season that runs Wed–Wed counts the
@@ -67,7 +70,8 @@
     for (let i = 0; w <= last && i < MAX_WEEKS; i++) {
       const end = weekEnd(w);
       // `off` is only present on a break week, so a league with no breaks reads exactly as before.
-      out.push({ start: w, end, number: i + 1, ...(breaks.some((b) => w >= b.from && end <= b.to) ? { off: true } : {}) });
+      const br = breaks.find((b) => w >= b.from && end <= b.to);
+      out.push({ start: w, end, number: i + 1, ...(br ? { off: true } : {}), ...(br && br.catchup ? { catchup: true } : {}) });
       const d = dateOf(w); d.setUTCDate(d.getUTCDate() + 7); w = isoOf(d);
     }
     return out;
@@ -101,6 +105,10 @@
        playoffsStart   first day of the playoffs — substitutes may not play from here on
        rosterLockWeek  rosters lock at the end of this week of the season (4 = after week 4)
        feesFirst       a team must have paid in full before it books a league round
+       qualifiersEnd   last day a round may be played for any week that ends on or before it — after
+                       it, those weeks are closed for good (the managers split the divisions then)
+       playoffMakeups  rounds missed before the playoffs may still be made up during them, up to
+                       the end of the season (without it, the playoffs play only playoff weeks)
      rosterLockOn is worked out: the last day of week `rosterLockWeek`. */
   const isoDay = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(Date.parse(`${v}T00:00:00Z`)) ? String(v) : null);
   function leagueDates(league) {
@@ -108,7 +116,8 @@
     const all = weeks(league), n = Math.floor(Number(d.rosterLockWeek));
     const lock = n >= 1 && n <= all.length ? all[n - 1] : null;
     return { regularEnd: isoDay(d.regularEnd), playoffsStart: isoDay(d.playoffsStart),
-      rosterLockWeek: lock ? n : null, rosterLockOn: lock ? lock.end : null, feesFirst: d.feesFirst === true };
+      rosterLockWeek: lock ? n : null, rosterLockOn: lock ? lock.end : null, feesFirst: d.feesFirst === true,
+      qualifiersEnd: isoDay(d.qualifiersEnd), playoffMakeups: d.playoffMakeups === true };
   }
   // Are rosters locked on todayISO? (No lock week set = never.)
   const rosterLocked = (league, todayISO) => { const k = leagueDates(league); return !!(k.rosterLockOn && todayISO > k.rosterLockOn); };
@@ -124,10 +133,15 @@
   //                                                   week's round (playedIn: the later week it is
   //                                                   booked in, when it is not in this one)
   //   { ok:false, code:'after_deadline', regularEnd, playoffsStart }
+  //   { ok:false, code:'catchup_only' }          a catch-up week, and nothing is owed to catch up
   //   { ok:false, code:'outside_season' }
   // A break week is never owed, so it is never a make-up — but a team may still play it in that
-  // week. Past the regular-season deadline no regular-season week can be played any more.
-  function roundTarget({ league, weeks: list = [], dateISO }) {
+  // week; a catch-up week has no round of its own at all. Past the regular-season deadline no
+  // regular-season week can be played any more, and past qualifiersEnd no week ending by it.
+  //
+  // `pick` (staff only): the week start the round should count for, instead of the earliest one
+  // owed — how staff book a team into a week AHEAD of time (a team away that week plays it early).
+  function roundTarget({ league, weeks: list = [], dateISO, pick = null }) {
     const wk = weekIn(league, dateISO);
     if (!list.some((w) => w.start === wk)) return { ok: false, code: 'outside_season' };
     const k = leagueDates(league);
@@ -135,12 +149,24 @@
     if (late && k.playoffsStart && dateISO < k.playoffsStart) {
       return { ok: false, code: 'after_deadline', regularEnd: k.regularEnd, playoffsStart: k.playoffsStart };
     }
-    // In the playoffs only playoff weeks are played: nothing from before them is made up.
-    const poWeek = k.playoffsStart && dateISO >= k.playoffsStart ? weekIn(league, k.playoffsStart) : null;
-    const open = list.filter((w) => w.start <= wk && !w.round && (!w.off || w.start === wk)
-      && !(late && w.end <= k.regularEnd) && !(poWeek && w.start < poWeek));
+    // Weeks closed for good on this date: past the regular deadline, or the qualifiers' cut-off.
+    const closed = (w) => (late && w.end <= k.regularEnd) || (!!k.qualifiersEnd && dateISO > k.qualifiersEnd && w.end <= k.qualifiersEnd);
+    if (pick) {
+      const w = list.find((x) => x.start === pick);
+      if (!w) return { ok: false, code: 'outside_season' };
+      if (w.catchup) return { ok: false, code: 'catchup_only' };
+      if (closed(w)) return { ok: false, code: 'after_deadline', regularEnd: k.regularEnd || k.qualifiersEnd, playoffsStart: k.playoffsStart };
+      if (w.round) return { ok: false, code: 'round_booked', existing: w.round, week: w, playedIn: null };
+      return { ok: true, week: w, makeup: w.start !== wk, ...(w.start > wk ? { early: true } : {}) };
+    }
+    // In the playoffs only playoff weeks are played (nothing from before them is made up), unless
+    // the league lets missed rounds be caught up into the playoffs (playoffMakeups).
+    const poWeek = k.playoffsStart && dateISO >= k.playoffsStart && !k.playoffMakeups ? weekIn(league, k.playoffsStart) : null;
+    const open = list.filter((w) => w.start <= wk && !w.round && (!w.off || (w.start === wk && !w.catchup))
+      && !closed(w) && !(poWeek && w.start < poWeek));
     if (open.length) return { ok: true, week: open[0], makeup: open[0].start !== wk };
     const here = list.find((w) => w.start === wk);
+    if (here.catchup) return { ok: false, code: 'catchup_only' };
     if (late && !here.round) return { ok: false, code: 'after_deadline', regularEnd: k.regularEnd, playoffsStart: k.playoffsStart };
     // This week's round may be a booking on a LATER date standing in for it (booked ahead, so it
     // took the earliest unplayed week). playedIn says which week that booking is really in, so the
@@ -351,14 +377,17 @@
     const dates = { ...(isoDay(kd.regularEnd) ? { regularEnd: isoDay(kd.regularEnd) } : {}),
       ...(isoDay(kd.playoffsStart) ? { playoffsStart: isoDay(kd.playoffsStart) } : {}),
       ...(lockN >= 1 && lockN <= MAX_WEEKS ? { rosterLockWeek: lockN } : {}),
-      ...(kd.feesFirst === true || kd.feesFirst === 'true' ? { feesFirst: true } : {}) };
+      ...(kd.feesFirst === true || kd.feesFirst === 'true' ? { feesFirst: true } : {}),
+      ...(isoDay(kd.qualifiersEnd) ? { qualifiersEnd: isoDay(kd.qualifiersEnd) } : {}),
+      ...(kd.playoffMakeups === true || kd.playoffMakeups === 'true' ? { playoffMakeups: true } : {}) };
     const date = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !isNaN(Date.parse(`${v}T00:00:00Z`)) ? String(v) : null);
     const schedule = (Array.isArray(d.schedule) ? d.schedule : []).map((w) => {
       const x = w && typeof w === 'object' ? w : {};
       let from = date(x.from), to = date(x.to);
       if (from && to && to < from) to = from;
       return { from, to, phase: line(x.phase, 60), event: line(x.event, 80), course: line(x.course, 120), location: line(x.location, 120),
-        note: line(x.note, INFO_LIMITS.note), ...(x.optional === true || x.optional === 'true' ? { optional: true } : {}) };
+        note: line(x.note, INFO_LIMITS.note), ...(x.optional === true || x.optional === 'true' ? { optional: true } : {}),
+        ...(x.catchup === true || x.catchup === 'true' ? { catchup: true } : {}) };
     }).filter((w) => w.from || w.event || w.course || w.note).slice(0, INFO_LIMITS.weeks);
     return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), eligibility: list(d.eligibility), format: list(d.format), rules: ruleSections, settings,
       challenges: list(d.challenges), schedule, notice: para(d.notice, INFO_LIMITS.notice),

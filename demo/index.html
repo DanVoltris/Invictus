@@ -2321,7 +2321,7 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape' && $('#wl-overlay'
 
    Migration 0031 may not be applied. Everything below is skipped silently in that case: no banner,
    no panel, and the page books exactly as it did before. */
-const LEAGUE_REFUSALS = ['round_booked', 'not_on_team', 'no_team', 'sign_in', 'outside_season', 'fees_unpaid', 'after_deadline'];
+const LEAGUE_REFUSALS = ['round_booked', 'not_on_team', 'no_team', 'sign_in', 'outside_season', 'fees_unpaid', 'after_deadline', 'catchup_only'];
 let LG = { teams: [], armed: null, intent: false, note: null };
 
 const todayISO = () => { const w = winnipegNow(); return `${w.y}-${pad(w.mo)}-${pad(w.d)}`; };
@@ -2369,6 +2369,7 @@ function renderLeagueBar(){
     const c = t.weeks.find(w => w.current), n = next(t);
     if(t.sub) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b>: you are a substitute, so the team's players book the league round. Anything you book here is an ordinary session.</div>`;
     if(n.code === 'after_deadline') return `<div class="lg-line"><b>${escHtml(t.teamName)}</b>: the regular season ended on ${escHtml(longDate(n.regularEnd))}${n.playoffsStart ? `, and playoffs start ${escHtml(longDate(n.playoffsStart))}` : ''}. A booking now is an ordinary session.</div>`;
+    if(n.code === 'catchup_only') return `<div class="lg-line"><b>${escHtml(t.teamName)}</b>: this is a catch-up week, and you are up to date — there is no league round to play. A booking now is an ordinary session.</div>`;
     if(n.ok && n.makeup) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> has a missed round to make up: <b>week ${n.week.number}</b> (${escHtml(weekLabel(n.week))}). Your next league round counts for it, then you carry on with the weeks after. Pick any open time below and choose your team at checkout.</div>`;
     if(!c) return `<div class="lg-line"><b>${escHtml(t.teamName)}</b> — ${escHtml(t.leagueName)} is not running this week, so a booking now is an ordinary session.</div>`;
     const later = c.round && c.round.booking_date && t.weeks.find(w => w.start === LEA.weekIn(t.league, c.round.booking_date) && w.start !== c.start);
@@ -2401,6 +2402,7 @@ function leagueChoices(){
     const base = { teamId:t.teamId, teamName:t.teamName, leagueName:t.leagueName, minMins:t.minMins, weeksTotal:t.weeks.length };
     if(n.ok) out.open.push({ ...base, week:n.week, round:null, makeup:!!n.makeup });
     else if(n.code === 'after_deadline') out.closed.push({ ...base, regularEnd:n.regularEnd, playoffsStart:n.playoffsStart });
+    else if(n.code === 'catchup_only') out.closed.push({ ...base, catchup:true });
     else if(n.existing) out.taken.push({ ...base, week:(t.weeks.find(x => x.start === LEA.weekOf(day, t.weekStart)) || {}), round:n.existing, playedIn:n.playedIn || null });
   }
   return out;
@@ -2461,7 +2463,10 @@ function renderLeaguePanel(){
     </div>` : `<div class="lg-panel is-note">
       <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)} is up to date</div>
       <div class="lg-d">${t.week.number ? `Week ${t.week.number} is booked` : 'That week is booked'}: <b>${escHtml(roundLine(t.round))}</b>, and there is no missed week to make up. So this one is an ordinary session at the normal price.</div>
-    </div>`).join('') + closed.map(t => `<div class="lg-panel is-note">
+    </div>`).join('') + closed.map(t => t.catchup ? `<div class="lg-panel is-note">
+      <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)} is up to date</div>
+      <div class="lg-d">This is a catch-up week: it only makes up a round your team missed, and you have none to make up. So this one is an ordinary session at the normal price.</div>
+    </div>` : `<div class="lg-panel is-note">
       <div class="lg-t" style="font-size:14px">${escHtml(t.teamName)}: the regular season is over</div>
       <div class="lg-d">Regular-season rounds had to be played by <b>${escHtml(longDate(t.regularEnd))}</b>${t.playoffsStart ? `, and playoffs start ${escHtml(longDate(t.playoffsStart))}` : ''}. This one is an ordinary session at the normal price.</div>
     </div>`).join('');
