@@ -257,7 +257,7 @@ test('a booking receipt is TEXTED — no marketing tick needed — and never ema
     startMin: 1410, endMin: 1620, players: 2, amountCents: 5600, name: 'Sam', email: 'sam@invictus.test', phone: '(204) 555-0101' });
   assert.deepEqual(rows.map((r) => [r.channel, r.template, r.status]), [['sms', 'booking.confirmed', 'sent']]);
   assert.equal(fetched.length, 1); assert.match(fetched[0].url, /twilio/);
-  assert.match(fetched[0].form.get('Body'), /you're booked — Birchwood Bay #2, Saturday, October 3, 11:30 PM–3:00 AM \(Sun\)\. Paid \$56\.00 CAD\./);
+  assert.match(fetched[0].form.get('Body'), /you're booked - Birchwood Bay #2, Saturday, October 3, 11:30 PM-3:00 AM \(Sun\)\. Paid \$56\.00 CAD\./);
   delete process.env.RESEND_API_KEY; delete process.env.RESEND_FROM;
 });
 

@@ -1,6 +1,5 @@
 import { getSettings, getBookingsForDate, getOverridesForDate, cleanupExpiredHolds } from '../lib/db.js';
-import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked, taxPctOf, holdChangesEnabled } from '../lib/booking.js';
-import { contestEnabled } from '../lib/contest.js';
+import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked, taxPctOf, holdChangesEnabled, contestEnabled } from '../lib/booking.js';
 
 // The two anonymous reads every visitor makes before they can do anything — what this install is
 // wired up to, and what is free on a given day. Dispatch on ?action=, the same shape as

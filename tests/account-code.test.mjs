@@ -97,7 +97,7 @@ test('a new staff member is TEXTED their invite link, and the stored copy loses 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].body.get('To'), '+12045550123');
   const body = sent[0].body.get('Body');
-  assert.match(body, /^Invictus Golf: Murad added you to the staff portal as an employee\. Set up your login \(your email \+ a password\): https:\/\/x\.supabase\.co\S+type=invite — works once, within 7 days\./);
+  assert.match(body, /^Invictus Golf: Murad added you to the staff portal as an employee\. Set up your login \(your email \+ a password\): https:\/\/x\.supabase\.co\S+type=invite - works once, within 7 days\./);
   const row = S.db.notifications[0];
   assert.equal(row.template, 'staff.invite'); assert.equal(row.status, 'sent');
   assert.equal(row.payload.link, undefined, 'a delivered sign-in link is not kept in the database');
@@ -166,7 +166,7 @@ test('signing up for My Account with a staff email: told to use a personal one, 
   S.db.staff = [{ user_id: 'S1', email: 'coach@invictus.ca', role: 'employee' }];
   await start('204-990-6530');
   const v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
-  const r = await act('register', { token: v.out.token, email: 'coach@invictus.ca', password: 'longenough' });
+  const r = await act('register', { token: v.out.token, email: 'coach@invictus.ca', password: 'longenough', firstName: 'Murad', lastName: 'Test', dateOfBirth: '1990-01-01', career: 'Golfer' });
   assert.equal(r.code, 409);
   assert.equal(r.out.code, 'staff_email');
   assert.match(r.out.error, /staff login .* personal email/);
@@ -196,7 +196,7 @@ test('sign-up with a different email than the one on file: the record follows th
   S.db.customers = [{ id: 'C1', name: 'Murad', phone: '204-990-6530', email: 'old@import.ca', user_id: null }];
   await start('204-990-6530');
   const v = await act('verify', { phone: '204-990-6530', code: codeFromText() });
-  const r = await act('register', { token: v.out.token, email: 'murad@home.ca', password: 'longenough', name: 'Murad' });
+  const r = await act('register', { token: v.out.token, email: 'murad@home.ca', password: 'longenough', firstName: 'Murad', lastName: 'Test', dateOfBirth: '1990-01-01', career: 'Golfer' });
   assert.equal(r.code, 200, JSON.stringify(r.out));
   assert.equal(S.db.customers[0].user_id, 'NEWUSER');
   assert.equal(S.db.customers[0].email, 'murad@home.ca');

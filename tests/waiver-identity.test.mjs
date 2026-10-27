@@ -33,7 +33,7 @@ function fakeDb() {
 mock.module(ROOT + 'lib/db.js', { namedExports: {
   admin: () => fakeDb(),
   normPhone: digits,
-  getSettings: async () => ({}), saveBookingFeedback: async () => ({}),
+  getSettings: async () => ({}), saveBookingFeedback: async () => ({}), accountCustomerForRequest: async () => null,
   // phone first, email fallback — as lib/db.js does
   customerHoursByContact: async ({ email, phone }) =>
     (digits(phone) && S.customers.find((c) => digits(c.phone) === digits(phone)))
