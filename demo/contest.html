@@ -97,10 +97,12 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = c => '$'+(c/100).toLocaleString('en-US',{minimumFractionDigits:c%100?2:0,maximumFractionDigits:2});
-// Contest times are Central Time, whatever the visitor's own clock says.
-const fmtCT = iso => new Date(iso).toLocaleString('en-US',{timeZone:'America/Winnipeg',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+// Contest times are Central Time, whatever the visitor's own clock says. Manitoba stays on UTC−5 all
+// year from November 2026, and many devices do not know yet, so the offset is fixed ('Etc/GMT+5').
+const fmtCT = iso => new Date(iso).toLocaleString('en-US',{timeZone:'Etc/GMT+5',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' CT';
 const FIELD_LABEL = { first_name:'First name', last_name:'Last name', email:'Email', phone:'Phone number',
-  address:'Address', career:'Career', date_of_birth:'Date of birth' };
+  address:'Address', address_verified:'Address chosen from the suggestions (to confirm it)',
+  manitoba:'A Manitoba address — the contest is open to Manitoba residents', career:'Career', date_of_birth:'Date of birth' };
 
 let SB = null, ST = null, TICK = null, TURNS = 0;
 

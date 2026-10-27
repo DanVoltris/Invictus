@@ -164,6 +164,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/assets/leagues.js"></script>
 <script src="/assets/password-toggle.js"></script>
+<script src="/assets/address.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -457,8 +458,9 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     </div>
     <label class="fld" for="n-dob" style="margin-top:14px">Date of birth</label>
     <input class="input" id="n-dob" type="date" autocomplete="bday" min="1900-01-01" max="${todayISO()}" required />
-    <label class="fld" for="n-address" style="margin-top:14px">Address <span class="opt">(optional)</span></label>
-    <input class="input" id="n-address" type="text" autocomplete="street-address" maxlength="200" placeholder="Street, city, postal code" />
+    <label class="fld" for="n-address" style="margin-top:14px">Address <span class="opt">(optional — needed for Spin the Wheel)</span></label>
+    <input class="input" id="n-address" type="text" maxlength="200" placeholder="Start typing your street address" aria-describedby="n-address-hint" />
+    <div class="ph-hint" id="n-address-hint">Choose your address from the list as you type.</div>
     <label class="fld" for="n-career" style="margin-top:14px">Career</label>
     <input class="input" id="n-career" type="text" autocomplete="organization-title" maxlength="120" required placeholder="What you do for work" />
     <label class="fld" for="n-email" style="margin-top:14px">Email</label>
@@ -476,12 +478,16 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     el.focus(); el.select();
   }
   if($('#n-email-unlock')) $('#n-email-unlock').onclick = unlockEmail;
+  // Autofill before the account exists: the phone proof from the last step stands in for a sign-in.
+  if(window.InvictusAddress) InvictusAddress.attach($('#n-address'), { auth: () => ({ body:{ token: FLOW.token } }) });
   const go = async () => {
     const first = ($('#n-first').value||'').trim(), last = ($('#n-last').value||'').trim();
     const nm = (first + ' ' + last).trim();
     const dob = $('#n-dob').value || '';
     if(!first || !last){ setErr('#n-err','Enter your first and last name.'); $(first ? '#n-last' : '#n-first').focus(); return; }
     if(!dob || dob > todayISO() || dob < '1900-01-01'){ setErr('#n-err','Enter your date of birth.'); $('#n-dob').focus(); return; }
+    if(($('#n-address').value||'').trim() && !$('#n-address').dataset.placeId){ setErr('#n-err','Choose your address from the list as you type, or leave it blank for now.'); $('#n-address').focus(); return; }
+    if($('#n-address').dataset.needsNumber && !InvictusAddress.houseNumber($('#n-address'))){ setErr('#n-err','Add your house number under the address.'); $('#n-address')._addrNum.focus(); return; }
     const email = ($('#n-email').value||'').trim().toLowerCase();
     const password = $('#n-pass').value||'';
     const career = ($('#n-career').value||'').trim();
@@ -490,7 +496,8 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     if(password.length < 8){ setErr('#n-err','Use a password of at least 8 characters.'); return; }
     $('#n-go').disabled = true; $('#n-go').textContent = 'Creating…';
     const r = await api('register', { token: FLOW.token, email, password, firstName: first, lastName: last, dateOfBirth: dob,
-      address: ($('#n-address').value||'').trim(), career });
+      address: ($('#n-address').value||'').trim(), addressPlaceId: $('#n-address').dataset.placeId || '',
+      addressNumber: window.InvictusAddress ? InvictusAddress.houseNumber($('#n-address')) : '', career });
     if(!r.ok){
       $('#n-go').disabled = false; $('#n-go').textContent = 'Create account';
       // The email we filled in already has a login — often a family member sharing it. Let them
@@ -872,9 +879,14 @@ function teamCard(t, idx, opts){
         <div class="err seat-err"></div>
         <button class="btn btn-ghost seat-go" data-share="${st.shareCents}" style="margin-top:8px">Pay for 1 seat — ${money(st.shareCents)}</button>`;
     }
+    // A player the shop put on the team pays their own share here (lib/db.js ownShareOwed).
+    const mine = st.myShareCents ? `<div class="lg-note is-owed" style="margin-top:10px"><b>Your share: ${money(st.myShareCents)}.</b>
+        You were added to ${esc(team.name || 'this team')} by our staff. Pay your share to confirm your spot — or pay at the counter.</div>
+        <div class="err share-err"></div>
+        <button class="btn btn-primary share-go" data-share="${st.myShareCents}" style="margin-top:8px">Pay my share — ${money(st.myShareCents)}</button>` : '';
     seatsBlock = `<div class="sec-title">Seats &amp; payments</div>
       <div class="seat-bar" aria-hidden="true">${bar}</div>
-      <div class="sub" style="margin:0">${intro}</div>${capPart}`;
+      <div class="sub" style="margin:0">${intro}</div>${mine}${capPart}`;
   }
   // Designated substitutes (0041): up to three a team. Everyone sees who they are; the captain
   // invites one from the same form as a teammate, by choosing which it is.
@@ -1001,6 +1013,18 @@ function wireScorecards(){
 // The captain's invite control: a phone number in, a single-use link out.
 function wireTeams(teams){
   wireScorecards();
+  // A staff-added player paying their own share: straight to Checkout.
+  document.querySelectorAll('[data-team-card] .share-go').forEach(go => {
+    const card = go.closest('[data-team-card]'), err = card.querySelector('.share-err');
+    const label = go.textContent;
+    go.onclick = async () => {
+      err.textContent = ''; go.disabled = true; go.textContent = 'Opening secure payment…';
+      const r = await leaguesPost('pay-share', { teamId: card.dataset.teamId });
+      if(r.ok && r.url){ location.href = r.url; return; }
+      go.disabled = false; go.textContent = label;
+      err.textContent = r.error || 'Could not open the payment. Try again, or pay at the shop — 204-488-6177.';
+    };
+  });
   // The captain paying for seats: pick how many (a radio group with arrow keys), then Checkout.
   document.querySelectorAll('[data-team-card]').forEach(card => {
     const go = card.querySelector('.seat-go');
@@ -1100,9 +1124,19 @@ function wireTeams(teams){
 // Name, date of birth, address and career: shown on the account, editable in place. Spin the
 // Wheel needs every one of them (lib/contest.js); ?details=contest is where its "Finish my details"
 // button lands, so the editor opens straight away and says which are missing.
-const CONTEST_FIELDS = { first_name:'First name', last_name:'Last name', date_of_birth:'Date of birth', address:'Address', career:'Career' };
-const contestMissing = c => Object.keys(CONTEST_FIELDS).filter(k => !String(c[k]||'').trim());
+const CONTEST_FIELDS = { first_name:'First name', last_name:'Last name', date_of_birth:'Date of birth', address:'Address',
+  address_verified:'Address chosen from the suggestions', manitoba:'A Manitoba address', career:'Career' };
+const contestMissing = c => {
+  const out = ['first_name','last_name','date_of_birth','address','career'].filter(k => !String(c[k]||'').trim());
+  if(String(c.address||'').trim()) { if(!c.address_verified_at) out.push('address_verified'); else if(c.address_province !== 'MB') out.push('manitoba'); }
+  return out;
+};
+// Where the address stands: picked and confirmed in Manitoba, confirmed elsewhere, or typed by hand.
+const addrNote = c => !String(c.address||'').trim() ? ''
+  : !c.address_verified_at ? 'Not confirmed — edit it and choose it from the suggestions'
+  : c.address_province === 'MB' ? '✓ Confirmed Manitoba address' : 'Outside Manitoba';
 const fromContest = () => new URLSearchParams(location.search).get('details') === 'contest';
+let SESSION_TOKEN = null;   // for the address actions; refreshed whenever the editor opens
 function drawDetails(c, dev, editing){
   const host = $('#details'); if(!host) return;
   const row = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v${v?'':' is-empty'}">${v ? esc(v) : 'Not added'}</span></div>`;
@@ -1110,7 +1144,8 @@ function drawDetails(c, dev, editing){
   if(!editing){
     const done = fromContest() && !contestMissing(c).length;
     host.innerHTML = row('First name', c.first_name) + row('Last name', c.last_name) + row('Date of birth', dobText) +
-      row('Address', c.address) + row('Career', c.career) +
+      row('Address', c.address) + (addrNote(c) ? `<div class="ph-hint" style="text-align:right;margin:-4px 0 4px${c.address_verified_at && c.address_province==='MB' ? ';color:#067647' : ''}">${esc(addrNote(c))}</div>` : '') +
+      row('Career', c.career) +
       (done ? '<div class="inherit" style="margin:10px 0 0">Your details are complete. <a href="/contest" style="color:#0a5c38;font-weight:700">Back to Spin the Wheel →</a></div>' : '') +
       '<button class="btn btn-ghost" id="d-edit" style="margin-top:8px;padding:10px">Edit details</button>';
     $('#d-edit').onclick = () => drawDetails(c, dev, true);
@@ -1130,17 +1165,29 @@ function drawDetails(c, dev, editing){
       ? `<input class="input" id="d-dob" type="text" readonly value="${esc(dobText)}" aria-describedby="d-dob-why" /><div class="ph-hint" id="d-dob-why">To correct your date of birth, ask our staff.</div>`
       : `<input class="input" id="d-dob" type="date" autocomplete="bday" min="1900-01-01" max="${todayISO()}" /><div class="ph-hint">It can't be changed once saved, so check it carefully.</div>`}
     <label class="fld" for="d-address" style="margin-top:12px">Address <span class="opt">(needed for Spin the Wheel)</span></label>
-    <input class="input" id="d-address" type="text" autocomplete="street-address" maxlength="200" value="${esc(c.address||'')}" placeholder="Street, city, postal code" />
+    <input class="input" id="d-address" type="text" maxlength="200" value="${esc(c.address||'')}" placeholder="Start typing your street address" aria-describedby="d-address-hint" />
+    <div class="ph-hint" id="d-address-hint">${esc(addrNote(c) || 'Choose your address from the list as you type.')}</div>
     <label class="fld" for="d-career" style="margin-top:12px">Career</label>
     <input class="input" id="d-career" type="text" autocomplete="organization-title" maxlength="120" required value="${esc(c.career||'')}" placeholder="What you do for work" />
     <div class="err" id="d-err"></div>
     <div class="row2"><button class="btn btn-primary" id="d-save">Save</button><button class="btn btn-ghost" id="d-cancel">Cancel</button></div>`;
   $('#d-cancel').onclick = () => drawDetails(c, dev);
-  const firstGap = { first_name:'#d-first', last_name:'#d-last', date_of_birth:'#d-dob', address:'#d-address', career:'#d-career' }[missing[0]];
+  const firstGap = { first_name:'#d-first', last_name:'#d-last', date_of_birth:'#d-dob', address:'#d-address',
+    address_verified:'#d-address', manitoba:'#d-address', career:'#d-career' }[missing[0]];
+  if(window.InvictusAddress && !dev) InvictusAddress.attach($('#d-address'), { auth: () => ({ headers: SESSION_TOKEN ? { Authorization:'Bearer '+SESSION_TOKEN } : {} }) });
+  if(!dev) supa().then(sb => sb && sb.auth.getSession()).then(r => { SESSION_TOKEN = r && r.data && r.data.session ? r.data.session.access_token : null; });
   $(firstGap || '#d-first').focus();
   $('#d-save').onclick = async () => {
     const patch = { first_name: $('#d-first').value.trim() || null, last_name: $('#d-last').value.trim() || null,
-      address: $('#d-address').value.trim() || null, career: $('#d-career').value.trim() || null };
+      career: $('#d-career').value.trim() || null };
+    // The address goes through the server, which confirms the picked place on OpenStreetMap (0045). Text
+    // typed without picking is refused rather than saved unconfirmed; clearing it is allowed.
+    const addrText = $('#d-address').value.trim(), placeId = $('#d-address').dataset.placeId;
+    const addrChanged = addrText !== String(c.address||'').trim();
+    if(addrChanged && addrText && !placeId && !dev){ setErr('#d-err', 'Choose your address from the list as you type.'); $('#d-address').focus(); return; }
+    const houseNo = window.InvictusAddress ? InvictusAddress.houseNumber($('#d-address')) : '';
+    if(addrChanged && placeId && $('#d-address').dataset.needsNumber && !houseNo){ setErr('#d-err', 'Add your house number under the address.'); $('#d-address')._addrNum.focus(); return; }
+    if(addrChanged && (dev || !addrText)) patch.address = addrText || null;
     if(!patch.first_name || !patch.last_name){ setErr('#d-err', 'Enter your first and last name.'); $(patch.first_name ? '#d-last' : '#d-first').focus(); return; }
     if(!patch.career){ setErr('#d-err', 'Tell us your career — what you do for work.'); $('#d-career').focus(); return; }
     // Sent only while it is still empty: once saved it belongs to staff (migration 0044's guard).
@@ -1151,17 +1198,28 @@ function drawDetails(c, dev, editing){
     }
     $('#d-save').disabled = true; $('#d-save').textContent = 'Saving…';
     let error = null;
-    if(dev){
+    if(addrChanged && addrText && placeId && !dev){
+      try{
+        const r = await fetch('/api/account?action=address-save', { method:'POST',
+          headers:{ 'Content-Type':'application/json', ...(SESSION_TOKEN ? { Authorization:'Bearer '+SESSION_TOKEN } : {}) },
+          body: JSON.stringify({ placeId, houseNumber: houseNo }) });
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || !j.ok) error = j.error || 'Could not confirm your address.';
+        else Object.assign(c, { address: j.address, address_province: j.province, address_verified_at: new Date().toISOString() });
+      }catch(e){ error = 'Could not reach the server.'; }
+    }
+    if(!error && dev){
       try{ const r = await fetch('/api/dev/my-account/profile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch) });
         const j = await r.json(); if(!j.ok) error = j.error || 'Could not save.'; }
       catch(e){ error = 'Could not reach the server.'; }
-    } else {
+    } else if(!error){
       const sb = await supa();
       const r = await sb.from('customers').update(patch).eq('id', c.id);
       if(r.error) error = r.error.message;
     }
     if(error){ $('#d-save').disabled = false; $('#d-save').textContent = 'Save'; setErr('#d-err', 'Not saved: ' + error); return; }
     Object.assign(c, patch, { name: patch.first_name + ' ' + patch.last_name });
+    if('address' in patch) Object.assign(c, { address_province: null, address_verified_at: null });
     const h = document.querySelector('#content .card h1'); if(h && c.name) h.textContent = c.name;
     drawDetails(c, dev);
   };

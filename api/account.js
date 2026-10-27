@@ -12,6 +12,10 @@
 //   6. POST ?action=contest-*   Spin the Wheel (migration 0044, lib/contest.js). contest-rules needs
 //      no sign-in; contest-status, -spin, -question, -answer and -rewards act for the signed-in
 //      customer (Authorization: Bearer <session>).
+//   7. POST ?action=address-suggest { input, token? }           -> OpenStreetMap suggestions;
+//      POST ?action=address-save    { placeId, houseNumber? }    -> verified address saved.
+//      Suggestions are for a signed-in customer, or someone mid-sign-up holding a phone proof
+//      (`token`), so this server is not a free public address search for anyone (lib/address.js).
 //   5. GET/POST ?action=waiver  -> the participant waiver (was api/sign-waiver.js; see the foot of
 //      this file). It lives here because a waiver belongs to a CUSTOMER, which is what this file
 //      is about, and because Vercel's Hobby plan allows 12 Serverless Functions while api/ held
@@ -32,6 +36,7 @@
 import crypto from 'node:crypto';
 import { getSettings, admin, customerHoursByContact, normPhone, saveBookingFeedback, accountCustomerForRequest } from '../lib/db.js';
 import { contestRules, contestStatus, contestSpin, contestQuestion, contestAnswer, contestRewards } from '../lib/contest.js';
+import { suggestAddresses, verifyAddress } from '../lib/address.js';
 import { enqueue, sendOne, venueIdentity } from '../lib/notify.js';
 
 const CODE_TTL_MIN = 10;        // a code is good for ten minutes
@@ -72,7 +77,8 @@ function actionOf(req, known) {
 // 'cards', 'card-setup' and 'card-remove' are gone (saved cards retired): they now fall through
 // to the "Unknown action." 400 below, exactly like any other name this file does not serve.
 const CONTEST_ACTIONS = ['contest-rules', 'contest-status', 'contest-spin', 'contest-question', 'contest-answer', 'contest-rewards'];
-const ACTIONS = ['start', 'verify', 'register', 'reset', 'feedback', 'waiver', ...CONTEST_ACTIONS];
+const ADDRESS_ACTIONS = ['address-suggest', 'address-save'];
+const ACTIONS = ['start', 'verify', 'register', 'reset', 'feedback', 'waiver', ...CONTEST_ACTIONS, ...ADDRESS_ACTIONS];
 export default async function handler(req, res, forced) {
   const action = forced || actionOf(req, ACTIONS);
   // The waiver is the one action here that answers a GET (a status check), and it has its own
@@ -91,6 +97,7 @@ export default async function handler(req, res, forced) {
     if (action === 'reset')    return await resetPassword(req, res, db);
     if (action === 'feedback') return await feedback(req, res, db);
     if (CONTEST_ACTIONS.includes(action)) return await contest(action, req, res, db);
+    if (ADDRESS_ACTIONS.includes(action)) return await address(action, req, res, db);
     return json(res, 400, { error: 'Unknown action.' });
   } catch (err) {
     console.error(`account?action=${action}:`, err.message);
@@ -339,7 +346,14 @@ async function register(req, res, db) {
   // birth, 0044. A separate update after the account is linked, so a database without those
   // columns still finishes the sign-up.
   const profile = { first_name: firstName, last_name: lastName, date_of_birth: dob };
-  const address = String(b.address || '').trim().slice(0, 200);
+  // An address picked from the suggestions is looked up again here and saved as verified (0045).
+  const found = b.addressPlaceId
+    ? await verifyAddress(b.addressPlaceId, b.addressNumber).catch((e) => { console.error('register address:', e.message); return null; })
+    : null;
+  const picked = found && !found.needsNumber ? found : null;
+  if (picked) Object.assign(profile, { address: picked.address, address_place_id: picked.placeId,
+    address_province: picked.province, address_verified_at: new Date().toISOString() });
+  const address = picked ? '' : String(b.address || '').trim().slice(0, 200);
   if (address) profile.address = address;
   if (career) profile.career = career;
   if (customerId && Object.keys(profile).length) {
@@ -373,6 +387,34 @@ async function contest(action, req, res, db) {
     : action === 'contest-question' ? await contestQuestion(db, cust, b)
     : await contestAnswer(db, cust, b);
   return json(res, r.status, r.body);
+}
+
+// ---- 7. address autofill ------------------------------------------------
+// A phone proof from steps 2/3 that has not been spent yet: lets sign-up use the autofill before
+// the account exists.
+async function signupInProgress(db, token) {
+  if (!token) return false;
+  const { data } = await db.from('phone_verifications').select('used_at,expires_at').eq('token', sha(token)).maybeSingle();
+  return !!(data && !data.used_at && Date.parse(data.expires_at) > Date.now());
+}
+async function address(action, req, res, db) {
+  const b = req.body || {};
+  const cust = await accountCustomerForRequest(req);
+  if (action === 'address-suggest') {
+    if (!cust && !(await signupInProgress(db, String(b.token || '')))) return json(res, 401, { error: 'Sign in to look up your address.' });
+    try { return json(res, 200, { ok: true, suggestions: await suggestAddresses(b.input) }); }
+    catch (e) { console.error('address-suggest:', e.message); return json(res, 502, { error: 'Address lookup is not answering. Try again in a moment.' }); }
+  }
+  if (!cust) return json(res, 401, { error: 'Sign in to save your address.' });
+  let place;
+  try { place = await verifyAddress(b.placeId, b.houseNumber); }
+  catch (e) { console.error('address-save:', e.message); return json(res, 502, { error: 'Address lookup is not answering. Try again in a moment.' }); }
+  if (!place) return json(res, 400, { error: 'Choose a street address in Canada from the list.' });
+  if (place.needsNumber) return json(res, 400, { error: 'Add your house number.', needsNumber: true });
+  const { error } = await db.from('customers').update({ address: place.address, address_place_id: place.placeId,
+    address_province: place.province, address_verified_at: new Date().toISOString() }).eq('id', cust.id);
+  if (error) { console.error('address-save update:', error.message); return json(res, 500, { error: 'Could not save your address. Please try again.' }); }
+  return json(res, 200, { ok: true, address: place.address, province: place.province, manitoba: place.province === 'MB' });
 }
 
 // ---- 4. feedback on a finished session ---------------------------------------

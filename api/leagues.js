@@ -6,8 +6,8 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor,
          soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos, staffAddInvitee, withdrawTeamInvite,
          teamInviteForResend, notificationOutcome,
-         teamMembershipFor, saveScorecard, listScorecards, removeScorecard } from '../lib/db.js';
-import { notifyTeamInvite, notifyLeaguePlaced } from '../lib/notify.js';
+         teamMembershipFor, saveScorecard, listScorecards, removeScorecard, memberShareNotice, ownShareFor } from '../lib/db.js';
+import { notifyTeamInvite, notifyLeaguePlaced, notifyLeagueAdded } from '../lib/notify.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
 const L = globalThis.InvictusLeagues;
 
@@ -56,7 +56,7 @@ const isUuid = (s) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 // Where an invite link points. Same order as api/waitlist.js and api/staff.js: an explicit
 // setting, then PUBLIC_BASE_URL, then the request's own origin — so a local run links to
 // localhost and production links to production with nothing to configure.
-function inviteLink(req, token) {
+function siteOrigin(req) {
   const env = process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL || '';
   const origin = env || (req.headers && req.headers.origin) || (() => {
     const h = req.headers || {};
@@ -65,7 +65,11 @@ function inviteLink(req, token) {
     const proto = h['x-forwarded-proto'] || (String(host).startsWith('localhost') ? 'http' : 'https');
     return `${proto}://${host}`;
   })();
-  return origin ? `${String(origin).replace(/\/+$/, '')}/leagues?invite=${encodeURIComponent(token)}` : null;
+  return origin ? String(origin).replace(/\/+$/, '') : '';
+}
+function inviteLink(req, token) {
+  const origin = siteOrigin(req);
+  return origin ? `${origin}/leagues?invite=${encodeURIComponent(token)}` : null;
 }
 
 export default async function handler(req, res) {
@@ -89,6 +93,8 @@ export default async function handler(req, res) {
     if (action === 'invite-info') return await inviteInfo(req, res);
     if (action === 'invite-claim') return await inviteClaim(req, res);
     if (action === 'pay-seats') return await paySeats(req, res);
+    if (action === 'pay-share') return await payShare(req, res);
+    if (action === 'member-added') return await memberAdded(req, res);
     if (action === 'my-teams') return await myTeams(req, res);
     if (action === 'join') return await join(req, res);
     if (action === 'confirm') return await confirm(req, res);
@@ -572,6 +578,57 @@ async function paySeats(req, res) {
     cancel_url: `${origin}/leagues?canceled=1`,
   });
   return res.status(200).json({ ok: true, url: session.url, amountCents: n * money.shareCents });
+}
+
+// A player staff put on a team paying their own share, from My Account.
+//   POST ?action=pay-share   { teamId }  (signed in)
+async function payShare(req, res) {
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to pay your share.' });
+  const r = await ownShareFor({ teamId: (req.body || {}).teamId, customerId: me.id });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  const { enabled } = stripeStatus(process.env);
+  if (!enabled) return res.status(503).json({ ok: false, error: 'Online payment isn’t available right now — you can pay at the counter.' });
+  const settings = normalizeSettings(await getSettings());
+  const origin = siteOrigin(req) || `https://${req.headers.host}`;
+  const session = await stripeClient(process.env).checkout.sessions.create({
+    mode: 'payment',
+    line_items: [{ quantity: 1, price_data: { currency: settings.currency, unit_amount: r.owedCents,
+      product_data: { name: `${(r.league && r.league.name) || 'League'} — your seat on ${r.team.name}`,
+        description: `Your share of the team price (a team of ${r.team.seats}).` } } }],
+    customer_email: validEmail(me.email) ? me.email : undefined,
+    metadata: { kind: 'league-seat', teamId: r.team.id, ownShare: '1', customerId: String(me.id) },
+    success_url: `${origin}/leagues?success=1&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/account`,
+  });
+  return res.status(200).json({ ok: true, url: session.url, amountCents: r.owedCents });
+}
+
+// Staff only: text a player they have just put on a team — which team, and their share to pay.
+//   POST ?action=member-added   { leagueId, customerId, again? }
+async function memberAdded(req, res) {
+  const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
+  if (ctx.error) return res.status(403).json({ ok: false, error: 'Only staff with the Bookings permission can do this.' });
+  const b = req.body || {};
+  if (!isUuid(b.leagueId) || !isUuid(b.customerId)) return res.status(400).json({ ok: false, error: 'Which player?' });
+  const r = await memberShareNotice({ leagueId: b.leagueId, customerId: b.customerId });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  if (r.sub) return res.status(200).json({ ok: true, texted: false, reason: 'Substitutes pay nothing, so no text was sent.' });
+  const phone = r.customer && r.customer.phone;
+  if (!phone) return res.status(200).json({ ok: true, texted: false, reason: 'They have no mobile number on file, so no text was sent.' });
+  const out = await notifyLeagueAdded({
+    memberId: r.member.id, teamId: r.team.id, phone, customerId: r.customer.id,
+    name: r.customer.first_name || (r.customer.name || '').split(' ')[0] || null,
+    teamName: r.team.name, leagueName: r.league.name, shareCents: r.owedCents,
+    link: `${siteOrigin(req)}/account`, again: !!b.again,
+  });
+  if (out.sms && out.sms.already) return res.status(200).json({ ok: true, texted: false, reason: 'They were already sent this text.' });
+  if (!out.sms || !out.sms.row) return res.status(200).json({ ok: true, texted: false, reason: 'The text could not be queued.' });
+  if (out.sent[0] === 'sent') return res.status(200).json({ ok: true, texted: true, owedCents: r.owedCents });
+  // Not delivered: say why in the provider's own words, as invite-resend does.
+  const row = await notificationOutcome(out.sms.row.id);
+  return res.status(200).json({ ok: true, texted: false, owedCents: r.owedCents,
+    reason: `The text did not go out — ${(row && row.last_error) || 'the text service did not accept it'}.${out.sent[0] === 'retry' ? ' It will be retried automatically.' : ''}` });
 }
 
 // The teams this player is on: roster, the season week by week, and the standings.

@@ -48,7 +48,8 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const money = c => '$'+(c/100).toLocaleString('en-US',{minimumFractionDigits:c%100?2:0,maximumFractionDigits:2});
-const fmtCT = iso => new Date(iso).toLocaleString('en-US',{timeZone:'America/Winnipeg',month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+// Fixed UTC−5: Manitoba keeps daylight time all year from November 2026 (see demo/contest.html).
+const fmtCT = iso => new Date(iso).toLocaleString('en-US',{timeZone:'Etc/GMT+5',month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' CT';
 // "about 1 in 37" — the chance a single spin wins this prize.
 const oneIn = x => x > 0 ? `about 1 in ${Math.max(1, Math.round(1/x)).toLocaleString('en-US')}` : '—';
 
@@ -74,16 +75,17 @@ function draw(r){
     <p>No purchase is necessary to enter or to win. Creating an account is free, and any account holder may spin. A purchase does not improve your chances of winning.</p>
 
     <h2>3. Contest period</h2>
-    <p>${p ? `The contest runs from <b>${esc(fmtCT(p.starts_at))}</b> to <b>${esc(fmtCT(p.ends_at))}</b> (Central Time). Spins are not accepted outside this period.` : 'Dates will be posted here when the next contest period is scheduled.'}</p>
+    <p>${p ? `The contest runs from <b>${esc(fmtCT(p.starts_at))}</b> to <b>${esc(fmtCT(p.ends_at))}</b> (Central Time, UTC−5). Spins are not accepted outside this period.` : 'Dates will be posted here when the next contest period is scheduled.'}</p>
 
     <h2>4. Eligibility</h2>
     <ul>
-      <li>Open to residents of Manitoba who hold a free ${sponsor} account.</li>
+      <!-- FLAG FOR LAWYER: residency is shown by a Manitoba street address picked from OpenStreetMap address suggestions (house number typed by the entrant when the map lacks it) and confirmed by the website; it is not otherwise proven. -->
+      <li>Open to residents of Manitoba who hold a free ${sponsor} account. Your account must have a Manitoba street address, chosen from the address suggestions so it can be confirmed.</li>
       <li>One account per person. Accounts are tied to a mobile number verified by text message.</li>
-      <li>To spin, your account must include your first and last name, email, phone number, address, career and date of birth.</li>
+      <li>To spin, your account must include your first and last name, email, phone number, a confirmed Manitoba address, career and date of birth.</li>
       <!-- FLAG FOR LAWYER: parent/guardian consent and accompaniment for entrants and winners under 18; whether a minimum age applies. -->
       <li>Entrants under 18 may take part. Winners under 18 must be accompanied by a parent or guardian to claim their prize (this does not apply to hours-card prizes).</li>
-      <li>Some prizes are for those 18 and older only. Staff check ID when one of these prizes is redeemed; a winner who cannot show ID proving they are 18 or older cannot redeem it, and the prize is forfeited.</li>
+      <li>Some prizes are for those 18 and older only. They are only offered to entrants who are 18 or older according to the date of birth on their account. Staff also check ID when one of these prizes is redeemed; a winner who cannot show ID proving they are 18 or older cannot redeem it, and the prize is forfeited.</li>
     </ul>
 
     <h2>5. How to enter</h2>
@@ -92,16 +94,17 @@ function draw(r){
     <h2>6. How winners are decided and the odds</h2>
     <!-- FLAG FOR LAWYER: wording for disclosing the number of prizes when there is no cap on the total. -->
     ${p ? `<p>Spins are counted in groups of <b>${Y}</b>. In each group, <b>${X}</b> spin${X===1?'':'s'} win${X===1?'s':''} a prize. Which spins in the group win is chosen at random, by a secure random number generator, before the group begins. Each spin therefore has a <b>${X} in ${Y}</b> chance of winning a prize. There is no limit on the total number of prizes; the total depends on how many spins are made during the contest period.</p>
-    <p>When a spin wins, the prize is chosen at random from the prize list below, with the chances shown. The wheel's animation is for display only; the result is decided before it turns.</p>` : '<p>The odds will be posted here with the next contest period.</p>'}
+    <p>When a spin wins, the prize is chosen at random from the prize list below, with the chances shown. Entrants under 18 can only be given prizes that are not 18+ only, so their chances differ, as shown. If an entrant under 18 wins when no such prize is available, that win is returned to the prize pool for a later spin. The wheel's animation is for display only; the result is decided before it turns.</p>` : '<p>The odds will be posted here with the next contest period.</p>'}
 
     <h2>7. Prizes</h2>
     ${prizes.length ? `<div class="tbl"><table>
-      <thead><tr><th>Prize</th><th style="text-align:right">Approx. value</th><th>Age</th><th style="text-align:right">If you win</th><th style="text-align:right">Per spin</th></tr></thead>
+      <thead><tr><th>Prize</th><th style="text-align:right">Approx. value</th><th>Age</th><th style="text-align:right">If you win · 18+</th><th style="text-align:right">If you win · under 18</th><th style="text-align:right">Per spin · 18+</th></tr></thead>
       <tbody>${prizes.map(z => `<tr>
         <td><b>${esc(z.name)}</b>${z.description ? `<br><span style="color:var(--muted)">${esc(z.description)}</span>` : ''}</td>
         <td class="num">${money(z.value_cents||0)}</td>
         <td>${z.adults_only ? '18+ only' : 'All ages'}</td>
         <td class="num">${Math.round(z.share*1000)/10}%</td>
+        <td class="num">${z.adults_only ? '—' : Math.round((z.share_minor||0)*1000)/10 + '%'}</td>
         <td class="num">${p ? oneIn(winChance * z.share) : '—'}</td></tr>`).join('')}</tbody></table></div>
     <p>Dollar credits may be spent on anything sold at the venue. No prize is an alcoholic drink; anyone ordering alcohol with a credit must show ID as usual.</p>` : '<p>The prize list will be posted here.</p>'}
 

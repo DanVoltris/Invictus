@@ -3051,7 +3051,8 @@ function openCustomer(c){
       <button class="btn btn-ghost btn-sm" id="c-hsub" type="button">− Use</button>
     </div><div class="sub" style="margin:6px 0 0">Add hours (in-person card sale) or use hours (redeem in person).</div></div>`}
     <div class="grid2">
-      <div class="field"><label>Address</label><input class="input" id="c-address" value="${esc(c.address||'')}" maxlength="200" placeholder="Optional" /></div>
+      <div class="field"><label>Address ${!c.address ? '' : c.address_verified_at ? (c.address_province==='MB' ? '<span class="pill confirmed">Confirmed MB</span>' : `<span class="pill warn">Confirmed · ${esc(c.address_province||'')}</span>`) : '<span class="pill cancelled">Not confirmed</span>'}</label><input class="input" id="c-address" value="${esc(c.address||'')}" maxlength="200" placeholder="Optional" />
+        <div class="dim" style="font-size:12px;margin-top:6px">Changing it here leaves it unconfirmed. For Spin the Wheel the customer confirms it in My Account by choosing it from the suggestions.</div></div>
       <div class="field"><label>Career</label><input class="input" id="c-career" value="${esc(c.career||'')}" maxlength="120" required placeholder="What they do for work" /></div>
     </div>
     <div class="field"><label>Notes</label><input class="input" id="c-notes" value="${esc(c.notes||'')}" placeholder="Optional" /></div>
@@ -3844,7 +3845,9 @@ function openAddPlayer(ctx, presetTeamId, asSub){
       </div>
     </div>
     ${league.team_mode&&!asSub?`<div class="field"><label for="ap-team">Team</label><select class="input" id="ap-team">${teamOpts}</select>
-      <div class="dim" style="font-size:12px;margin-top:6px">The season is paid for by the team, so adding a player here doesn’t charge anyone. Team payments live on the Teams tab.</div></div>`:''}
+      <div class="dim" style="font-size:12px;margin-top:6px">Adding a player here doesn’t charge anyone. They pay their own share from My Account, or at the counter (Teams tab → collect).</div></div>
+    <label class="row" style="gap:8px;align-items:flex-start;margin:0 0 12px;font-size:13.5px"><input type="checkbox" id="ap-text" checked style="margin-top:3px" />
+      <span>Text them the team’s name and a link to pay their share in My Account</span></label>`:''}
     <div class="field"><label for="ap-note">Note</label><input class="input" id="ap-note" maxlength="200" placeholder="Optional — e.g. left-handed, captain" /></div>
     <div class="err" id="ap-err"></div>
     <div class="row" style="gap:10px"><button class="btn btn-ghost" id="ap-back" style="flex:1">Back</button><button class="btn btn-primary" id="ap-save" style="flex:2">${asSub?'Add substitute':'Add player'}</button></div>`;
@@ -3910,7 +3913,14 @@ function openAddPlayer(ctx, presetTeamId, asSub){
       if(created && !(await sb.from('customers').delete().eq('id',customer.id)).error) CUSTOMERS=CUSTOMERS.filter(cu=>cu.id!==customer.id);
       return err('Could not add them to the league. Check the details and try again.');
     }
-    toast(`${customer.name||(asSub?'Substitute':'Player')} added`,'ok'); await loadLeagueIndex(); back();
+    toast(`${customer.name||(asSub?'Substitute':'Player')} added`,'ok');
+    // The text goes from the server (it holds the texting account); the player is on the team either way.
+    if(!asSub && teamId && $('#ap-text') && $('#ap-text').checked){
+      const r=await apiPost('/api/leagues?action=member-added', { leagueId:league.id, customerId:customer.id });
+      if(r && r.texted) toast(`Texted ${customer.name||'them'}${r.owedCents?` to pay their ${money(r.owedCents)} share`:''}`,'ok');
+      else toast((r && (r.reason||r.error)) || 'The text could not be sent.','err');
+    }
+    await loadLeagueIndex(); back();
   };
 }
 
@@ -4021,7 +4031,11 @@ function leagueTeamsBoard(ctx){
     const name=$('#tb-new').value.trim();
     if(!name){ toast('Type a team name first.','err'); return; }
     if(teams.some(t=>t.name.toLowerCase()===name.toLowerCase())){ toast('There is already a team with that name.','err'); return; }
-    if(await dbInsert('league_teams',{ league_id:league.id, name })){ toast('Team added','ok'); reload(); }
+    // Priced like a team bought online (0036): the league's team size, the fee shared across it — so
+    // the players staff add can each pay their own share from My Account.
+    const priced = payments && league.fee_cents>0 && league.team_size>0
+      ? { seats:league.team_size, share_cents:Math.ceil(league.fee_cents/league.team_size) } : {};
+    if(await dbInsert('league_teams',{ league_id:league.id, name, ...priced })){ toast('Team added','ok'); reload(); }
   };
   $('#tb-new').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#tb-create').click(); });
   $('#lo-body').querySelectorAll('.tb-team').forEach(el=>{
@@ -8062,8 +8076,11 @@ boot();
    Contest Setup — contest.manage: periods, prizes, the end-of-period decision, logs and CSV.
    A group's winning positions come only from contest_block_log(), which withholds an open group's.
    ====================================================================== */
-const CT_TZ = 'America/Winnipeg';
-const fmtCT = iso => iso ? new Date(iso).toLocaleString('en-US',{timeZone:CT_TZ,month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : '—';
+// Manitoba stays on UTC−5 all year from November 2026 (no more clock change). Many devices still
+// carry the old rule for America/Winnipeg and would show UTC−6 this winter, so contest times use a
+// fixed UTC−5 ('Etc/GMT+5' — the sign is inverted in that naming) and every device agrees.
+const CT_TZ = 'Etc/GMT+5';
+const fmtCT = iso => iso ? new Date(iso).toLocaleString('en-US',{timeZone:CT_TZ,month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' CT' : '—';
 // Wall-clock parts of an instant in Winnipeg.
 function ctParts(ms){
   return Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:CT_TZ,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
@@ -8079,6 +8096,13 @@ function ctToISO(v){
   return new Date(ts).toISOString();
 }
 function isoToCTInput(iso){ if(!iso) return ''; const p=ctParts(Date.parse(iso)); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`; }
+// A time-of-day dropdown in 15-minute steps; a saved time off the grid is kept as its own option.
+function ctTimeSelect(id, hhmm){
+  const opts=[]; for(let m=0;m<1440;m+=15) opts.push(`${dpPad(Math.floor(m/60))}:${dpPad(m%60)}`);
+  if(hhmm && !opts.includes(hhmm)) opts.push(hhmm), opts.sort();
+  return `<select class="input" id="${id}">${opts.map(v=>{ const [h,mi]=v.split(':').map(Number);
+    return `<option value="${v}" ${v===hhmm?'selected':''}>${esc(fmtMin(h*60+mi))}</option>`; }).join('')}</select>`;
+}
 function ageOf(dob){
   if(!dob) return null;
   const p=ctParts(Date.now()), [y,m,d]=String(dob).slice(0,10).split('-').map(Number);
@@ -8284,8 +8308,12 @@ function openContestPeriod(p){
     <div class="sub">${isNew?'Spins are accepted between the start and end. Times are Central Time.':`${spins} spin${spins===1?'':'s'} so far.`}</div>
     <div class="field" style="margin-top:14px"><label>Name</label><input class="input" id="cp-name" value="${esc(p.name)}" placeholder="Fall 2026" /></div>
     <div class="grid2">
-      <div class="field"><label>Starts (Central Time)</label><input class="input" id="cp-from" type="datetime-local" value="${isoToCTInput(p.starts_at)}" /></div>
-      <div class="field"><label>Ends (Central Time)</label><input class="input" id="cp-to" type="datetime-local" value="${isoToCTInput(p.ends_at)}" /></div>
+      <div class="field"><label>Start date</label><input class="input" id="cp-from-d" type="date" value="${isoToCTInput(p.starts_at).slice(0,10)}" /></div>
+      <div class="field"><label>Start time (Central)</label>${ctTimeSelect('cp-from-t', isoToCTInput(p.starts_at).slice(11) || '00:00')}</div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>End date</label><input class="input" id="cp-to-d" type="date" value="${isoToCTInput(p.ends_at).slice(0,10)}" /></div>
+      <div class="field"><label>End time (Central)</label>${ctTimeSelect('cp-to-t', isoToCTInput(p.ends_at).slice(11) || '23:45')}</div>
     </div>
     <div class="sec-h">Odds</div>
     <div class="grid2">
@@ -8306,11 +8334,14 @@ function openContestPeriod(p){
     ${!isNew && !spins?'<button class="btn btn-danger" id="cp-del" style="width:100%;margin-top:10px">Delete period</button>':''}`;
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
+  // The portal's own calendar and dropdowns, not the browser's.
+  buildDatePicker($('#cp-from-d')); buildDatePicker($('#cp-to-d')); enhanceSelects(sheet);
   const odds=()=>{ const x=+$('#cp-x').value, y=+$('#cp-y').value;
     $('#cp-odds').textContent = x>=1 && y>=x ? `Each spin has a ${x} in ${y} chance (${Math.round(x/y*1000)/10}%).` : 'Winning spins must be at least 1 and no more than the group size.'; };
   $('#cp-x').oninput=odds; $('#cp-y').oninput=odds; odds();
   $('#cp-save').onclick=async()=>{
-    const row={ name:$('#cp-name').value.trim(), starts_at:ctToISO($('#cp-from').value), ends_at:ctToISO($('#cp-to').value),
+    const at=(d,t)=>$(d).value ? ctToISO($(d).value+'T'+$(t).value) : null;
+    const row={ name:$('#cp-name').value.trim(), starts_at:at('#cp-from-d','#cp-from-t'), ends_at:at('#cp-to-d','#cp-to-t'),
       wins_per_block:Math.round(+$('#cp-x').value), block_size:Math.round(+$('#cp-y').value),
       incomplete_mode:$('#cp-inc').value, forfeit_mode:$('#cp-ff').value };
     if(!row.name){ toast('Give the period a name.','err'); return; }
@@ -8366,6 +8397,7 @@ function openContestPrize(z){
     ${isNew?'':'<button class="btn btn-danger" id="pz-del" style="width:100%;margin-top:10px">Delete prize</button>'}`;
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
+  enhanceSelects(sheet);
   const kindNote=()=>{ const k=$('#pz-kind').value;
     $('#pz-kind-note').textContent = k==='credit' ? 'A dollar credit the winner can spend on anything at the venue — never a free alcoholic drink.'
       : k==='hours' ? 'Staff apply the hours discount at the venue when it is redeemed.' : ''; };

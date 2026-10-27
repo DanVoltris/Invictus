@@ -256,9 +256,10 @@ app.post('/api/dev/my-account/profile', async (req, res) => {
   const up = await upsertCustomer({ name: process.env.DEV_ACCOUNT_NAME, phone: process.env.DEV_ACCOUNT_PHONE });
   if (!up.id) return res.status(500).json({ error: `Could not find or create the customer record: ${up.error || 'unknown'}` });
   const patch = {
-    address: String((req.body || {}).address || '').trim().slice(0, 200) || null,
     career: String((req.body || {}).career || '').trim().slice(0, 120) || null,
   };
+  // Only when sent: My Account leaves the address out unless it changed (0045 verifies it).
+  if ('address' in (req.body || {})) patch.address = String(req.body.address || '').trim().slice(0, 200) || null;
   // First/last name and a first date of birth (migration 0044), only when sent — My Account's editor.
   for (const k of ['first_name', 'last_name']) if (k in (req.body || {})) patch[k] = String(req.body[k] || '').trim().slice(0, 80) || null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(String((req.body || {}).date_of_birth || ''))) patch.date_of_birth = req.body.date_of_birth;
