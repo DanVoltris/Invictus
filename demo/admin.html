@@ -1610,14 +1610,21 @@ function startAutoRefresh(){
   renderAutoRefresh();
 }
 
-// Detect an expired-session error from any Supabase call; if so, send the user to re-login.
+// Detect an expired-session error from any Supabase call. Only PostgREST's own words for a bad login
+// count: matching any "token" or "expired" also caught a JSON parse error ("Unexpected token '<'")
+// and anything naming an expires_at column, and put staff on the sign-in screen with a good login.
+// An expired access token is usually renewable, so renew first and only ask for a sign-in if that fails.
 function isAuthError(error){
   if(!error) return false;
   const m=(error.message||'')+' '+(error.code||'');
-  if(/jwt|expired|token|not authenticated|PGRST301/i.test(m)){
-    toast('Session timed out — please sign in again','err'); showLogin(); return true;
-  }
-  return false;
+  if(!/\bJWT\b|PGRST30[13]|not authenticated/i.test(m)) return false;
+  (async()=>{
+    let renewed=false;
+    try{ const { data, error:e } = await sb.auth.refreshSession(); renewed=!e && !!(data && data.session); }catch(e){}
+    if(renewed){ toast('Your session was renewed — please try that again','ok'); return; }
+    toast('Session timed out — please sign in again','err'); showLogin();
+  })();
+  return true;
 }
 
 function showLogin(){
@@ -1682,7 +1689,9 @@ $('#login-btn').onclick = async () => {
   showApp(data.session);
 };
 $('#login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') $('#login-btn').click(); });
-$('#logout-btn').onclick = async () => { await sb.auth.signOut(); showLogin(); };
+// Scope 'local': sign out this browser only. The default ('global') ended the same login on every
+// other computer too, so one person signing out at the counter logged out a shared login elsewhere.
+$('#logout-btn').onclick = async () => { await sb.auth.signOut({ scope:'local' }); showLogin(); };
 
 $('#su-btn').onclick = async () => {
   const name=$('#su-name').value.trim(), email=$('#su-email').value.trim().toLowerCase(), a=$('#su-1').value, b=$('#su-2').value;
