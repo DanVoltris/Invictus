@@ -854,8 +854,11 @@ function teamCard(t, idx, opts){
   const stagedTable = !sg ? '' : (() => {
     const q = sg.qualifiers, [qa, qb] = sg.stages.qualifiers, [ra, rb] = sg.stages.ranking, [pa, pb] = sg.stages.playoffs;
     const me = q.rows.find(r => r.you);
+    // A week played early has a score only this team can see; it is placed when that week starts.
+    const earlyOf = n => (sg.earlyScores || []).find(e => e.week === n);
     const myWeeks = me && me.weeks ? `<div class="chips" style="margin:6px 0 10px">${me.weeks.map(w => `<span class="chip">Wk ${w.week}: ${
-      w.pending ? 'not played yet' : w.missed ? `missed · ${w.points} pts` : `${L.ordinal(w.place)} · ${w.points} pts`}</span>`).join('')}</div>` : '';
+      earlyOf(w.week) ? `played early · ${earlyOf(w.week).strokes} — placed when the week starts`
+      : w.pending ? 'not played yet' : w.missed ? `missed · ${w.points} pts` : `${L.ordinal(w.place)} · ${w.points} pts`}</span>`).join('')}</div>` : '';
     const qualTable = `<div class="team-h">Qualifiers · weeks ${qa}–${qb}</div>
       <div class="sub" style="margin:2px 0 6px">Each week teams are placed by strokes, lowest first: 1st 100 points, 2nd 98, and down from there. ${q.closed ? 'The qualifiers are over.' : 'A missed week can be caught up until the qualifiers close; after that it scores last place.'}</div>
       ${myWeeks}
@@ -865,8 +868,10 @@ function teamCard(t, idx, opts){
       ? `<div class="lg-note" style="margin:6px 0 10px">The divisions are being set. Your team’s division will show here.</div>${qualTable}` : qualTable;
     const d = sg.divisionTable;
     const flag = r => r.tie === 'playoff' ? ' <span class="pill warn">Tie — play-off</span>' : r.tie === 'shared' ? ' <span class="pill off">Shared</span>' : '';
+    const earlyLate = (sg.earlyScores || []).filter(e => e.week >= ra);
     return `<div class="team-h">Division ${sg.division}</div>
       <div class="sub" style="margin:2px 0 6px">Final = (average of weeks ${ra}–${rb} + average of weeks ${pa}–${pb}) ÷ 2. Lowest wins.</div>
+      ${earlyLate.length ? `<div class="chips" style="margin:4px 0 8px">${earlyLate.map(e => `<span class="chip">Wk ${e.week}: played early · ${e.strokes} — counts when the week starts</span>`).join('')}</div>` : ''}
       <div class="tbl-wrap"><table class="lg-table"><thead><tr><th>#</th><th>Team</th><th class="num">Wks ${ra}–${rb}</th><th class="num">Playoffs</th><th class="num">Final</th></tr></thead>
       <tbody>${d.standings.map(r => `<tr class="${r.you?'is-you':''}"><td>${r.final == null ? '—' : r.rank}</td><td>${youName(r)}${flag(r)}</td>
         <td class="num">${val(r.rankingAvg)}</td><td class="num">${val(r.playoffAvg)}</td><td class="num">${val(r.final)}</td></tr>`).join('')}</tbody></table></div>
