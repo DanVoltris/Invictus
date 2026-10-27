@@ -62,6 +62,8 @@ app.get('/leagues', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'le
 app.get('/membership', (_req, res) => res.redirect(301, '/leagues'));   // memberships were replaced by leagues
 app.get('/hours', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'hours.html')));
 app.get('/account', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'account.html')));
+app.get('/contest', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'contest.html')));
+app.get('/contest/rules', (_req, res) => res.sendFile(path.join(__dirname, 'demo', 'contest-rules.html')));
 // /gift-cards is where api/gift-cards.js sends a buyer back to after Stripe Checkout. The page
 // itself belongs to the Customer UI agent and does not exist yet, so serve it only if it is there
 // — otherwise fall through to a clean 404 rather than a sendFile ENOENT 500.
@@ -257,6 +259,9 @@ app.post('/api/dev/my-account/profile', async (req, res) => {
     address: String((req.body || {}).address || '').trim().slice(0, 200) || null,
     career: String((req.body || {}).career || '').trim().slice(0, 120) || null,
   };
+  // First/last name and a first date of birth (migration 0044), only when sent — My Account's editor.
+  for (const k of ['first_name', 'last_name']) if (k in (req.body || {})) patch[k] = String(req.body[k] || '').trim().slice(0, 80) || null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String((req.body || {}).date_of_birth || ''))) patch.date_of_birth = req.body.date_of_birth;
   const { error } = await db.from('customers').update(patch).eq('id', up.id);
   if (error) return res.status(500).json({ error: `Could not save: ${error.message}. Is migration 0027 applied?` });
   res.json({ ok: true, ...patch });

@@ -70,6 +70,14 @@
     {
       "source": "/leagues",
       "destination": "/demo/leagues.html"
+    },
+    {
+      "source": "/contest/rules",
+      "destination": "/demo/contest-rules.html"
+    },
+    {
+      "source": "/contest",
+      "destination": "/demo/contest.html"
     }
   ],
   "redirects": [

@@ -9,6 +9,9 @@
 //       sets a new one, and the answer carries the account's email so the page can sign straight in
 //   4. POST ?action=feedback { bookingId, rating, comment, skipped }  (Authorization: Bearer <session>)
 //      -> rates a finished session on My Account (migration 0027)
+//   6. POST ?action=contest-*   Spin the Wheel (migration 0044, lib/contest.js). contest-rules needs
+//      no sign-in; contest-status, -spin, -question, -answer and -rewards act for the signed-in
+//      customer (Authorization: Bearer <session>).
 //   5. GET/POST ?action=waiver  -> the participant waiver (was api/sign-waiver.js; see the foot of
 //      this file). It lives here because a waiver belongs to a CUSTOMER, which is what this file
 //      is about, and because Vercel's Hobby plan allows 12 Serverless Functions while api/ held
@@ -27,7 +30,8 @@
 //   it numbers, learn who is a customer. The answer comes back from ?action=verify, which only
 //   somebody holding the phone can reach.
 import crypto from 'node:crypto';
-import { getSettings, admin, customerHoursByContact, normPhone, saveBookingFeedback } from '../lib/db.js';
+import { getSettings, admin, customerHoursByContact, normPhone, saveBookingFeedback, accountCustomerForRequest } from '../lib/db.js';
+import { contestRules, contestStatus, contestSpin, contestQuestion, contestAnswer, contestRewards } from '../lib/contest.js';
 import { enqueue, sendOne, venueIdentity } from '../lib/notify.js';
 
 const CODE_TTL_MIN = 10;        // a code is good for ten minutes
@@ -67,7 +71,8 @@ function actionOf(req, known) {
 // Vercel only ever passes (req, res), so the ?action= read applies there.
 // 'cards', 'card-setup' and 'card-remove' are gone (saved cards retired): they now fall through
 // to the "Unknown action." 400 below, exactly like any other name this file does not serve.
-const ACTIONS = ['start', 'verify', 'register', 'reset', 'feedback', 'waiver'];
+const CONTEST_ACTIONS = ['contest-rules', 'contest-status', 'contest-spin', 'contest-question', 'contest-answer', 'contest-rewards'];
+const ACTIONS = ['start', 'verify', 'register', 'reset', 'feedback', 'waiver', ...CONTEST_ACTIONS];
 export default async function handler(req, res, forced) {
   const action = forced || actionOf(req, ACTIONS);
   // The waiver is the one action here that answers a GET (a status check), and it has its own
@@ -85,6 +90,7 @@ export default async function handler(req, res, forced) {
     if (action === 'register') return await register(req, res, db);
     if (action === 'reset')    return await resetPassword(req, res, db);
     if (action === 'feedback') return await feedback(req, res, db);
+    if (CONTEST_ACTIONS.includes(action)) return await contest(action, req, res, db);
     return json(res, 400, { error: 'Unknown action.' });
   } catch (err) {
     console.error(`account?action=${action}:`, err.message);
@@ -244,6 +250,13 @@ async function resetPassword(req, res, db) {
   return json(res, 200, { ok: true, email });
 }
 
+// A real calendar date (YYYY-MM-DD), not in the future, and not before 1900.
+function validDob(v) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(v + 'T12:00:00Z');
+  return !isNaN(d) && d.toISOString().slice(0, 10) === v && v >= '1900-01-01' && d.getTime() <= Date.now();
+}
+
 // ---- 3. create the login and link the row --------------------------------
 async function register(req, res, db) {
   const b = req.body || {};
@@ -251,7 +264,12 @@ async function register(req, res, db) {
   const password = String(b.password || '');
   const token = String(b.token || '');
   const career = String(b.career || '').trim().slice(0, 120);
+  const firstName = String(b.firstName || '').trim().slice(0, 80);
+  const lastName = String(b.lastName || '').trim().slice(0, 80);
+  const dob = String(b.dateOfBirth || '').trim();
   if (!token) return json(res, 400, { error: 'Verify your phone number first.' });
+  if (!firstName || !lastName) return json(res, 400, { error: 'Enter your first and last name.' });
+  if (!validDob(dob)) return json(res, 400, { error: 'Enter your date of birth.' });
   if (!career) return json(res, 400, { error: 'Tell us your career — what you do for work.' });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: 'Enter a valid email address.' });
   if (password.length < 8) return json(res, 400, { error: 'Use a password of at least 8 characters.' });
@@ -307,7 +325,7 @@ async function register(req, res, db) {
     }
   } else {
     const { data, error } = await db.from('customers')
-      .insert({ name: b.name || null, email, phone, user_id: userId, account_created_at: new Date().toISOString() })
+      .insert({ name: `${firstName} ${lastName}`, email, phone, user_id: userId, account_created_at: new Date().toISOString() })
       .select().single();
     if (error) {
       await db.auth.admin.deleteUser(userId);
@@ -317,15 +335,16 @@ async function register(req, res, db) {
     customerId = data.id;
   }
 
-  // Address (optional) and career (required above), migration 0027. A separate update after the account is
-  // linked, so a database without those columns still finishes the sign-up.
-  const profile = {};
+  // Address (optional) and career (required above), migration 0027; first/last name and date of
+  // birth, 0044. A separate update after the account is linked, so a database without those
+  // columns still finishes the sign-up.
+  const profile = { first_name: firstName, last_name: lastName, date_of_birth: dob };
   const address = String(b.address || '').trim().slice(0, 200);
   if (address) profile.address = address;
   if (career) profile.career = career;
   if (customerId && Object.keys(profile).length) {
     const { error } = await db.from('customers').update(profile).eq('id', customerId);
-    if (error) console.warn('register: address/career not saved —', error.message);
+    if (error) console.warn('register: profile details not saved —', error.message);
   }
 
   return json(res, 200, {
@@ -338,6 +357,22 @@ async function register(req, res, db) {
       membership: !!existing.membership_id,
     } : null,
   });
+}
+
+// ---- 6. Spin the Wheel ---------------------------------------------------
+// The rules are public; everything else is the signed-in customer's own.
+async function contest(action, req, res, db) {
+  const settings = await getSettings();
+  if (action === 'contest-rules') return json(res, 200, await contestRules(db, settings));
+  const cust = await accountCustomerForRequest(req);
+  if (action === 'contest-status') return json(res, 200, await contestStatus(db, cust, settings));
+  if (!cust) return json(res, 401, { error: 'Sign in to take part.' });
+  const b = req.body || {};
+  if (action === 'contest-rewards') return json(res, 200, await contestRewards(db, cust));
+  const r = action === 'contest-spin' ? await contestSpin(db, cust, req)
+    : action === 'contest-question' ? await contestQuestion(db, cust, b)
+    : await contestAnswer(db, cust, b);
+  return json(res, r.status, r.body);
 }
 
 // ---- 4. feedback on a finished session ---------------------------------------

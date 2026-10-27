@@ -56,6 +56,8 @@
   .bk a{color:var(--orange);text-decoration:none;font-weight:700;font-size:12.5px;white-space:nowrap}
   .row2{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
   .row2 .btn{flex:1;margin-top:0;min-width:150px}
+  .pair{display:flex;gap:10px;flex-wrap:wrap}
+  .pair > div{flex:1;min-width:140px}
   .switch{color:var(--dim);font-size:12.5px;margin-top:14px;text-align:center}
   .switch a{color:var(--muted);cursor:pointer;text-decoration:underline}
   .spin{color:var(--dim);text-align:center;padding:36px 0}
@@ -226,6 +228,10 @@ let FLOW = { phone:'', token:'', name:'' };
 
 const steps = n => `<div class="steps">${[1,2,3].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</div>`;
 const setErr = (sel,msg) => { const e=$(sel); if(e) e.textContent = msg||''; };
+// Today in Winnipeg as YYYY-MM-DD, the latest a date of birth may be.
+const todayISO = () => new Intl.DateTimeFormat('en-CA',{timeZone:'America/Winnipeg',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+// "Jane Q Public" → ['Jane', 'Q Public']: pre-fills first/last from the name already on file.
+const splitName = n => { const t=String(n||'').trim(), i=t.indexOf(' '); return i<0 ? [t,''] : [t.slice(0,i), t.slice(i+1).trim()]; };
 
 async function api(action, body){
   const r = await fetch('/api/account?action='+action, {
@@ -443,8 +449,14 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     <div class="sub">Your number is verified. Add an email and password so you can sign in from anywhere.</div>
     ${note ? `<div class="inherit" style="background:var(--near-black);border-color:var(--border);color:var(--muted)">${esc(note)}</div>` : ''}
     ${knownCustomer ? `<div class="inherit"><b>We already know you${name ? ', '+esc(name.split(' ')[0]) : ''}.</b> Your booking history and prepaid hours will be attached to this account.</div>` : ''}
-    <label class="fld" for="n-name">Your name</label>
-    <input class="input" id="n-name" type="text" autocomplete="name" placeholder="First and last name" value="${esc(name||'')}" />
+    <div class="pair">
+      <div><label class="fld" for="n-first">First name</label>
+      <input class="input" id="n-first" type="text" autocomplete="given-name" maxlength="80" required value="${esc(splitName(name)[0])}" /></div>
+      <div><label class="fld" for="n-last">Last name</label>
+      <input class="input" id="n-last" type="text" autocomplete="family-name" maxlength="80" required value="${esc(splitName(name)[1])}" /></div>
+    </div>
+    <label class="fld" for="n-dob" style="margin-top:14px">Date of birth</label>
+    <input class="input" id="n-dob" type="date" autocomplete="bday" min="1900-01-01" max="${todayISO()}" required />
     <label class="fld" for="n-address" style="margin-top:14px">Address <span class="opt">(optional)</span></label>
     <input class="input" id="n-address" type="text" autocomplete="street-address" maxlength="200" placeholder="Street, city, postal code" />
     <label class="fld" for="n-career" style="margin-top:14px">Career</label>
@@ -465,7 +477,11 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
   }
   if($('#n-email-unlock')) $('#n-email-unlock').onclick = unlockEmail;
   const go = async () => {
-    const nm = ($('#n-name').value||'').trim();
+    const first = ($('#n-first').value||'').trim(), last = ($('#n-last').value||'').trim();
+    const nm = (first + ' ' + last).trim();
+    const dob = $('#n-dob').value || '';
+    if(!first || !last){ setErr('#n-err','Enter your first and last name.'); $(first ? '#n-last' : '#n-first').focus(); return; }
+    if(!dob || dob > todayISO() || dob < '1900-01-01'){ setErr('#n-err','Enter your date of birth.'); $('#n-dob').focus(); return; }
     const email = ($('#n-email').value||'').trim().toLowerCase();
     const password = $('#n-pass').value||'';
     const career = ($('#n-career').value||'').trim();
@@ -473,7 +489,7 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ setErr('#n-err','Enter a valid email address.'); return; }
     if(password.length < 8){ setErr('#n-err','Use a password of at least 8 characters.'); return; }
     $('#n-go').disabled = true; $('#n-go').textContent = 'Creating…';
-    const r = await api('register', { token: FLOW.token, email, password, name: nm,
+    const r = await api('register', { token: FLOW.token, email, password, firstName: first, lastName: last, dateOfBirth: dob,
       address: ($('#n-address').value||'').trim(), career });
     if(!r.ok){
       $('#n-go').disabled = false; $('#n-go').textContent = 'Create account';
@@ -671,6 +687,7 @@ function drawProfile(c, bks, justInherited, opts){
       </div>
     </div>
 
+    <div id="rewards"></div>
     ${teams.map((t,i) => teamCard(t, i, opts)).join('')}
     ${MY_SOLOS.map(x => `<div class="card">
       <div class="sec-title" style="margin-top:0">My league</div>
@@ -687,7 +704,9 @@ function drawProfile(c, bks, justInherited, opts){
       ${dev ? '' : '<button class="btn btn-ghost" id="o-out" style="margin-top:18px">Sign out</button>'}
     </div>`);
   if(!dev) $('#o-out').onclick = signOut;
-  drawDetails(c, dev);
+  drawDetails(c, dev, fromContest() && contestMissing(c).length > 0);
+  if(fromContest()) $('#details').scrollIntoView({ block:'center' });
+  if(!dev) loadRewards();
   if(ask) wireFeedback(ask, dev);
   wireTeams(teams);
 }
@@ -1078,28 +1097,58 @@ function wireTeams(teams){
   });
 }
 
-// Address and career: shown on the account, editable in place.
+// Name, date of birth, address and career: shown on the account, editable in place. Spin the
+// Wheel needs every one of them (lib/contest.js); ?details=contest is where its "Finish my details"
+// button lands, so the editor opens straight away and says which are missing.
+const CONTEST_FIELDS = { first_name:'First name', last_name:'Last name', date_of_birth:'Date of birth', address:'Address', career:'Career' };
+const contestMissing = c => Object.keys(CONTEST_FIELDS).filter(k => !String(c[k]||'').trim());
+const fromContest = () => new URLSearchParams(location.search).get('details') === 'contest';
 function drawDetails(c, dev, editing){
   const host = $('#details'); if(!host) return;
   const row = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v${v?'':' is-empty'}">${v ? esc(v) : 'Not added'}</span></div>`;
+  const dobText = c.date_of_birth ? fmtDate(String(c.date_of_birth).slice(0,10)).replace(/^\w+, /,'') : '';
   if(!editing){
-    host.innerHTML = row('Address', c.address) + row('Career', c.career) +
+    const done = fromContest() && !contestMissing(c).length;
+    host.innerHTML = row('First name', c.first_name) + row('Last name', c.last_name) + row('Date of birth', dobText) +
+      row('Address', c.address) + row('Career', c.career) +
+      (done ? '<div class="inherit" style="margin:10px 0 0">Your details are complete. <a href="/contest" style="color:#0a5c38;font-weight:700">Back to Spin the Wheel →</a></div>' : '') +
       '<button class="btn btn-ghost" id="d-edit" style="margin-top:8px;padding:10px">Edit details</button>';
     $('#d-edit').onclick = () => drawDetails(c, dev, true);
     return;
   }
+  const missing = contestMissing(c);
   host.innerHTML = `
-    <label class="fld" for="d-address">Address <span class="opt">(optional)</span></label>
+    ${fromContest() && missing.length ? `<div class="inherit" style="background:rgba(240,82,61,.07);border-color:rgba(240,82,61,.35);color:#A8321F">To spin the wheel, fill in: <b>${missing.map(k => CONTEST_FIELDS[k]).join(', ')}</b>.</div>` : ''}
+    <div class="pair">
+      <div><label class="fld" for="d-first">First name</label>
+      <input class="input" id="d-first" type="text" autocomplete="given-name" maxlength="80" value="${esc(c.first_name||'')}" /></div>
+      <div><label class="fld" for="d-last">Last name</label>
+      <input class="input" id="d-last" type="text" autocomplete="family-name" maxlength="80" value="${esc(c.last_name||'')}" /></div>
+    </div>
+    <label class="fld" for="d-dob" style="margin-top:12px">Date of birth</label>
+    ${c.date_of_birth
+      ? `<input class="input" id="d-dob" type="text" readonly value="${esc(dobText)}" aria-describedby="d-dob-why" /><div class="ph-hint" id="d-dob-why">To correct your date of birth, ask our staff.</div>`
+      : `<input class="input" id="d-dob" type="date" autocomplete="bday" min="1900-01-01" max="${todayISO()}" /><div class="ph-hint">It can't be changed once saved, so check it carefully.</div>`}
+    <label class="fld" for="d-address" style="margin-top:12px">Address <span class="opt">(needed for Spin the Wheel)</span></label>
     <input class="input" id="d-address" type="text" autocomplete="street-address" maxlength="200" value="${esc(c.address||'')}" placeholder="Street, city, postal code" />
     <label class="fld" for="d-career" style="margin-top:12px">Career</label>
     <input class="input" id="d-career" type="text" autocomplete="organization-title" maxlength="120" required value="${esc(c.career||'')}" placeholder="What you do for work" />
     <div class="err" id="d-err"></div>
     <div class="row2"><button class="btn btn-primary" id="d-save">Save</button><button class="btn btn-ghost" id="d-cancel">Cancel</button></div>`;
   $('#d-cancel').onclick = () => drawDetails(c, dev);
-  $('#d-address').focus();
+  const firstGap = { first_name:'#d-first', last_name:'#d-last', date_of_birth:'#d-dob', address:'#d-address', career:'#d-career' }[missing[0]];
+  $(firstGap || '#d-first').focus();
   $('#d-save').onclick = async () => {
-    const patch = { address: $('#d-address').value.trim() || null, career: $('#d-career').value.trim() || null };
+    const patch = { first_name: $('#d-first').value.trim() || null, last_name: $('#d-last').value.trim() || null,
+      address: $('#d-address').value.trim() || null, career: $('#d-career').value.trim() || null };
+    if(!patch.first_name || !patch.last_name){ setErr('#d-err', 'Enter your first and last name.'); $(patch.first_name ? '#d-last' : '#d-first').focus(); return; }
     if(!patch.career){ setErr('#d-err', 'Tell us your career — what you do for work.'); $('#d-career').focus(); return; }
+    // Sent only while it is still empty: once saved it belongs to staff (migration 0044's guard).
+    if(!c.date_of_birth){
+      const dob = $('#d-dob').value || '';
+      if(dob && (dob > todayISO() || dob < '1900-01-01')){ setErr('#d-err', 'Enter a real date of birth.'); $('#d-dob').focus(); return; }
+      if(dob) patch.date_of_birth = dob;
+    }
     $('#d-save').disabled = true; $('#d-save').textContent = 'Saving…';
     let error = null;
     if(dev){
@@ -1112,9 +1161,56 @@ function drawDetails(c, dev, editing){
       if(r.error) error = r.error.message;
     }
     if(error){ $('#d-save').disabled = false; $('#d-save').textContent = 'Save'; setErr('#d-err', 'Not saved: ' + error); return; }
-    Object.assign(c, patch);
+    Object.assign(c, patch, { name: patch.first_name + ' ' + patch.last_name });
+    const h = document.querySelector('#content .card h1'); if(h && c.name) h.textContent = c.name;
     drawDetails(c, dev);
   };
+}
+
+/* ---------- Rewards: prizes won on Spin the Wheel (migration 0044) ----------
+   POST /api/account?action=contest-rewards → { ok, rewards:[{ id, status, prize, wonAt, redeemedAt,
+   returnedToPool }], minor }. Shown only once the person has won something; until then the card
+   is a one-line invitation to the wheel, and nothing at all if the contest is not set up. */
+async function loadRewards(){
+  const host = $('#rewards'); if(!host) return;
+  let r = null;
+  try{
+    const sb = await supa(); const { data:{ session } } = await sb.auth.getSession();
+    if(!session) return;
+    const res = await fetch('/api/account?action=contest-rewards', { method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+session.access_token }, body:'{}' });
+    r = await res.json();
+  }catch(e){ return; }
+  if(!r || !r.ok) return;
+  const list = r.rewards || [];
+  const money = c => '$'+(c/100).toLocaleString('en-US',{minimumFractionDigits:c%100?2:0,maximumFractionDigits:2});
+  const state = w => ({
+    pending:  ['warn', 'Answer to claim'], question: ['warn', 'Answer to claim'],
+    won:      w.redeemedAt ? ['off', 'Redeemed'] : ['ok', 'Unredeemed'],
+    wrong:    ['off', 'Forfeited'], timeout: ['off', 'Forfeited'], refused: ['off', 'Not redeemed — ID check'],
+  }[w.status] || ['off', w.status]);
+  const item = w => {
+    const p = w.prize || {}, [cls, label] = state(w), open = w.status === 'pending' || w.status === 'question';
+    const notes = w.status === 'won' && !w.redeemedAt ? [
+      p.kind === 'hours' ? 'Staff will apply the hours discount at the venue.' : '',
+      p.adults_only ? '18+ only — staff will check ID when you redeem it.' : '',
+      r.minor && p.kind !== 'hours' ? '<b>A parent or guardian must be present to claim this prize.</b>' : '',
+    ].filter(Boolean) : [];
+    return `<div class="bk" style="align-items:flex-start">
+      <div class="b-main"><b>${esc(p.name || 'Prize')}</b>${p.value_cents ? ` <span class="b-sub">· approx. ${money(p.value_cents)}</span>` : ''}
+        <div class="b-sub">Won ${esc(fmtDate(String(w.wonAt).slice(0,10)))}${w.source === 'draw' ? ' in the end-of-period draw' : ''}${w.redeemedAt ? ` · redeemed ${esc(fmtDate(String(w.redeemedAt).slice(0,10)))}` : ''}</div>
+        ${notes.map(n => `<div class="b-sub" style="color:var(--muted);margin-top:3px">${n}</div>`).join('')}
+        ${open ? `<a href="/contest?claim=${encodeURIComponent(w.id)}" style="display:inline-block;margin-top:6px">Answer the skill-testing question →</a>` : ''}
+      </div>
+      <div><span class="pill ${cls}">${esc(label)}</span></div>
+    </div>`;
+  };
+  host.innerHTML = `<div class="card">
+    <div class="sec-title" style="margin-top:0">Rewards</div>
+    ${list.length ? `<div class="sub" style="margin-bottom:6px">To redeem a prize, see our staff at the venue — they will find it on your account.</div>${list.map(item).join('')}`
+      : '<div class="empty">No prizes yet.</div>'}
+    <a class="btn btn-ghost" href="/contest" style="margin-top:14px">Spin the Wheel</a>
+  </div>`;
 }
 
 // Stars behave as a radio group: Tab reaches the group, arrow keys move the choice.

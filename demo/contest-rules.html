@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Invictus Golf — Spin the Wheel Rules</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{ --black:#F6F7F9;--near-black:#F5F7FA;--surface:#FFFFFF;--border:#D7DCE3;--white:#14161A;--muted:#555C68;--dim:#858C99;--orange:#F0523D;--radius:16px; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--black);color:var(--white);font-family:'Raleway',system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:16px 16px 40px}
+  .wrap{max-width:760px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:4px 0 18px}
+  header img{height:38px;width:auto}
+  header a{color:var(--muted);text-decoration:none;font-size:13px}
+  .brand-fallback{font-family:'Space Grotesk';font-weight:700;font-size:18px}
+  .brand-fallback .joy{color:var(--orange);margin-right:6px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px 22px}
+  h1{font-family:'Space Grotesk';font-size:26px;margin-bottom:4px}
+  h2{font-family:'Space Grotesk';font-size:17px;margin:24px 0 8px}
+  p,li{font-size:14.5px;line-height:1.6;color:#2A2E35}
+  p{margin-bottom:8px} ul,ol{margin:0 0 8px 20px}
+  .lead{color:var(--muted);font-size:13.5px}
+  .tbl{overflow-x:auto;margin:6px 0 8px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{text-align:left;font-family:'Space Grotesk';font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);padding:7px 8px;border-bottom:1px solid var(--border)}
+  td{padding:9px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+  td.num{white-space:nowrap;text-align:right}
+  a{color:var(--orange)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <img src="/assets/invictus-logo.png" alt="Invictus Golf"
+           onerror="this.style.display='none';document.getElementById('bf').style.display='inline-block'" />
+      <span id="bf" class="brand-fallback" style="display:none"><span class="joy">INVICTUS</span> GOLF</span>
+    </div>
+    <a href="/contest">← Back to the wheel</a>
+  </header>
+  <!-- TO BE REVIEWED BY LAWYER: the full contest rules below (filled from live values in draw()). -->
+  <div class="card" id="rules"><p class="lead">Loading the rules…</p></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money = c => '$'+(c/100).toLocaleString('en-US',{minimumFractionDigits:c%100?2:0,maximumFractionDigits:2});
+const fmtCT = iso => new Date(iso).toLocaleString('en-US',{timeZone:'America/Winnipeg',month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+// "about 1 in 37" — the chance a single spin wins this prize.
+const oneIn = x => x > 0 ? `about 1 in ${Math.max(1, Math.round(1/x)).toLocaleString('en-US')}` : '—';
+
+function draw(r){
+  const p = r.period || r.nextPeriod, s = r.sponsor || {};
+  const sponsor = esc(s.name || 'Invictus Golf');
+  const contact = [s.address && esc(s.address).replace(/\n/g, ', '), s.phone && esc(s.phone),
+    s.email && `<a href="mailto:${esc(s.email)}">${esc(s.email)}</a>`].filter(Boolean).join(' · ');
+  const X = p ? p.wins_per_block : null, Y = p ? p.block_size : null;
+  const winChance = p ? X / Y : 0;
+  const prizes = r.prizes || [];
+  const minutes = Math.round((r.questionSeconds || 300) / 60);
+
+  // TO BE REVIEWED BY LAWYER — every section of the full rules below.
+  $('#rules').innerHTML = `
+    <h1>Spin the Wheel — Official Rules</h1>
+    <p class="lead">${p ? (r.period ? 'Current contest period' : 'Next contest period') + `: ${esc(p.name)}` : 'No contest period is scheduled right now.'}</p>
+
+    <h2>1. Sponsor</h2>
+    <p>The contest is run by ${sponsor} (the “Sponsor”)${contact ? `, ${contact}` : ''}.</p>
+
+    <h2>2. No purchase necessary</h2>
+    <p>No purchase is necessary to enter or to win. Creating an account is free, and any account holder may spin. A purchase does not improve your chances of winning.</p>
+
+    <h2>3. Contest period</h2>
+    <p>${p ? `The contest runs from <b>${esc(fmtCT(p.starts_at))}</b> to <b>${esc(fmtCT(p.ends_at))}</b> (Central Time). Spins are not accepted outside this period.` : 'Dates will be posted here when the next contest period is scheduled.'}</p>
+
+    <h2>4. Eligibility</h2>
+    <ul>
+      <li>Open to residents of Manitoba who hold a free ${sponsor} account.</li>
+      <li>One account per person. Accounts are tied to a mobile number verified by text message.</li>
+      <li>To spin, your account must include your first and last name, email, phone number, address, career and date of birth.</li>
+      <!-- FLAG FOR LAWYER: parent/guardian consent and accompaniment for entrants and winners under 18; whether a minimum age applies. -->
+      <li>Entrants under 18 may take part. Winners under 18 must be accompanied by a parent or guardian to claim their prize (this does not apply to hours-card prizes).</li>
+      <li>Some prizes are for those 18 and older only. Staff check ID when one of these prizes is redeemed; a winner who cannot show ID proving they are 18 or older cannot redeem it, and the prize is forfeited.</li>
+    </ul>
+
+    <h2>5. How to enter</h2>
+    <p>Sign in at the Spin the Wheel page and press Spin. Each account may spin once every 24 hours (a rolling 24 hours from your last spin). Additional or automated spins are not permitted.</p>
+
+    <h2>6. How winners are decided and the odds</h2>
+    <!-- FLAG FOR LAWYER: wording for disclosing the number of prizes when there is no cap on the total. -->
+    ${p ? `<p>Spins are counted in groups of <b>${Y}</b>. In each group, <b>${X}</b> spin${X===1?'':'s'} win${X===1?'s':''} a prize. Which spins in the group win is chosen at random, by a secure random number generator, before the group begins. Each spin therefore has a <b>${X} in ${Y}</b> chance of winning a prize. There is no limit on the total number of prizes; the total depends on how many spins are made during the contest period.</p>
+    <p>When a spin wins, the prize is chosen at random from the prize list below, with the chances shown. The wheel's animation is for display only; the result is decided before it turns.</p>` : '<p>The odds will be posted here with the next contest period.</p>'}
+
+    <h2>7. Prizes</h2>
+    ${prizes.length ? `<div class="tbl"><table>
+      <thead><tr><th>Prize</th><th style="text-align:right">Approx. value</th><th>Age</th><th style="text-align:right">If you win</th><th style="text-align:right">Per spin</th></tr></thead>
+      <tbody>${prizes.map(z => `<tr>
+        <td><b>${esc(z.name)}</b>${z.description ? `<br><span style="color:var(--muted)">${esc(z.description)}</span>` : ''}</td>
+        <td class="num">${money(z.value_cents||0)}</td>
+        <td>${z.adults_only ? '18+ only' : 'All ages'}</td>
+        <td class="num">${Math.round(z.share*1000)/10}%</td>
+        <td class="num">${p ? oneIn(winChance * z.share) : '—'}</td></tr>`).join('')}</tbody></table></div>
+    <p>Dollar credits may be spent on anything sold at the venue. No prize is an alcoholic drink; anyone ordering alcohol with a credit must show ID as usual.</p>` : '<p>The prize list will be posted here.</p>'}
+
+    <h2>8. Skill-testing question</h2>
+    <p>Before a prize is awarded, the winner must correctly answer a mathematical skill-testing question within ${minutes} minutes of it being shown. The question uses several operations and the order of operations (for example, (8 × 6) + 12 ÷ 4 − 3). There is one attempt. A wrong answer, or no answer within ${minutes} minutes, forfeits the prize.</p>
+
+    <h2>9. Forfeited prizes</h2>
+    <p>${p && p.forfeit_mode === 'void'
+      ? 'A forfeited prize is not awarded to anyone else.'
+      : 'A forfeited prize goes back into the prize pool: it is added to a later, randomly chosen spin in the same group of spins, or to the next group if that one is complete.'}</p>
+
+    <h2>10. End of the contest period</h2>
+    <p>${p && p.incomplete_mode === 'carry'
+      ? 'If the period ends before the last group of spins is complete, any prizes not yet won in that group are carried into the next contest period.'
+      : 'If the period ends before the last group of spins is complete, any prizes not yet won in that group are awarded by a random draw among the entrants in that group who did not win. A drawn winner must answer the skill-testing question in My Account to claim the prize.'}</p>
+
+    <h2>11. Claiming and redeeming a prize</h2>
+    <ul>
+      <li>Prizes you have won are listed under <b>Rewards</b> in My Account, with the date won and whether they have been redeemed.</li>
+      <li>To redeem a prize, visit the venue and see our staff. Staff will find the prize on your account and mark it redeemed.</li>
+      <li>For hours-card prizes, staff will apply the hours discount at the venue.</li>
+      <li>Winners under 18 must have a parent or guardian present to claim their prize, except for hours-card prizes.</li>
+    </ul>
+
+    <h2>12. Privacy</h2>
+    <p>To run the contest we collect your first and last name, email, phone number, address, career and date of birth, and we record each spin (its time and result) and each skill-testing answer. We use this information only to run the contest: to confirm eligibility, to keep spins fair, to contact and verify winners, and to let staff redeem prizes. Your date of birth is used to apply the age rules above. Spin and prize records are kept as an audit record of the contest. We do not sell your information. To see or correct your information, contact ${sponsor}${s.email ? ` at <a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : ''}${s.phone ? ` or ${esc(s.phone)}` : ''}.</p>
+
+    <h2>13. Contact</h2>
+    <p>Questions about the contest: ${sponsor}${contact ? `, ${contact}` : ''}.</p>`;
+}
+
+(async () => {
+  try{
+    const r = await (await fetch('/api/account?action=contest-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' })).json();
+    if(!r || !r.ok) throw new Error();
+    draw(r);
+  }catch(e){ $('#rules').innerHTML = '<p>The rules could not be loaded. Please reload the page.</p>'; }
+})();
+</script>
+</body>
+</html>

@@ -276,7 +276,8 @@
      every capability this signed-in staff member lacks; anything tagged cap-<cap> then hides.
      With 0024 not applied there is no role system, no class is set, and nothing hides. ---- */
   body.no-money .cap-money, body.no-booking .cap-booking, body.no-customer .cap-customer,
-  body.no-config .cap-config, body.no-staff .cap-staff, body.no-audit .cap-audit{display:none!important}
+  body.no-config .cap-config, body.no-staff .cap-staff, body.no-audit .cap-audit,
+  body.no-contest .cap-contest{display:none!important}
   .ro-note{font-size:12px;color:var(--dim);text-align:center;padding:12px 0}
 
   /* ---- Stat strip shared by the Gift Cards / Promos / Waiting List tabs ---- */
@@ -1385,6 +1386,59 @@
       </div>
 
       <!-- STAFF & ROLES -->
+      <!-- Spin the Wheel (migration 0044). Rewards: any staff finds a winner and redeems. -->
+      <div id="tab-contestrewards" class="hidden">
+        <div class="toolbar">
+          <div><h2>Contest Rewards</h2><div class="day-label">Spin the Wheel prizes. Find the winner, check what the prize needs, and mark it redeemed.</div></div>
+          <div class="day-nav">
+            <input class="input" id="cr-q" placeholder="Search name / email / phone" style="width:220px" />
+            <div class="seg seg-sm" id="cr-show" role="tablist" aria-label="Which prizes to show">
+              <button type="button" role="tab" data-v="open" class="on" aria-selected="true">To redeem</button>
+              <button type="button" role="tab" data-v="redeemed" aria-selected="false">Redeemed</button>
+              <button type="button" role="tab" data-v="waiting" aria-selected="false">Awaiting answer</button>
+              <button type="button" role="tab" data-v="all" aria-selected="false">All</button></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="sub">A prize is ready to redeem once its winner has answered the skill-testing question correctly. <b>18+ prizes:</b> check ID before redeeming; if the winner cannot show they are 18 or older, use <b>ID check failed</b>. <b>Winners under 18</b> need a parent or guardian present, except for hours cards. <b>Hours cards:</b> apply the hours discount at the counter.</div>
+          <div class="tbl-scroll"><table id="cr-table"></table></div>
+        </div>
+      </div>
+
+      <!-- Spin the Wheel setup: periods, prizes, end-of-period decisions, logs. contest.manage only. -->
+      <div id="tab-contest" class="hidden">
+        <div class="toolbar">
+          <div><h2>Contest Setup</h2><div class="day-label">Spin the Wheel — periods, prizes and odds, and the audit logs. Times are Central Time.</div></div>
+          <div class="day-nav"><a class="btn btn-ghost" href="/contest/rules" target="_blank" rel="noopener">View rules page</a></div>
+        </div>
+        <div id="ct-alerts"></div>
+        <div class="card">
+          <div class="sec-head"><div><h3 class="card-h">Contest periods</h3>
+            <div class="sub">Spins are accepted only inside a period. Periods cannot overlap. Changing the winners-per-spins setting of a running period applies from its next group of spins.</div></div>
+            <button class="btn btn-primary" id="ct-add-period" style="white-space:nowrap">+ New period</button></div>
+          <div class="tbl-scroll"><table id="ct-periods"></table></div>
+        </div>
+        <div class="card">
+          <div class="sec-head"><div><h3 class="card-h">Prizes</h3>
+            <div class="sub">When a spin wins, one active prize is picked at random using these chances. The rules page shows each prize, its value, its age limit and its odds.</div></div>
+            <button class="btn btn-primary" id="ct-add-prize" style="white-space:nowrap">+ New prize</button></div>
+          <div class="tbl-scroll"><table id="ct-prizes"></table></div>
+        </div>
+        <div class="card">
+          <div class="sec-head"><div><h3 class="card-h">Logs</h3>
+            <div class="sub">Every spin, every prize and its skill-testing question, and every group of spins. A group's winning positions are shown only once it has closed.</div></div>
+            <div class="row" style="gap:8px;flex-wrap:wrap">
+              <select class="input" id="ct-log-period" style="width:auto"></select>
+              <button class="btn btn-ghost" id="ct-csv-winners">Export winners CSV</button>
+              <button class="btn btn-ghost" id="ct-csv-spins">Export audit log CSV</button></div></div>
+          <div class="seg seg-sm" id="ct-log-view" role="tablist" aria-label="Which log" style="max-width:420px;margin-bottom:12px">
+            <button type="button" role="tab" data-v="claims" class="on" aria-selected="true">Winners</button>
+            <button type="button" role="tab" data-v="spins" aria-selected="false">Spins</button>
+            <button type="button" role="tab" data-v="blocks" aria-selected="false">Groups</button></div>
+          <div class="tbl-scroll"><table id="ct-log"></table></div>
+        </div>
+      </div>
+
       <div id="tab-staff" class="hidden">
         <div class="toolbar">
           <div><h2>Staff &amp; Roles</h2><div class="day-label">Who can sign in to this portal, and what each of them is allowed to do.</div></div>
@@ -1828,7 +1882,7 @@ $('#chpw-btn').onclick = () => {
        stale tab or a poked-at DOM gains nothing. */
 let ME = { role:'admin', caps:null, rbac:false, bootstrap:false, name:'', email:'' };
 const CAP_CLASS = { 'booking.write':'booking', 'customer.write':'customer', 'money.write':'money',
-                    'config.write':'config', 'staff.manage':'staff', 'audit.read':'audit' };
+                    'config.write':'config', 'staff.manage':'staff', 'audit.read':'audit', 'contest.manage':'contest' };
 const ROLE_LABEL = { admin:'Admin', employee:'Employee', readonly:'Read-only' };
 function can(cap){
   if(!ME.rbac) return true;            // no role system on this database — see above
@@ -1868,6 +1922,7 @@ const TABS = [
   { id:'promos',                             label:'Promo Codes',        load:loadPromos },
   { id:'logs',                               label:'Booking Logs',       load:loadLogs },
   { id:'customers',                          label:'Search Customers',   load:loadCustomers },
+  { id:'contestrewards',                     label:'Contest Rewards',    load:loadContestRewards },
   { id:'bays',        group:'Configuration', label:'Bays',               load:loadBaysTab,        cap:'config.write' },
   { id:'prices',                             label:'Prices',             load:loadPricesTab,      cap:'config.write' },
   { id:'overrides',                          label:'Schedule Overrides', load:loadOverridesTab,   cap:'config.write' },
@@ -1876,6 +1931,7 @@ const TABS = [
   { id:'tags',                               label:'Tags',               load:loadTags,           cap:'config.write' },
   { id:'paysettings',                        label:'Payment Settings',   load:loadPaySettings,    cap:'config.write' },
   { id:'venue',                              label:'Venue Identity',     load:loadVenueTab,       cap:'config.write' },
+  { id:'contest',                            label:'Contest Setup',      load:loadContestSetup,   cap:'contest.manage' },
   { id:'staff',       group:'Access',        label:'Staff & Roles',      load:loadStaffTab,       cap:'staff.manage' },
 ];
 const DEFAULT_TAB = 'bookings';
@@ -3000,12 +3056,14 @@ function openCustomer(c){
     </div>
     <div class="field"><label>Notes</label><input class="input" id="c-notes" value="${esc(c.notes||'')}" placeholder="Optional" /></div>
     ${isNew?'':`<div class="field" style="margin-bottom:0"><label>Booking history</label><div class="cust-history" id="c-hist"><div class="dim" style="font-size:13px;padding:6px 0">Loading…</div></div></div>`}
+    ${isNew?'':`<div class="field" style="margin:14px 0 0"><label>Contest rewards</label><div class="tbl-scroll" id="c-rewards"><div class="dim" style="font-size:13px;padding:6px 0">Loading…</div></div></div>`}
     <button class="btn btn-primary" id="c-save" style="width:100%;margin-top:16px">${isNew?'Add customer':'Save changes'}</button>
     ${isNew?'':'<button class="btn btn-danger" id="c-del" style="width:100%;margin-top:10px">Delete customer</button>'}`;
   overlay.classList.add('show');
   $('#x').onclick=closeSheet;
   enhanceSelects(sheet);
   if(!isNew) loadCustHistory(c,'c-hist');
+  if(!isNew) loadCustRewards(c,'c-rewards');
   if(!isNew){
     const doAdj=async(sign)=>{
       const hrs=+$('#c-hadj').value; if(!(hrs>0)){ toast('Enter hours to adjust','err'); return; }
@@ -7995,6 +8053,432 @@ enhanceSelects();
 csObserver.observe(document.body,{childList:true,subtree:true});
 wireGlanceArrows();
 boot();
+
+/* ======================================================================
+   SPIN THE WHEEL (migration 0044)
+   Contest Rewards — any staff: find a winner's prize and redeem it (contest_redeem_claim), or
+   refuse an 18+ prize after a failed ID check (contest_refuse_claim). Both need customer.write,
+   which the database checks again.
+   Contest Setup — contest.manage: periods, prizes, the end-of-period decision, logs and CSV.
+   A group's winning positions come only from contest_block_log(), which withholds an open group's.
+   ====================================================================== */
+const CT_TZ = 'America/Winnipeg';
+const fmtCT = iso => iso ? new Date(iso).toLocaleString('en-US',{timeZone:CT_TZ,month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : '—';
+// Wall-clock parts of an instant in Winnipeg.
+function ctParts(ms){
+  return Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:CT_TZ,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
+    .formatToParts(new Date(ms)).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
+}
+// '2026-11-01T18:00' typed as Central Time → ISO instant. Twice through the offset, so a period
+// that starts on a daylight-saving changeover still lands on the hour that was typed.
+function ctToISO(v){
+  const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v||''); if(!m) return null;
+  const want=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]);
+  const off=ms=>{ const p=ctParts(ms); return Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute)-ms; };
+  let ts=want-off(want); ts=want-off(ts);
+  return new Date(ts).toISOString();
+}
+function isoToCTInput(iso){ if(!iso) return ''; const p=ctParts(Date.parse(iso)); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`; }
+function ageOf(dob){
+  if(!dob) return null;
+  const p=ctParts(Date.now()), [y,m,d]=String(dob).slice(0,10).split('-').map(Number);
+  return +p.year - y - ((+p.month<m || (+p.month===m && +p.day<d)) ? 1 : 0);
+}
+const PRIZE_KIND = { round:'Free round of golf', hours:'Hours card', credit:'Food & beverage credit', other:'Other' };
+// The correct answer, worked out from the question as stored — the answer column itself is not
+// readable from the portal. Only digits, brackets and the four operators get this far.
+function contestAnswerOf(q){
+  const e=String(q||'').replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-');
+  if(!/^[\d\s()+\-*/]+$/.test(e)) return '';
+  try{ const v=Function('"use strict";return ('+e+')')(); return Number.isFinite(v) ? String(v) : ''; }catch(err){ return ''; }
+}
+function claimState(c){
+  if(c.status==='won') return c.redeemed_at ? ['confirmed','Redeemed'] : ['warn','To redeem'];
+  if(c.status==='pending') return ['info','Awaiting answer'];
+  if(c.status==='question') return Date.parse(c.question_expires_at) < Date.now() ? ['cancelled','Time ran out'] : ['info','Answering now'];
+  if(c.status==='wrong') return ['cancelled','Forfeited — wrong answer'];
+  if(c.status==='timeout') return ['cancelled','Forfeited — time ran out'];
+  if(c.status==='refused') return ['blocked','ID check failed'];
+  return ['cancelled', c.status];
+}
+const CLAIM_COLS = 'id,customer_id,period_id,source,prize_name,prize_description,prize_kind,prize_value_cents,prize_adults_only,status,question,question_issued_at,question_expires_at,given_answer,answered_at,returned_to_pool,redeemed_at,redeemed_by_email,refused_note,created_at';
+function toCSV(cols, rows){
+  const cell=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  return [cols.map(c=>cell(c[0])).join(',')].concat(rows.map(r=>cols.map(c=>cell(c[1](r))).join(','))).join('\n');
+}
+function downloadCSV(name, text){
+  const url=URL.createObjectURL(new Blob([text],{type:'text/csv'}));
+  const a=document.createElement('a'); a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url);
+}
+
+/* ---------- Contest Rewards ---------- */
+let CR_ROWS=[], CR_SHOW='open';
+async function loadContestRewards(){
+  const tbl=$('#cr-table');
+  const { data, error } = await sb.from('contest_claims')
+    .select(CLAIM_COLS+',customers(name,phone,email,date_of_birth)').order('created_at',{ascending:false}).limit(1000);
+  if(error){
+    if(isAuthError(error)) return;
+    tbl.innerHTML=migrationRow(missingSchema(error)?'Run database migration 0044 (supabase/migrations) to switch on Spin the Wheel.':'Could not load prizes: '+error.message,6);
+    return;
+  }
+  CR_ROWS=data||[];
+  renderContestRewards();
+}
+function crRowsHtml(rows, withCustomer){
+  return rows.map(c=>{
+    const cu=c.customers||{}, [cls,label]=claimState(c), age=ageOf(cu.date_of_birth);
+    const ready = c.status==='won' && !c.redeemed_at;
+    return `<tr>
+      ${withCustomer?`<td><b>${esc(cu.name||'—')}</b><div class="dim" style="font-size:12px">${esc([cu.phone,cu.email].filter(Boolean).join(' · '))}</div></td>`:''}
+      <td><b>${esc(c.prize_name)}</b>${c.prize_adults_only?' <span class="pill blocked">18+</span>':''}
+        <div class="dim" style="font-size:12px">${esc(PRIZE_KIND[c.prize_kind]||c.prize_kind)}${c.prize_value_cents?' · approx. '+money(c.prize_value_cents):''}</div></td>
+      <td class="muted" style="white-space:nowrap">${esc(fmtCT(c.created_at))}${c.source==='draw'?'<div class="dim" style="font-size:12px">End-of-period draw</div>':''}</td>
+      ${withCustomer?`<td>${age==null?'<span class="dim">—</span>':age<18?`<span class="pill warn">Under 18 · ${age}</span>`:esc(age)}</td>`:''}
+      <td><span class="pill ${cls}">${esc(label)}</span>${c.redeemed_at?`<div class="dim" style="font-size:12px;margin-top:3px">${esc(fmtCT(c.redeemed_at))}${c.redeemed_by_email?' · '+esc(c.redeemed_by_email):''}</div>`:''}</td>
+      <td style="white-space:nowrap;text-align:right">${ready?`<button class="btn btn-primary btn-sm cap-customer" data-redeem="${c.id}">Redeem</button>
+        ${c.prize_adults_only?`<button class="btn btn-ghost btn-sm cap-customer" data-refuse="${c.id}">ID check failed</button>`:''}`:''}</td>
+    </tr>`;
+  }).join('');
+}
+function renderContestRewards(){
+  const q=($('#cr-q').value||'').trim().toLowerCase(), digits=q.replace(/\D/g,'');
+  const rows=CR_ROWS.filter(c=>{
+    if(CR_SHOW==='open' && !(c.status==='won' && !c.redeemed_at)) return false;
+    if(CR_SHOW==='redeemed' && !c.redeemed_at) return false;
+    if(CR_SHOW==='waiting' && !(c.status==='pending' || c.status==='question')) return false;
+    if(!q) return true;
+    const cu=c.customers||{};
+    return (cu.name||'').toLowerCase().includes(q) || (cu.email||'').toLowerCase().includes(q)
+      || (digits.length>=3 && String(cu.phone||'').replace(/\D/g,'').includes(digits));
+  });
+  const tbl=$('#cr-table');
+  tbl.innerHTML = rows.length ? `<thead><tr><th>Winner</th><th>Prize</th><th>Won</th><th>Age</th><th>Status</th><th></th></tr></thead><tbody>${crRowsHtml(rows,true)}</tbody>`
+    : emptyRow(CR_ROWS.length ? 'No prizes match.' : 'Nobody has won a prize yet.', 6);
+  wireClaimButtons(tbl, CR_ROWS, loadContestRewards);
+}
+// Redeem / ID-check-failed buttons, wherever a list of prizes is drawn (this tab, the customer editor).
+function wireClaimButtons(host, rows, reload){
+  host.querySelectorAll('[data-redeem]').forEach(b=>b.onclick=()=>{
+    const c=rows.find(x=>x.id===b.dataset.redeem); if(!c) return;
+    const cu=c.customers||{}, age=ageOf(cu.date_of_birth);
+    const checks=[
+      c.prize_adults_only ? '<li><b>18+ prize:</b> check photo ID shows they are 18 or older. If not, cancel and use <b>ID check failed</b>.</li>' : '',
+      age!=null && age<18 && c.prize_kind!=='hours' ? '<li><b>Under 18:</b> a parent or guardian must be present.</li>' : '',
+      c.prize_kind==='hours' ? '<li><b>Hours card:</b> apply the hours discount at the counter.</li>' : '',
+      c.prize_kind==='credit' ? '<li><b>Credit:</b> spendable on anything at the venue. Check ID as usual if alcohol is ordered.</li>' : '',
+    ].filter(Boolean).join('');
+    confirmSheet({ title:'Redeem this prize?', okLabel:'Mark redeemed',
+      body:`<b>${esc(c.prize_name)}</b> for <b>${esc(cu.name||'this customer')}</b>, won ${esc(fmtCT(c.created_at))}.${checks?`<ul style="margin:10px 0 0 18px">${checks}</ul>`:''}`,
+      onOk:async()=>{
+        const { error } = await sb.rpc('contest_redeem_claim',{ p_claim:c.id });
+        if(error){ if(!isAuthError(error)) toast(error.message,'err'); return; }
+        toast('Prize redeemed','ok'); reload();
+      } });
+  });
+  host.querySelectorAll('[data-refuse]').forEach(b=>b.onclick=()=>{
+    const c=rows.find(x=>x.id===b.dataset.refuse); if(!c) return;
+    let note='';
+    confirmSheet({ title:'ID check failed?', okLabel:'Record ID check failed',
+      body:`<b>${esc(c.prize_name)}</b> is an 18+ prize. Recording a failed ID check forfeits it for <b>${esc((c.customers||{}).name||'this customer')}</b>; the period's forfeit rule decides whether it goes back into the pool. This cannot be undone.
+        <input class="input" id="cr-note" placeholder="Note (optional)" maxlength="300" style="margin-top:12px" />`,
+      onOk:async()=>{
+        const { error } = await sb.rpc('contest_refuse_claim',{ p_claim:c.id, p_note:note||null });
+        if(error){ if(!isAuthError(error)) toast(error.message,'err'); return; }
+        toast('Recorded — the prize is forfeited','ok'); reload();
+      } });
+    // confirmSheet empties itself before onOk runs, so the note is kept as it is typed.
+    const n=$('#cr-note'); if(n) n.addEventListener('input',()=>{ note=n.value.trim(); });
+  });
+}
+$('#cr-q').addEventListener('input', ()=>renderContestRewards());
+document.querySelectorAll('#cr-show button').forEach(b=>b.onclick=()=>{
+  CR_SHOW=b.dataset.v;
+  document.querySelectorAll('#cr-show button').forEach(x=>{ x.classList.toggle('on',x===b); x.setAttribute('aria-selected',x===b?'true':'false'); });
+  renderContestRewards();
+});
+// The customer editor's own list of this customer's prizes.
+async function loadCustRewards(c, hostId){
+  const host=document.getElementById(hostId); if(!host) return;
+  const { data, error } = await sb.from('contest_claims').select(CLAIM_COLS+',customers(name,phone,email,date_of_birth)')
+    .eq('customer_id', c.id).order('created_at',{ascending:false}).limit(50);
+  if(error){ host.innerHTML = missingSchema(error) ? '<div class="dim" style="font-size:13px">Spin the Wheel is not switched on (migration 0044).</div>' : `<div class="dim" style="font-size:13px">Could not load prizes.</div>`; return; }
+  if(!(data||[]).length){ host.innerHTML='<div class="dim" style="font-size:13px;padding:6px 0">No contest prizes.</div>'; return; }
+  host.innerHTML=`<table style="width:100%">${crRowsHtml(data,false)}</table>`;
+  wireClaimButtons(host, data, ()=>loadCustRewards(c, hostId));
+}
+
+/* ---------- Contest Setup ---------- */
+let CT_PERIODS=[], CT_PRIZES=[], CT_STATUS={}, CT_LOG_VIEW='claims';
+async function loadContestSetup(){
+  const [p, z, st] = await Promise.all([
+    sb.from('contest_periods').select('*').order('starts_at',{ascending:false}),
+    sb.from('contest_prizes').select('*').order('sort').order('created_at'),
+    sb.rpc('contest_period_status'),
+  ]);
+  const error=p.error||z.error||st.error;
+  if(error){
+    if(isAuthError(error)) return;
+    const msg=missingSchema(error)?'Run database migration 0044 (supabase/migrations) to switch on Spin the Wheel.':'Could not load the contest: '+error.message;
+    $('#ct-periods').innerHTML=migrationRow(msg,7); $('#ct-prizes').innerHTML=''; $('#ct-alerts').innerHTML=''; return;
+  }
+  CT_PERIODS=p.data||[]; CT_PRIZES=z.data||[];
+  CT_STATUS=Object.fromEntries((st.data||[]).map(r=>[r.id,r]));
+  renderContestAlerts(); renderContestPeriods(); renderContestPrizes(); fillLogPeriods(); loadContestLog();
+}
+function periodState(p){
+  const now=Date.now(), s=CT_STATUS[p.id]||{};
+  if(now < Date.parse(p.starts_at)) return ['info','Upcoming'];
+  if(now < Date.parse(p.ends_at)) return ['confirmed','Running'];
+  if(s.needs_resolution) return ['blocked','Needs a decision'];
+  return ['cancelled', p.resolved_at ? 'Ended · '+(p.resolution||'resolved') : 'Ended'];
+}
+const INCOMPLETE_TEXT = { draw:'Random draw among the last group’s entrants', carry:'Carried into the next period' };
+const FORFEIT_TEXT = { return:'Back into the pool', void:'Not awarded' };
+// An ended period with prizes nobody won: the decision the rules page promised, one button away.
+function renderContestAlerts(){
+  const due=CT_PERIODS.filter(p=>(CT_STATUS[p.id]||{}).needs_resolution);
+  $('#ct-alerts').innerHTML=due.map(p=>{ const n=CT_STATUS[p.id].unawarded;
+    return `<div class="card" style="border-color:rgba(240,82,61,.45);background:rgba(240,82,61,.05)">
+      <h3 class="card-h">“${esc(p.name)}” ended with ${n} prize${n===1?'':'s'} not yet won</h3>
+      <div class="sub">Its last group of spins was not complete. The rules page says: <b>${esc(INCOMPLETE_TEXT[p.incomplete_mode])}</b>. To use the other method instead, change it on the period first so the rules page says so too.</div>
+      <button class="btn btn-primary" data-resolve="${p.id}">${p.incomplete_mode==='draw'?'Run the random draw':'Carry into the next period'}</button>
+    </div>`; }).join('');
+  $('#ct-alerts').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>{
+    const p=CT_PERIODS.find(x=>x.id===b.dataset.resolve); if(!p) return;
+    const n=CT_STATUS[p.id].unawarded;
+    confirmSheet({ title:p.incomplete_mode==='draw'?'Run the random draw?':'Carry the prizes forward?',
+      okLabel:p.incomplete_mode==='draw'?'Run the draw':'Carry forward',
+      body:p.incomplete_mode==='draw'
+        ? `${n} winner${n===1?' is':'s are'} drawn at random from the entrants in the last group of “${esc(p.name)}” who did not win. Each winner answers the skill-testing question in My Account. This cannot be undone.`
+        : `${n} prize${n===1?'':'s'} move${n===1?'s':''} into the next contest period. That period must already be created. This cannot be undone.`,
+      onOk:async()=>{
+        const { data, error } = await sb.rpc('contest_resolve_period',{ p_period:p.id, p_mode:p.incomplete_mode });
+        if(error){ if(!isAuthError(error)) toast(error.message,'err'); return; }
+        toast(data && data.drawn!=null ? `Drew ${data.drawn} winner${data.drawn===1?'':'s'}` : `Carried ${data.carried} to ${data.to}`,'ok');
+        loadContestSetup();
+      } });
+  });
+}
+function renderContestPeriods(){
+  const tbl=$('#ct-periods');
+  tbl.innerHTML = CT_PERIODS.length ? `<thead><tr><th>Period</th><th>Runs (Central)</th><th>Winners</th><th>Period ends early</th><th>Forfeited prizes</th><th style="text-align:right">Spins</th><th>Status</th></tr></thead><tbody>${
+    CT_PERIODS.map(p=>{ const [cls,label]=periodState(p), s=CT_STATUS[p.id]||{};
+      return `<tr data-id="${p.id}" style="cursor:pointer">
+        <td><b>${esc(p.name)}</b>${p.carry_wins?`<div class="dim" style="font-size:12px">${p.carry_wins} extra prize${p.carry_wins===1?'':'s'} owed to the next group</div>`:''}</td>
+        <td class="muted" style="white-space:nowrap">${esc(fmtCT(p.starts_at))} – ${esc(fmtCT(p.ends_at))}</td>
+        <td style="white-space:nowrap">${p.wins_per_block} per ${p.block_size} spins</td>
+        <td class="muted">${esc(INCOMPLETE_TEXT[p.incomplete_mode])}</td>
+        <td class="muted">${esc(FORFEIT_TEXT[p.forfeit_mode])}</td>
+        <td style="text-align:right;font-family:'Space Grotesk';font-weight:700">${s.spins||0}</td>
+        <td><span class="pill ${cls}">${esc(label)}</span></td></tr>`; }).join('')}</tbody>` : emptyRow('No contest periods yet. Create one to open the wheel.',7);
+  tbl.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>openContestPeriod(CT_PERIODS.find(x=>x.id===tr.dataset.id)));
+}
+$('#ct-add-period').onclick=()=>openContestPeriod(null);
+function openContestPeriod(p){
+  const isNew=!p, spins=p?((CT_STATUS[p.id]||{}).spins||0):0;
+  p = p || { name:'', starts_at:null, ends_at:null, wins_per_block:1, block_size:20, incomplete_mode:'draw', forfeit_mode:'return' };
+  sheet.innerHTML=`
+    <button class="sheet-close" id="x">✕</button>
+    <h3>${isNew?'New contest period':esc(p.name)}</h3>
+    <div class="sub">${isNew?'Spins are accepted between the start and end. Times are Central Time.':`${spins} spin${spins===1?'':'s'} so far.`}</div>
+    <div class="field" style="margin-top:14px"><label>Name</label><input class="input" id="cp-name" value="${esc(p.name)}" placeholder="Fall 2026" /></div>
+    <div class="grid2">
+      <div class="field"><label>Starts (Central Time)</label><input class="input" id="cp-from" type="datetime-local" value="${isoToCTInput(p.starts_at)}" /></div>
+      <div class="field"><label>Ends (Central Time)</label><input class="input" id="cp-to" type="datetime-local" value="${isoToCTInput(p.ends_at)}" /></div>
+    </div>
+    <div class="sec-h">Odds</div>
+    <div class="grid2">
+      <div class="field"><label>Winning spins (X)</label><input class="input" id="cp-x" type="number" min="1" step="1" value="${p.wins_per_block}" /></div>
+      <div class="field"><label>Per group of spins (Y)</label><input class="input" id="cp-y" type="number" min="1" step="1" value="${p.block_size}" /></div>
+    </div>
+    <div class="dim" style="font-size:12.5px;margin-top:-4px" id="cp-odds"></div>
+    <div class="sec-h">Rules</div>
+    <div class="field"><label>If the period ends part-way through a group</label><select class="input" id="cp-inc">
+      <option value="draw" ${p.incomplete_mode==='draw'?'selected':''}>${INCOMPLETE_TEXT.draw}</option>
+      <option value="carry" ${p.incomplete_mode==='carry'?'selected':''}>${INCOMPLETE_TEXT.carry}</option></select></div>
+    <div class="field"><label>A prize forfeited (wrong answer, time ran out, failed ID check)</label><select class="input" id="cp-ff">
+      <option value="return" ${p.forfeit_mode==='return'?'selected':''}>Goes back into the pool — a later spin wins it</option>
+      <option value="void" ${p.forfeit_mode==='void'?'selected':''}>Is not awarded to anyone</option></select>
+      <div class="dim" style="font-size:12px;margin-top:6px">Both settings are printed on the rules page as soon as they are saved.</div></div>
+    ${p.resolved_at?`<div class="sub">Ended: ${esc(p.resolution||'resolved')} on ${esc(fmtCT(p.resolved_at))}.</div>`:''}
+    <button class="btn btn-primary" id="cp-save" style="width:100%;margin-top:16px">${isNew?'Create period':'Save changes'}</button>
+    ${!isNew && !spins?'<button class="btn btn-danger" id="cp-del" style="width:100%;margin-top:10px">Delete period</button>':''}`;
+  overlay.classList.add('show');
+  $('#x').onclick=closeSheet;
+  const odds=()=>{ const x=+$('#cp-x').value, y=+$('#cp-y').value;
+    $('#cp-odds').textContent = x>=1 && y>=x ? `Each spin has a ${x} in ${y} chance (${Math.round(x/y*1000)/10}%).` : 'Winning spins must be at least 1 and no more than the group size.'; };
+  $('#cp-x').oninput=odds; $('#cp-y').oninput=odds; odds();
+  $('#cp-save').onclick=async()=>{
+    const row={ name:$('#cp-name').value.trim(), starts_at:ctToISO($('#cp-from').value), ends_at:ctToISO($('#cp-to').value),
+      wins_per_block:Math.round(+$('#cp-x').value), block_size:Math.round(+$('#cp-y').value),
+      incomplete_mode:$('#cp-inc').value, forfeit_mode:$('#cp-ff').value };
+    if(!row.name){ toast('Give the period a name.','err'); return; }
+    if(!row.starts_at || !row.ends_at){ toast('Set a start and an end.','err'); return; }
+    if(Date.parse(row.ends_at)<=Date.parse(row.starts_at)){ toast('The end has to be after the start.','err'); return; }
+    if(!(row.wins_per_block>=1 && row.block_size>=row.wins_per_block)){ toast('Winning spins must be at least 1 and no more than the group size.','err'); return; }
+    $('#cp-save').disabled=true;
+    const { error } = isNew ? await sb.from('contest_periods').insert(row) : await sb.from('contest_periods').update(row).eq('id',p.id);
+    $('#cp-save').disabled=false;
+    if(error){ if(!isAuthError(error)) toast(/overlap|23P01|no_overlap/i.test(error.message+' '+(error.code||''))?'That overlaps another contest period.':error.message,'err'); return; }
+    closeSheet(); toast(isNew?'Period created':'Period saved','ok'); loadContestSetup();
+  };
+  if($('#cp-del')) $('#cp-del').onclick=()=>confirmSheet({ title:'Delete this period?', okLabel:'Delete period',
+    body:`Delete <b>${esc(p.name)}</b>? Nobody has spun in it yet.`,
+    onOk:async()=>{ if(await dbDelete('contest_periods',p.id)){ closeSheet(); toast('Period deleted','ok'); loadContestSetup(); } } });
+}
+function renderContestPrizes(){
+  const tbl=$('#ct-prizes'), live=CT_PRIZES.filter(z=>z.active && z.weight>0), total=live.reduce((s,z)=>s+z.weight,0);
+  tbl.innerHTML = CT_PRIZES.length ? `<thead><tr><th>Prize</th><th>Type</th><th style="text-align:right">Approx. value</th><th>Age</th><th style="text-align:right">Chance when a spin wins</th><th>Status</th></tr></thead><tbody>${
+    CT_PRIZES.map(z=>{ const on=z.active && z.weight>0;
+      return `<tr data-id="${z.id}" style="cursor:pointer">
+        <td><b>${esc(z.name)}</b>${z.description?`<div class="dim" style="font-size:12px">${esc(z.description)}</div>`:''}</td>
+        <td class="muted">${esc(PRIZE_KIND[z.kind]||z.kind)}</td>
+        <td style="text-align:right">${money(z.value_cents)}</td>
+        <td>${z.adults_only?'<span class="pill blocked">18+ only</span>':'<span class="dim">All ages</span>'}</td>
+        <td style="text-align:right;font-family:'Space Grotesk';font-weight:700">${on&&total?Math.round(z.weight/total*1000)/10+'%':'—'}<div class="dim" style="font-size:12px;font-weight:400">weight ${z.weight}</div></td>
+        <td><span class="pill ${on?'confirmed':'cancelled'}">${on?'Active':'Off'}</span></td></tr>`; }).join('')}</tbody>` : emptyRow('No prizes yet. A winning spin needs at least one active prize.',6);
+  tbl.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>openContestPrize(CT_PRIZES.find(x=>x.id===tr.dataset.id)));
+}
+$('#ct-add-prize').onclick=()=>openContestPrize(null);
+function openContestPrize(z){
+  const isNew=!z;
+  z = z || { name:'', description:'', kind:'credit', value_cents:1000, adults_only:false, weight:1, active:true, sort:CT_PRIZES.length };
+  sheet.innerHTML=`
+    <button class="sheet-close" id="x">✕</button>
+    <h3>${isNew?'New prize':esc(z.name)}</h3>
+    <div class="sub">Shown on the wheel, the rules page and the winner's Rewards.</div>
+    <div class="field" style="margin-top:14px"><label>Name</label><input class="input" id="pz-name" value="${esc(z.name)}" placeholder="$10 clubhouse credit" maxlength="80" /></div>
+    <div class="field"><label>Description</label><input class="input" id="pz-desc" value="${esc(z.description||'')}" placeholder="Optional" maxlength="200" /></div>
+    <div class="grid2">
+      <div class="field"><label>Type</label><select class="input" id="pz-kind">${Object.entries(PRIZE_KIND).map(([k,l])=>`<option value="${k}" ${z.kind===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div>
+      <div class="field"><label>Approx. retail value ($)</label><input class="input" id="pz-value" type="number" min="0" step="0.01" value="${(z.value_cents||0)/100}" /></div>
+    </div>
+    <div class="dim" style="font-size:12.5px;margin:-4px 0 10px" id="pz-kind-note"></div>
+    <div class="grid2">
+      <div class="field"><label>Chance weight</label><input class="input" id="pz-weight" type="number" min="0" step="1" value="${z.weight}" />
+        <div class="dim" style="font-size:12px;margin-top:6px">Relative to the other active prizes. 6 vs 3 vs 1 → 60% / 30% / 10%.</div></div>
+      <div class="field"><label>Order</label><input class="input" id="pz-sort" type="number" step="1" value="${z.sort||0}" /></div>
+    </div>
+    <label class="row" style="gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="pz-adult" ${z.adults_only?'checked':''} /> 18+ only — staff check ID when it is redeemed</label>
+    <label class="row" style="gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="pz-active" ${z.active?'checked':''} /> Active — can be won</label>
+    <button class="btn btn-primary" id="pz-save" style="width:100%;margin-top:16px">${isNew?'Add prize':'Save changes'}</button>
+    ${isNew?'':'<button class="btn btn-danger" id="pz-del" style="width:100%;margin-top:10px">Delete prize</button>'}`;
+  overlay.classList.add('show');
+  $('#x').onclick=closeSheet;
+  const kindNote=()=>{ const k=$('#pz-kind').value;
+    $('#pz-kind-note').textContent = k==='credit' ? 'A dollar credit the winner can spend on anything at the venue — never a free alcoholic drink.'
+      : k==='hours' ? 'Staff apply the hours discount at the venue when it is redeemed.' : ''; };
+  $('#pz-kind').onchange=kindNote; kindNote();
+  $('#pz-save').onclick=async()=>{
+    const row={ name:$('#pz-name').value.trim(), description:$('#pz-desc').value.trim()||null, kind:$('#pz-kind').value,
+      value_cents:Math.max(0,Math.round((+$('#pz-value').value||0)*100)), weight:Math.max(0,Math.round(+$('#pz-weight').value||0)),
+      sort:Math.round(+$('#pz-sort').value||0), adults_only:$('#pz-adult').checked, active:$('#pz-active').checked };
+    if(!row.name){ toast('Give the prize a name.','err'); return; }
+    $('#pz-save').disabled=true;
+    const { error } = isNew ? await sb.from('contest_prizes').insert(row) : await sb.from('contest_prizes').update(row).eq('id',z.id);
+    $('#pz-save').disabled=false;
+    if(error){ if(!isAuthError(error)) toast(error.message,'err'); return; }
+    closeSheet(); toast(isNew?'Prize added':'Prize saved','ok'); loadContestSetup();
+  };
+  if($('#pz-del')) $('#pz-del').onclick=()=>confirmSheet({ title:'Delete this prize?', okLabel:'Delete prize',
+    body:`Delete <b>${esc(z.name)}</b>? A prize somebody has already won cannot be deleted — switch it off instead.`,
+    onOk:async()=>{
+      const { error } = await sb.from('contest_prizes').delete().eq('id',z.id);
+      if(error){ if(!isAuthError(error)) toast(/foreign key|23503/i.test(error.message+' '+(error.code||''))?'This prize has been won before. Untick Active instead.':error.message,'err'); return; }
+      closeSheet(); toast('Prize deleted','ok'); loadContestSetup();
+    } });
+}
+
+/* ---------- Logs and CSV ---------- */
+function fillLogPeriods(){
+  const sel=$('#ct-log-period'), keep=sel.value, now=Date.now();
+  sel.innerHTML=CT_PERIODS.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('') || '<option value="">No periods</option>';
+  const running=CT_PERIODS.find(p=>Date.parse(p.starts_at)<=now && now<Date.parse(p.ends_at));
+  sel.value = CT_PERIODS.some(p=>p.id===keep) ? keep : (running ? running.id : (CT_PERIODS[0]||{}).id || '');
+}
+$('#ct-log-period').onchange=()=>loadContestLog();
+document.querySelectorAll('#ct-log-view button').forEach(b=>b.onclick=()=>{
+  CT_LOG_VIEW=b.dataset.v;
+  document.querySelectorAll('#ct-log-view button').forEach(x=>{ x.classList.toggle('on',x===b); x.setAttribute('aria-selected',x===b?'true':'false'); });
+  loadContestLog();
+});
+async function contestClaims(periodId, limit){
+  return sb.from('contest_claims').select(CLAIM_COLS+',customers(name,phone,email,date_of_birth)')
+    .eq('period_id',periodId).order('created_at',{ascending:false}).limit(limit);
+}
+async function contestSpins(periodId, limit){
+  const [s, b] = await Promise.all([
+    sb.from('contest_spins').select('id,created_at,block_id,position,won,prize_id,ip,customer_id,customers(name,phone,email)')
+      .eq('period_id',periodId).order('created_at',{ascending:false}).limit(limit),
+    sb.rpc('contest_block_log',{ p_period:periodId }),
+  ]);
+  const seq=Object.fromEntries((b.data||[]).map(x=>[x.id,x.seq]));
+  return { error:s.error||b.error, data:(s.data||[]).map(r=>({ ...r, seq:seq[r.block_id] })) };
+}
+const prizeName = id => (CT_PRIZES.find(z=>z.id===id)||{}).name || '';
+async function loadContestLog(){
+  const tbl=$('#ct-log'), pid=$('#ct-log-period').value;
+  if(!pid){ tbl.innerHTML=emptyRow('No periods yet.',6); return; }
+  tbl.innerHTML=emptyRow('Loading…',6);
+  if(CT_LOG_VIEW==='claims'){
+    const { data, error } = await contestClaims(pid, 500);
+    if(error){ if(!isAuthError(error)) tbl.innerHTML=emptyRow('Could not load: '+error.message,8); return; }
+    tbl.innerHTML=(data||[]).length ? `<thead><tr><th>Won</th><th>Winner</th><th>Prize</th><th>Question</th><th>Their answer</th><th>Result</th><th>Redeemed</th></tr></thead><tbody>${
+      data.map(c=>{ const [cls,label]=claimState(c), cu=c.customers||{};
+        return `<tr><td class="muted" style="white-space:nowrap">${esc(fmtCT(c.created_at))}${c.source==='draw'?'<div class="dim" style="font-size:12px">Draw</div>':''}</td>
+          <td><b>${esc(cu.name||'—')}</b><div class="dim" style="font-size:12px">${esc(cu.phone||'')}</div></td>
+          <td>${esc(c.prize_name)}${c.prize_adults_only?' <span class="pill blocked">18+</span>':''}</td>
+          <td style="white-space:nowrap">${c.question?esc(c.question)+` <span class="dim">= ${esc(contestAnswerOf(c.question))}</span>`:'<span class="dim">Not shown yet</span>'}</td>
+          <td>${c.given_answer!=null?esc(c.given_answer):'<span class="dim">—</span>'}${c.answered_at?`<div class="dim" style="font-size:12px">${esc(fmtCT(c.answered_at))}</div>`:''}</td>
+          <td><span class="pill ${cls}">${esc(label)}</span>${c.returned_to_pool?'<div class="dim" style="font-size:12px">Returned to the pool</div>':''}</td>
+          <td class="muted" style="white-space:nowrap">${c.redeemed_at?esc(fmtCT(c.redeemed_at))+(c.redeemed_by_email?`<div class="dim" style="font-size:12px">${esc(c.redeemed_by_email)}</div>`:''):'—'}</td></tr>`; }).join('')}</tbody>` : emptyRow('Nobody has won in this period yet.',7);
+    return;
+  }
+  if(CT_LOG_VIEW==='spins'){
+    const { data, error } = await contestSpins(pid, 500);
+    if(error){ if(!isAuthError(error)) tbl.innerHTML=emptyRow('Could not load: '+error.message,6); return; }
+    tbl.innerHTML=data.length ? `<thead><tr><th>Time</th><th>Customer</th><th style="text-align:right">Group</th><th style="text-align:right">Position</th><th>Result</th><th>IP</th></tr></thead><tbody>${
+      data.map(r=>`<tr><td class="muted" style="white-space:nowrap">${esc(fmtCT(r.created_at))}</td>
+        <td><b>${esc((r.customers||{}).name||'—')}</b><div class="dim" style="font-size:12px">${esc((r.customers||{}).phone||'')}</div></td>
+        <td style="text-align:right">${r.seq||'—'}</td><td style="text-align:right">${r.position}</td>
+        <td>${r.won?`<span class="pill confirmed">Won</span> ${esc(prizeName(r.prize_id))}`:'<span class="dim">No win</span>'}</td>
+        <td class="dim" style="font-size:12px">${esc(r.ip||'')}</td></tr>`).join('')}</tbody>` : emptyRow('No spins in this period yet.',6);
+    return;
+  }
+  const { data, error } = await sb.rpc('contest_block_log',{ p_period:pid });
+  if(error){ if(!isAuthError(error)) tbl.innerHTML=emptyRow('Could not load: '+error.message,6); return; }
+  tbl.innerHTML=(data||[]).length ? `<thead><tr><th style="text-align:right">Group</th><th style="text-align:right">Spins</th><th style="text-align:right">Winners</th><th>Winning positions</th><th>Opened</th><th>Closed</th></tr></thead><tbody>${
+    data.map(b=>`<tr><td style="text-align:right;font-weight:700">${b.seq}</td><td style="text-align:right">${b.spins_taken} / ${b.size}</td>
+      <td style="text-align:right">${b.wins}</td>
+      <td>${b.winning_positions?esc(b.winning_positions.join(', ')):'<span class="dim">Hidden until the group closes</span>'}</td>
+      <td class="muted" style="white-space:nowrap">${esc(fmtCT(b.created_at))}</td><td class="muted" style="white-space:nowrap">${b.closed_at?esc(fmtCT(b.closed_at)):'Open'}</td></tr>`).join('')}</tbody>` : emptyRow('No groups yet — the first spin opens one.',6);
+}
+const periodSlug = () => { const p=CT_PERIODS.find(x=>x.id===$('#ct-log-period').value); return p ? p.name.replace(/[^\w]+/g,'-').toLowerCase() : 'contest'; };
+$('#ct-csv-winners').onclick=async()=>{
+  const pid=$('#ct-log-period').value; if(!pid) return;
+  const { data, error } = await contestClaims(pid, 10000);
+  if(error){ if(!isAuthError(error)) toast(error.message,'err'); return; }
+  downloadCSV(`contest-winners-${periodSlug()}.csv`, toCSV([
+    ['won_at',r=>r.created_at], ['source',r=>r.source], ['customer',r=>(r.customers||{}).name], ['phone',r=>(r.customers||{}).phone],
+    ['email',r=>(r.customers||{}).email], ['date_of_birth',r=>(r.customers||{}).date_of_birth], ['prize',r=>r.prize_name],
+    ['prize_type',r=>r.prize_kind], ['approx_value',r=>(r.prize_value_cents/100).toFixed(2)], ['adults_only',r=>r.prize_adults_only?'yes':'no'],
+    ['question',r=>r.question], ['correct_answer',r=>contestAnswerOf(r.question)], ['given_answer',r=>r.given_answer],
+    ['question_shown_at',r=>r.question_issued_at], ['answered_at',r=>r.answered_at], ['status',r=>r.status],
+    ['returned_to_pool',r=>r.returned_to_pool==null?'':(r.returned_to_pool?'yes':'no')],
+    ['redeemed_at',r=>r.redeemed_at], ['redeemed_by',r=>r.redeemed_by_email], ['note',r=>r.refused_note],
+  ], data||[]));
+};
+$('#ct-csv-spins').onclick=async()=>{
+  const pid=$('#ct-log-period').value; if(!pid) return;
+  const { data, error } = await contestSpins(pid, 10000);
+  if(error){ if(!isAuthError(error)) toast(error.message,'err'); return; }
+  downloadCSV(`contest-spins-${periodSlug()}.csv`, toCSV([
+    ['spun_at',r=>r.created_at], ['customer',r=>(r.customers||{}).name], ['phone',r=>(r.customers||{}).phone], ['email',r=>(r.customers||{}).email],
+    ['period_id',()=>pid], ['group',r=>r.seq], ['group_id',r=>r.block_id], ['position',r=>r.position],
+    ['result',r=>r.won?'win':'no win'], ['prize',r=>prizeName(r.prize_id)], ['ip',r=>r.ip], ['spin_id',r=>r.id],
+  ], data));
+};
 </script>
 </body>
 </html>
