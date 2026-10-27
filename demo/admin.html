@@ -3463,6 +3463,7 @@ function openLeagueEditor(x){
       details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value, rules:$('#li-rules').value,
         settings:$('#li-settings').value, challenges:$('#li-challenges').value,
         schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value,
+        stages:info.stages,   // the season's scoring stages are not on this form: keep them as they are
         dates:{ regularEnd:$('#li-regend').value, playoffsStart:$('#li-playoffs').value, rosterLockWeek:$('#li-lock').value, feesFirst:$('#li-fees').checked,
           qualifiersEnd:$('#li-qualend').value, playoffMakeups:$('#li-pomakeups').checked } });
       const kd=details.dates||{};
@@ -4492,7 +4493,11 @@ async function leagueHours(ctx){
   $('#lh-checked').onchange=e=>{ HOURS_CHECKED_ONLY=e.target.checked; leagueHours(ctx); };
 }
 
-function leagueStandingsView({ league, teams, members, results }){
+function leagueStandingsView(ctx){
+  const { league, teams, members, results }=ctx;
+  // A staged season (leagues.details.stages — the 2026-27 Winter League) has its own standings.
+  const staged=LG().stagedStandings({ league, teams, results, todayISO:todayISO() });
+  if(staged) return leagueStagedView(ctx, staged);
   const rows=LG().standings({ league, teams, members, results });
   const strokes=league.scoring==='strokes';
   const active=members.filter(x=>x.status==='active');
@@ -4503,6 +4508,65 @@ function leagueStandingsView({ league, teams, members, results }){
       <td style="text-align:right;font-weight:700">${r.played?(strokes?r.average:r.total):'—'}</td><td style="text-align:right">${r.best==null?'—':r.best}</td></tr>`).join('')}</tbody></table></div>
     <div class="foot-note">${strokes?'Lowest average wins, so a missed week doesn’t help anyone.':'Most total points wins.'} Players see this table on My Account.</div>`
     : '<div class="empty">No results yet. Enter the first week on the Results tab.</div>';
+}
+
+// The staged season: qualifier points (weeks 1–8) with the division each team goes into, then each
+// division's own standings — the ranking weeks' average seeds the playoffs, and the final is the
+// ranking and playoff averages averaged. Ties for a top-three place are played off (tiebreak_strokes).
+function leagueStagedView(ctx, s){
+  const { league, teams, edit, reload }=ctx;
+  const has46 = !teams.length || ('division' in teams[0]);     // migration 0046
+  const wkNo = n => `Wk ${n}`;
+  const fmt = v => v==null ? '—' : String(v);
+  const st = LG().normalizeStages(league.details.stages);
+  const span = ([a,b]) => `weeks ${a}–${b}`;
+  const qClosed = s.qualifiers.closed, k = LG().leagueDates(league);
+  const cell = w => w.pending ? '<span class="dim">—</span>'
+    : w.missed ? `<span class="dim" title="Did not play: last place">Missed</span><div style="font-size:11.5px">${w.points} pts</div>`
+    : `<b>${LG().ordinal(w.place)}</b><div class="dim" style="font-size:11.5px">${w.strokes} · ${w.points} pts</div>`;
+  const divSel = r => has46 && edit ? `<select class="input lgs-div" data-team="${esc(r.key)}" style="padding:5px 8px;font-size:12.5px;min-width:96px">
+      <option value="" ${!r.division?'selected':''}>—</option><option value="1" ${r.division===1?'selected':''}>Division 1</option><option value="2" ${r.division===2?'selected':''}>Division 2</option></select>`
+    : (r.division ? `Division ${r.division}` : '<span class="dim">—</span>');
+  const qual = `<div class="card" style="margin-bottom:16px">
+    <h3 class="card-h">Qualifiers · ${span(st.qualifiers)}</h3>
+    <div class="sub">Each week teams are placed by strokes, lowest first, and score points by place (1st 100, 2nd 98 … 61st–100th 50). Tied teams share the place.
+      ${qClosed ? `The qualifiers closed on ${esc(shortDate2(k.qualifiersEnd))}: a week a team never played scores last place.`
+        : `Provisional until ${k.qualifiersEnd?esc(shortDate2(k.qualifiersEnd)):'the qualifiers close'} — a missed week can still be caught up, and scores last place after that.`}
+      ${has46 ? 'Put each team in a division here once the qualifiers are done.' : '<b>Run migration 0046</b> to put teams in divisions.'}</div>
+    <div class="tbl-scroll"><table><thead><tr><th style="width:44px">#</th><th>Team</th>${s.qualifiers.weeks.map(n=>`<th style="text-align:center">${wkNo(n)}</th>`).join('')}<th style="text-align:right">Points</th><th>Division</th></tr></thead>
+    <tbody>${s.qualifiers.rows.map(r=>`<tr><td><b>${r.total?r.rank:'—'}</b></td><td><b>${esc(r.name)}</b></td>
+      ${r.weeks.map(w=>`<td style="text-align:center">${cell(w)}</td>`).join('')}
+      <td style="text-align:right;font-weight:700">${r.total}</td><td>${divSel(r)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  const flag = r => r.tie==='playoff' ? '<span class="pill blocked">Tie — play-off needed</span>'
+    : r.wonTiebreak ? `<span class="pill info">Play-off ${fmt(r.tiebreak)}</span>` : r.tie==='shared' ? '<span class="pill cancelled">Shared</span>' : '';
+  const tbInput = r => edit && has46 && (r.tie==='playoff' || r.wonTiebreak)
+    ? `<input class="input lgs-tb" data-team="${esc(r.key)}" type="number" step="0.5" min="0" value="${r.tiebreak!=null?r.tiebreak:''}" placeholder="Play-off strokes" style="max-width:130px;padding:5px 8px;font-size:12.5px" />` : '';
+  const divCard = d => `<div class="card" style="margin-bottom:16px">
+    <h3 class="card-h">Division ${d.division}</h3>
+    <div class="sub">Final = (average of ${span(st.ranking)} + average of ${span(st.playoffs)}) ÷ 2. Lowest wins.
+      A tie for 1st, 2nd or 3rd is played off — enter the play-off strokes and the lowest takes the higher place. Any other tie goes to the better playoff average.
+      ${s.seasonOver ? 'The season is over: teams that missed a week from week '+st.ranking[0]+' on are listed under Did not finish.' : 'Teams can catch up missed weeks until the season ends.'}</div>
+    <div class="tbl-scroll"><table><thead><tr><th style="width:44px">#</th><th>Team</th><th style="text-align:right">Wks ${st.ranking[0]}–${st.ranking[1]} avg</th><th style="text-align:right">Playoffs avg</th><th style="text-align:right">Final</th><th></th></tr></thead>
+    <tbody>${d.standings.map(r=>`<tr><td><b>${r.final==null?'—':r.rank}</b></td><td><b>${esc(r.name)}</b></td>
+      <td style="text-align:right">${fmt(r.rankingAvg)}<div class="dim" style="font-size:11.5px">${r.rankingPlayed} of ${s.weeksOf.ranking.length}</div></td>
+      <td style="text-align:right">${fmt(r.playoffAvg)}<div class="dim" style="font-size:11.5px">${r.playoffPlayed} of ${s.weeksOf.playoffs.length}</div></td>
+      <td style="text-align:right;font-weight:700">${fmt(r.final)}</td><td style="white-space:nowrap">${flag(r)} ${tbInput(r)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">No teams in this division yet.</td></tr>'}</tbody></table></div>
+    ${d.dnf.length?`<div class="sec-h">Did not finish</div><div class="tbl-scroll"><table><tbody>${d.dnf.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td class="dim" style="text-align:right">${r.rankingPlayed+r.playoffPlayed} of ${s.weeksOf.ranking.length+s.weeksOf.playoffs.length} weeks played</td></tr>`).join('')}</tbody></table></div>`:''}
+    <div class="sec-h">Playoff seeding · ${span(st.ranking)} average</div>
+    <div class="tbl-scroll"><table><tbody>${d.seeding.map(r=>`<tr><td style="width:44px"><b>${r.rankingAvg==null?'—':r.rank}</b></td><td>${esc(r.name)}</td><td style="text-align:right">${fmt(r.rankingAvg)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  $('#lo-body').innerHTML = (s.undivided.length ? `<div class="card" style="margin-bottom:16px;border-color:rgba(178,106,21,.45)"><b>${s.undivided.length} team${s.undivided.length===1?' has':'s have'} no division yet:</b> ${s.undivided.map(t=>esc(t.name)).join(', ')}. Set it in the Qualifiers table below.</div>` : '')
+    + s.divisions.map(divCard).join('') + qual
+    + '<div class="foot-note">Players see their own standings on My Account.</div>';
+  enhanceSelects($('#lo-body'));
+  $('#lo-body').querySelectorAll('.lgs-div').forEach(sel=>sel.onchange=async()=>{
+    const v=sel.value?Number(sel.value):null;
+    if(await dbUpdate('league_teams', sel.dataset.team, { division:v })){ toast(v?`Moved to Division ${v}`:'Division cleared','ok'); reload(); }
+  });
+  $('#lo-body').querySelectorAll('.lgs-tb').forEach(inp=>inp.onchange=async()=>{
+    const v=inp.value===''?null:Number(inp.value);
+    if(v!=null && !(v>=0)){ toast('Enter the play-off strokes as a number.','err'); return; }
+    if(await dbUpdate('league_teams', inp.dataset.team, { tiebreak_strokes:v })){ toast('Play-off strokes saved','ok'); reload(); }
+  });
 }
 
 $('#lea-add').onclick=()=>openLeagueEditor(null);

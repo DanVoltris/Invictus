@@ -832,6 +832,7 @@ function teamCard(t, idx, opts){
   const weekRows = weeks.map(w => {
     const what = w.round
       ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${(w.round.booking_date && L.weekIn(lg, w.round.booking_date) !== w.start) ? ' · make-up' : ''}${w.score!=null ? ` · <b>${esc(w.score)}</b>` : ''}`
+      : w.catchup ? 'Catch-up week: only for a missed round'
       : w.off ? 'Break: no round needed'
       : w.missed ? ((kd.regularEnd && today > kd.regularEnd) ? 'Missed, not played' : 'Missed: to make up')
       : w.current ? 'Not booked yet'
@@ -846,7 +847,34 @@ function teamCard(t, idx, opts){
   }).join('');
 
   const by = lg.team_mode === false ? 'Player' : 'Team';
-  const table = standings.some(r => r.played) ? `<div class="tbl-wrap"><table class="lg-table">
+  // A staged season (the 2026-27 Winter League): qualifier points, then the team's own division.
+  const sg = t.staged || null;
+  const val = v => v == null ? '—' : v;
+  const youName = r => `${esc(r.name)}${r.you?' <span style="color:var(--dim)">(your team)</span>':''}`;
+  const stagedTable = !sg ? '' : (() => {
+    const q = sg.qualifiers, [qa, qb] = sg.stages.qualifiers, [ra, rb] = sg.stages.ranking, [pa, pb] = sg.stages.playoffs;
+    const me = q.rows.find(r => r.you);
+    const myWeeks = me && me.weeks ? `<div class="chips" style="margin:6px 0 10px">${me.weeks.map(w => `<span class="chip">Wk ${w.week}: ${
+      w.pending ? 'not played yet' : w.missed ? `missed · ${w.points} pts` : `${L.ordinal(w.place)} · ${w.points} pts`}</span>`).join('')}</div>` : '';
+    const qualTable = `<div class="team-h">Qualifiers · weeks ${qa}–${qb}</div>
+      <div class="sub" style="margin:2px 0 6px">Each week teams are placed by strokes, lowest first: 1st 100 points, 2nd 98, and down from there. ${q.closed ? 'The qualifiers are over.' : 'A missed week can be caught up until the qualifiers close; after that it scores last place.'}</div>
+      ${myWeeks}
+      <div class="tbl-wrap"><table class="lg-table"><thead><tr><th>#</th><th>Team</th><th class="num">Played</th><th class="num">Points</th></tr></thead>
+      <tbody>${q.rows.map(r => `<tr class="${r.you?'is-you':''}"><td>${r.total ? r.rank : '—'}</td><td>${youName(r)}</td><td class="num">${r.played}</td><td class="num">${r.total}</td></tr>`).join('')}</tbody></table></div>`;
+    if (!sg.divisionTable) return sg.phase === 'divisions'
+      ? `<div class="lg-note" style="margin:6px 0 10px">The divisions are being set. Your team’s division will show here.</div>${qualTable}` : qualTable;
+    const d = sg.divisionTable;
+    const flag = r => r.tie === 'playoff' ? ' <span class="pill warn">Tie — play-off</span>' : r.tie === 'shared' ? ' <span class="pill off">Shared</span>' : '';
+    return `<div class="team-h">Division ${sg.division}</div>
+      <div class="sub" style="margin:2px 0 6px">Final = (average of weeks ${ra}–${rb} + average of weeks ${pa}–${pb}) ÷ 2. Lowest wins.</div>
+      <div class="tbl-wrap"><table class="lg-table"><thead><tr><th>#</th><th>Team</th><th class="num">Wks ${ra}–${rb}</th><th class="num">Playoffs</th><th class="num">Final</th></tr></thead>
+      <tbody>${d.standings.map(r => `<tr class="${r.you?'is-you':''}"><td>${r.final == null ? '—' : r.rank}</td><td>${youName(r)}${flag(r)}</td>
+        <td class="num">${val(r.rankingAvg)}</td><td class="num">${val(r.playoffAvg)}</td><td class="num">${val(r.final)}</td></tr>`).join('')}</tbody></table></div>
+      ${d.dnf.length ? `<div class="team-h">Did not finish</div><div class="chips">${d.dnf.map(r => `<span class="chip${r.you?' is-you':''}">${esc(r.name)}</span>`).join('')}</div>` : ''}
+      <div class="team-h">Playoff seeding · weeks ${ra}–${rb}</div>
+      <div class="tbl-wrap"><table class="lg-table"><tbody>${d.seeding.map(r => `<tr class="${r.you?'is-you':''}"><td>${r.rankingAvg == null ? '—' : r.rank}</td><td>${youName(r)}</td><td class="num">${val(r.rankingAvg)}</td></tr>`).join('')}</tbody></table></div>`;
+  })();
+  const table = sg ? stagedTable : standings.some(r => r.played) ? `<div class="tbl-wrap"><table class="lg-table">
       <thead><tr><th>#</th><th>${by}</th><th class="num">Played</th><th class="num">${strokes ? 'Average' : 'Points'}</th><th class="num">Best</th></tr></thead>
       <tbody>${standings.map(r => { const you = r.you || r.key === team.id;
         return `<tr class="${you?'is-you':''}"><td>${r.played ? r.rank : '—'}</td><td>${esc(r.name)}${you?' <span style="color:var(--dim)">(your team)</span>':''}</td>

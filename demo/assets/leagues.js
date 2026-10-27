@@ -392,7 +392,8 @@
     return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), eligibility: list(d.eligibility), format: list(d.format), rules: ruleSections, settings,
       challenges: list(d.challenges), schedule, notice: para(d.notice, INFO_LIMITS.notice),
       awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize),
-      ...(Object.keys(dates).length ? { dates } : {}) };
+      ...(Object.keys(dates).length ? { dates } : {}),
+      ...(normalizeStages(d.stages) ? { stages: normalizeStages(d.stages) } : {}) };
   }
   // The rules back as the text the manager edits: "1. Heading", its rules one per line, a blank
   // line between sections. normalizeDetails({ rules: rulesText(x) }) gives x back.
@@ -427,8 +428,123 @@
     return out;
   }
 
+  /* ----- A staged season (leagues.details.stages) — the 2026-27 Winter League's format -----
+       qualifiers  [from, to]  weeks scored by placing: each week, lowest strokes first, points by place
+       ranking     [from, to]  weeks whose average strokes seed the playoffs (bragging rights)
+       playoffs    [from, to]  weeks whose average strokes, averaged with the ranking one, decide it
+       points      [[upToPlace, points], …]  1st 100, 2nd 98 … 61st–100th 50
+     After the qualifiers the managers put each team in a division (league_teams.division); from then
+     each division is a league of its own. A league without `stages` is scored by standings(). */
+  const QUAL_POINTS = [[1, 100], [2, 98], [3, 96], [4, 94], [5, 92], [10, 90], [15, 85], [20, 80], [25, 75],
+    [30, 70], [40, 65], [50, 60], [60, 55], [100, 50]];
+  function normalizeStages(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const span = (v) => { const a = Math.floor(Number(v && v[0])), b = Math.floor(Number(v && v[1]));
+      return a >= 1 && b >= a && b <= MAX_WEEKS ? [a, b] : null; };
+    const qualifiers = span(raw.qualifiers), ranking = span(raw.ranking), playoffs = span(raw.playoffs);
+    if (!qualifiers || !ranking || !playoffs) return null;
+    const pts = (Array.isArray(raw.points) ? raw.points : QUAL_POINTS)
+      .map((r) => [Math.floor(Number(r && r[0])), Number(r && r[1])])
+      .filter(([u, p]) => u >= 1 && Number.isFinite(p)).sort((a, b) => a[0] - b[0]);
+    return { qualifiers, ranking, playoffs, points: pts.length ? pts : QUAL_POINTS };
+  }
+  const pointsFor = (st, place) => { for (const [upTo, pts] of st.points) if (place <= upTo) return pts; return 0; };
+  // Competition ranking (1, 2, 2, 4) over a list already in order; `same(a, b)` says two share a place.
+  const placeRows = (list, same) => { let place = 0; return list.map((r, i) => {
+    if (i === 0 || !same(list[i - 1], r)) place = i + 1; return { ...r, rank: place }; }); };
+  const avgOf = (vals) => (vals.length ? round2(vals.reduce((a, b) => a + b, 0) / vals.length) : null);
+
+  //   teams    [{ id, name, division?, tiebreak_strokes? }]
+  //   results  league_results rows [{ team_id, score, played_on }] — filed under the week they count for
+  // → null when the league has no stages, else
+  //   { phase: 'qualifiers' | 'divisions', qualifiers: { weeks, closed, rows }, divisions: [{ division,
+  //     seeding, standings, dnf }], undivided, seasonOver }
+  function stagedStandings({ league, teams = [], results = [], todayISO }) {
+    const st = normalizeStages(league && league.details && league.details.stages);
+    if (!st) return null;
+    const all = weeks(league), numOf = new Map(all.map((w) => [w.start, w.number]));
+    const k = leagueDates(league);
+    const qualClosed = !!k.qualifiersEnd && !!todayISO && todayISO > k.qualifiersEnd;
+    const seasonOver = !!league.season_end && !!todayISO && todayISO > league.season_end;
+    const inSpan = (n, [a, b]) => n >= a && n <= b;
+    const playable = (span) => all.filter((w) => inSpan(w.number, span) && !w.off).map((w) => w.number);
+    const qWeeks = playable(st.qualifiers), rWeeks = playable(st.ranking), pWeeks = playable(st.playoffs);
+
+    // strokes[teamId] → Map(week number → strokes); one score a team a week.
+    const strokes = new Map(teams.map((t) => [t.id, new Map()]));
+    for (const r of results) {
+      const m = r && strokes.get(r.team_id), n = r && numOf.get(weekIn(league, r.played_on)), s = Number(r && r.score);
+      if (m && n && Number.isFinite(s) && !m.has(n)) m.set(n, s);
+    }
+
+    // Qualifiers: each week placed by strokes, points by place. A team with no round that week has
+    // nothing yet while the week can still be caught up; once the qualifiers close it takes the place
+    // after everyone who did play — last-place points.
+    const weekly = new Map(qWeeks.map((n) => {
+      const played = teams.filter((t) => strokes.get(t.id).has(n)).map((t) => ({ id: t.id, s: strokes.get(t.id).get(n) }))
+        .sort((a, b) => a.s - b.s);
+      const m = new Map(placeRows(played, (a, b) => a.s === b.s).map((p) => [p.id, { strokes: p.s, place: p.rank, points: pointsFor(st, p.rank) }]));
+      if (qualClosed) {
+        const last = played.length + 1;
+        teams.forEach((t) => { if (!m.has(t.id)) m.set(t.id, { strokes: null, place: last, points: pointsFor(st, last), missed: true }); });
+      }
+      return [n, m];
+    }));
+    const qualRows = placeRows(teams.map((t) => {
+      const wk = qWeeks.map((n) => ({ week: n, ...(weekly.get(n).get(t.id) || { pending: true }) }));
+      return { key: t.id, name: t.name, division: t.division || null, weeks: wk,
+        played: wk.filter((x) => x.strokes != null).length, total: wk.reduce((sum, x) => sum + (x.points || 0), 0) };
+    }).sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name))), (a, b) => a.total === b.total);
+
+    // Divisions: a league of their own from the ranking weeks on.
+    const divisionNos = [...new Set(teams.map((t) => t.division).filter((d) => d))].sort((a, b) => a - b);
+    const divisions = divisionNos.map((d) => {
+      const rows = teams.filter((t) => t.division === d).map((t) => {
+        const m = strokes.get(t.id), r = rWeeks.filter((n) => m.has(n)), p = pWeeks.filter((n) => m.has(n));
+        const rankingAvg = avgOf(r.map((n) => m.get(n))), playoffAvg = avgOf(p.map((n) => m.get(n)));
+        const tb = Number(t.tiebreak_strokes);
+        return { key: t.id, name: t.name, rankingAvg, rankingPlayed: r.length, playoffAvg, playoffPlayed: p.length,
+          final: rankingAvg != null && playoffAvg != null ? round2((rankingAvg + playoffAvg) / 2) : null,
+          complete: r.length === rWeeks.length && p.length === pWeeks.length,
+          ...(t.tiebreak_strokes != null && Number.isFinite(tb) ? { tiebreak: tb } : {}) };
+      });
+      const byNull = (x) => (x == null ? Infinity : x);
+      const seeding = placeRows([...rows].sort((a, b) => byNull(a.rankingAvg) - byNull(b.rankingAvg) || String(a.name).localeCompare(String(b.name))),
+        (a, b) => a.rankingAvg != null && a.rankingAvg === b.rankingAvg);
+      // Once the season is over a team that missed any week from the ranking weeks on did not finish.
+      const finishers = seasonOver ? rows.filter((r) => r.complete) : rows;
+      const dnf = seasonOver ? rows.filter((r) => !r.complete).sort((a, b) => String(a.name).localeCompare(String(b.name))) : [];
+      // Lowest final wins. Equal finals: for a top-three place the teams play it off (tiebreak strokes,
+      // lowest first; until entered they are flagged); below that the better playoff average wins.
+      const sorted = [...finishers].sort((a, b) => byNull(a.final) - byNull(b.final) || String(a.name).localeCompare(String(b.name)));
+      const out = []; let i = 0;
+      while (i < sorted.length) {
+        let j = i; while (j + 1 < sorted.length && sorted[j + 1].final != null && sorted[j + 1].final === sorted[i].final) j++;
+        const group = sorted.slice(i, j + 1), place = i + 1;
+        if (group.length > 1 && place <= 3) {
+          const settled = group.every((g) => g.tiebreak != null) && new Set(group.map((g) => g.tiebreak)).size === group.length;
+          if (settled) group.sort((a, b) => a.tiebreak - b.tiebreak).forEach((g, x) => out.push({ ...g, rank: place + x, wonTiebreak: true }));
+          else group.forEach((g) => out.push({ ...g, rank: place, tie: 'playoff' }));
+        } else if (group.length > 1) {
+          placeRows(group.sort((a, b) => byNull(a.playoffAvg) - byNull(b.playoffAvg)), (a, b) => a.playoffAvg === b.playoffAvg)
+            .forEach((g) => out.push({ ...g, rank: place + g.rank - 1, ...(group.filter((h) => h.playoffAvg === g.playoffAvg).length > 1 ? { tie: 'shared' } : {}) }));
+        } else out.push({ ...group[0], rank: place });
+        i = j + 1;
+      }
+      return { division: d, seeding, standings: out, dnf };
+    });
+    return {
+      phase: divisions.length ? 'divisions' : 'qualifiers',
+      qualifiers: { weeks: qWeeks, closed: qualClosed, rows: qualRows },
+      divisions,
+      undivided: divisions.length ? teams.filter((t) => !t.division).map((t) => ({ key: t.id, name: t.name })) : [],
+      seasonOver, weeksOf: { ranking: rWeeks, playoffs: pWeeks },
+    };
+  }
+
   root.InvictusLeagues = { DAY_NAMES, timeLabel, scheduleLabel, weekOf, weeks, currentWeek, progress,
     teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName,
     seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
-    weekIn, weekStartOf, rulesText, roundWeek, leagueDates, rosterLocked, inPlayoffs, roundTarget };
+    weekIn, weekStartOf, rulesText, roundWeek, leagueDates, rosterLocked, inPlayoffs, roundTarget,
+    normalizeStages, stagedStandings, QUAL_POINTS };
 })(typeof window !== 'undefined' ? window : globalThis);
