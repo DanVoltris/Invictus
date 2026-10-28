@@ -22,8 +22,17 @@
   header a{color:var(--muted);text-decoration:none;font-size:13px}
   header a:hover{color:var(--white)}
   .title{text-align:center;font-size:22px;margin:2px 0 2px}
-  .status{text-align:center;color:var(--muted);font-size:13.5px;min-height:19px;margin-bottom:6px}
-  .status b{font-family:'Space Grotesk';color:var(--white)}
+  /* The line under the title: a banner, coloured by what it says. */
+  .status{text-align:center;font-size:16px;line-height:1.4;font-weight:600;margin:6px auto 8px;max-width:440px;
+    padding:11px 16px;border-radius:12px;background:var(--surface-2);color:var(--white)}
+  .status:empty{display:none}
+  .status b{font-family:'Space Grotesk'}
+  .status.is-ready{background:var(--orange);color:#fff;box-shadow:0 4px 14px rgba(154,105,15,.3)}
+  .status.is-wait{background:rgba(154,105,15,.1);color:var(--white);border:1px solid rgba(154,105,15,.35)}
+  .status.is-off{background:var(--surface-2);color:var(--muted)}
+  .prize-line{text-align:center;font-size:14px;color:var(--muted);margin:0 auto 8px;max-width:460px;line-height:1.5}
+  .prize-line:empty{display:none}
+  .prize-line b{color:var(--white)}
   /* The wheel is sized so the wheel, the button and the fine print all fit a phone screen without scrolling. */
   .wheel-box{position:relative;width:min(74vw,40svh,340px);aspect-ratio:1;margin:4px auto 0}
   .wheel-box svg{position:absolute;inset:0;width:100%;height:100%;display:block}
@@ -81,6 +90,7 @@
 
   <h1 class="title">Spin the Wheel</h1>
   <div class="status" id="status" aria-live="polite">Loading…</div>
+  <div class="prize-line" id="prize-line"></div>
   <div class="wheel-box">
     <div class="pointer" aria-hidden="true"></div>
     <svg id="wheel-spin" viewBox="-110 -110 220 220" role="img" aria-label="Prize wheel"><g id="wheel"></g></svg>
@@ -189,14 +199,24 @@ function drawFine(r){
 }
 
 /* ---------- the page's state ---------- */
-function setStatus(html){ $('#status').innerHTML = html; }
+// tone: 'ready' (gold — go ahead), 'wait' (a countdown), 'off' (nothing to spin); none = neutral.
+function setStatus(html, tone){ const el = $('#status'); el.innerHTML = html; el.className = 'status' + (tone ? ' is-' + tone : ''); }
+// While a draw runs: what can be won, and until when.
+function setPrizeLine(r){
+  const el = $('#prize-line');
+  if(!r.period || !(r.prizes || []).length){ el.innerHTML = ''; return; }
+  const money = c => '$' + (c/100).toFixed(c % 100 ? 2 : 0);
+  const names = r.prizes.map(p => `<b>${esc(p.name)}</b>${p.value_cents ? ' (' + money(p.value_cents) + ')' : ''}`);
+  const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' or ' + names[names.length - 1] : names[0];
+  el.innerHTML = `Spin for a chance to win ${list}. One spin every 24 hours · ends ${esc(fmtCT(r.period.ends_at))}.`;
+}
 function countdown(iso){
   clearInterval(TICK);
   const show = () => {
     const ms = Date.parse(iso) - Date.now();
     if(ms <= 0){ clearInterval(TICK); load(); return; }
     const s = Math.floor(ms/1000), hh = Math.floor(s/3600), mm = Math.floor(s%3600/60), ss = s%60;
-    setStatus(`Next spin in <b>${hh}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}</b> · ${esc(fmtCT(iso))}`);
+    setStatus(`Next spin in <b>${hh}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}</b> · ${esc(fmtCT(iso))}`, 'wait');
   };
   show(); TICK = setInterval(show, 1000);
 }
@@ -210,16 +230,17 @@ async function load(){
   ST = r;
   drawWheel(r.prizes);
   drawFine(r);
+  setPrizeLine(r);
   const btn = $('#spin');
   btn.onclick = spin; btn.disabled = false; btn.textContent = 'Spin';
   clearInterval(TICK);
   if(!r.period){
     btn.disabled = true;
-    setStatus(r.nextPeriod ? `The next contest starts <b>${esc(fmtCT(r.nextPeriod.starts_at))}</b>.` : 'The contest is not running right now.');
+    setStatus(r.nextPeriod ? `The next contest starts <b>${esc(fmtCT(r.nextPeriod.starts_at))}</b>.` : 'The contest is not running right now. Check back soon!', 'off');
     return;
   }
   if(!r.signedIn){
-    setStatus('Sign in or create a free account to spin.');
+    setStatus('Sign in or create a free account to spin.', 'ready');
     btn.textContent = 'Sign in to spin';
     btn.onclick = () => { location.href = '/account?next=' + encodeURIComponent('/contest'); };
     return;
@@ -229,7 +250,7 @@ async function load(){
   const open = (r.openClaims||[]).find(c => c.id === want) || (r.openClaims||[])[0];
   if(open){ showWin(open, r.minor); }
   if(r.nextSpinAt){ btn.disabled = true; countdown(r.nextSpinAt); return; }
-  setStatus('You have a spin ready.');
+  setStatus('🎉 You have a spin ready — tap Spin!', 'ready');
 }
 
 async function spin(){
