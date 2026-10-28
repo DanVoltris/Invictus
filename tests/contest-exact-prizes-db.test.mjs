@@ -73,12 +73,12 @@ test('0051: an under-18 winner’s 18+ slip waits for an adult; a forfeited priz
   const db = await boot();
   const adultsOnly = await prize(db, 'Beer tasting', 2, true);
   const per = await period(db, 2, 4);
-  // Open the group with an adult's spin, then fix its winning spins at positions 2 and 3.
+  // The group opened by hand, its winning spins fixed at positions 2 and 3, so position 1 never wins.
   const [a1, a2, a3] = await people(db, 3);
   const [kid] = await people(db, 1, { minor: true });
-  await spin(db, a1);
-  const blk = (await db.query(`select id from public.contest_blocks where period_id = $1`, [per])).rows[0].id;
-  await db.query(`update public.contest_blocks set winning_positions = '{2,3}', prize_bag = array[$2::uuid, $2::uuid] where id = $1`, [blk, adultsOnly]);
+  const blk = (await db.query(`insert into public.contest_blocks (period_id, seq, size, winning_positions, prize_bag)
+    values ($1, 1, 4, '{2,3}', array[$2::uuid, $2::uuid]) returning id`, [per, adultsOnly])).rows[0].id;
+  assert.equal((await spin(db, a1)).won, false);         // position 1
 
   const k = await spin(db, kid);                         // position 2: a win, but only 18+ slips are left
   assert.equal(k.won, false, 'nothing for a winner under 18');
