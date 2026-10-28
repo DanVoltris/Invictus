@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Invictus Golf — My Account</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -257,6 +257,143 @@
   .seat-pick button,.inv-role button{border:1px solid var(--border);background:var(--near-black);color:var(--muted);border-radius:10px;padding:8px 13px;font-family:'Space Grotesk';font-weight:700;font-size:13.5px;cursor:pointer}
   .seat-pick button.is-on,.inv-role button.is-on{border-color:var(--orange);color:var(--orange);background:rgba(154,105,15,.08)}
   .seat-pick button:focus-visible,.inv-role button:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+
+  /* ===================== Phones only (≤640px) =====================
+     Everything below changes the page on a phone and nothing wider. The phone-only pieces in the
+     markup (.m-only, the section headers .m-acc-head) are hidden on wider screens by the line below. */
+  .m-only,.m-acc-head{display:none}
+  @media (max-width:640px){
+    :root{--dim:#69707D}                                   /* grey labels at 4.5:1 or better */
+    body{padding:12px 16px calc(env(safe-area-inset-bottom) + 80px)}
+    header{padding:4px 0 12px}
+    .m-only{display:revert}
+    .d-only,.d-only-block{display:none}
+    .card{padding:16px;border-radius:14px;margin-bottom:12px}
+    .sub,.lg-note,.wn-sub,.kv,.bk,.empty,.muted-note,.sched-row,.inv-ok{font-size:15px}
+    .input{font-size:16px;min-height:48px}
+    .btn{min-height:48px}
+
+    /* 2. A compact header: name on one line, contact beneath, two equal chips, Book a bay. */
+    .acct-head{display:block;padding:16px}
+    .acct-head h1{font-size:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ah-contact{font-size:13.5px;margin-top:2px}
+    .ah-contact > span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .ah-contact > .d-only{display:none}
+    .ah-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;align-items:stretch}
+    .ah-stat{min-width:0;display:flex;flex-direction:column;justify-content:center;padding:10px 12px}
+    .ah-stat a{display:none}                               /* the sign link is in the banner below */
+    #ah-spin{grid-column:1/-1}
+    .ah-spin{min-width:0}
+    .ah-book{grid-column:1/-1;display:flex;align-items:center;justify-content:center;width:100%;height:48px;padding:0}
+
+    /* 3. One warning for an unsigned waiver. */
+    .m-waiver{display:flex;flex-direction:column;gap:10px;background:rgba(217,45,32,.07);border:1px solid rgba(217,45,32,.35);
+      color:#7A1F17;border-radius:14px;padding:14px 16px;margin-bottom:12px;font-size:15px;line-height:1.45}
+    .m-waiver .btn{margin:0;height:44px;min-height:44px;padding:0;display:flex;align-items:center;justify-content:center}
+
+    /* 1. Tabs: a sticky segmented control, four equal parts, no sideways scroll. */
+    .tabs{position:sticky;top:0;z-index:30;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:4px;
+      padding:4px;margin:0 0 12px;background:#E4E7EC;border:none;border-radius:12px;overflow:visible;
+      box-shadow:0 -12px 0 var(--black),0 0 0 4px var(--black)}
+    .tabs button{min-height:44px;padding:0 4px;font-size:14px;border:none;border-radius:9px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+    .tabs button[aria-selected="true"]{background:var(--surface);color:var(--white);box-shadow:0 1px 3px rgba(16,24,40,.15)}
+    .tabs button[hidden]{display:none}
+
+    /* 4. The league tab in order of what matters: one column, the team card unboxed, each part its own card. */
+    .card[data-team-card]{background:none;box-shadow:none;border:none;padding:0}
+    .team-top{padding:0 2px;margin-bottom:12px}
+    .team-top .lg-name{font-size:21px}
+    .team-top .rules-link{display:inline-flex;align-items:center;min-height:44px;padding:0}
+    .lg-grid{display:flex;flex-direction:column;gap:12px;align-items:stretch}
+    .lg-main,.lg-side{display:contents}
+    .m-g{order:20}
+    .m-g-top{order:1} .m-g-team{order:2} .m-g-seats{order:3} .m-g-invite{order:4} .m-g-stand{order:5}
+    .m-g-weeks{order:6} .m-g-cards{order:7} .m-g-past{order:8} .m-g-holes{order:9} .m-g-details{order:10}
+    .m-g:not(.m-g-top){background:var(--surface);border:none;border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 2px 8px rgba(16,24,40,.06)}
+    .m-g .sec-title:first-child,.m-g-stand > .sec-title{margin-top:0}
+    .m-g-top .course-card{margin-bottom:12px}
+    /* Collapsible sections: closed, with a chevron and a one-line summary. */
+    .m-acc{padding:4px 16px!important}
+    .m-acc-head{display:flex;align-items:center;gap:10px;width:100%;min-height:52px;background:none;border:0;padding:0;
+      font:inherit;color:var(--white);text-align:left;cursor:pointer}
+    .m-acc-t{font-family:'Space Grotesk';font-weight:700;font-size:16px;flex:1 1 auto;min-width:0}
+    .m-acc-s{font-size:13.5px;color:var(--dim);text-align:right;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .m-acc-chev{flex:none;width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin:-4px 4px 0 2px;transition:transform .15s}
+    .m-acc.is-open .m-acc-chev{transform:rotate(-135deg);margin-top:4px}
+    .m-acc:not(.is-open) > .m-acc-body{display:none}
+    .m-acc > .m-acc-body{padding-bottom:12px}
+    .m-acc-body > .sec-title:first-child{display:none}
+    .m-acc-head:focus-visible{outline:2px solid var(--orange);outline-offset:2px;border-radius:8px}
+
+    /* 5. Week by week: no box inside the page scroll; three weeks and a button for the rest. */
+    .lg-main .sched,.sched{max-height:none;overflow:visible;border:none;background:none;border-radius:0}
+    .sched:not(.show-all) .m-far{display:none}
+    .stand-box .m-weeks-all{margin-bottom:4px}
+    .sched.show-all .m-near{display:none}
+    .sched-more{display:none}
+    .sched-row{grid-template-columns:24px auto minmax(0,1fr);gap:10px;min-height:48px;padding:8px 2px}
+    .sched-row .sd-date{white-space:nowrap}
+    .sched-row .sd-what{text-align:right}
+    .sd-pill{display:inline-block;font-size:12.5px;line-height:1.3;padding:4px 9px;border-radius:999px;background:var(--surface-2);color:var(--muted);text-align:left}
+    .sched-row.is-current .sd-pill{background:rgba(154,105,15,.12);color:var(--orange)}
+    .sched-row.is-missed .sd-pill{background:rgba(217,45,32,.08);color:var(--danger)}
+    /* A week with a round: its details (when, where, score, photo) get their own line under the date. */
+    .sched-row.has-round .sd-what{grid-column:2/-1;text-align:left}
+    .sched-row.has-round .sd-pill{border-radius:10px;padding:6px 10px;display:block}
+    .sched-row.has-round .sc-ctl{margin-top:8px}
+    .sched-row.is-catchup{background:repeating-linear-gradient(135deg,transparent 0 8px,rgba(20,22,26,.03) 8px 16px)}
+    .sched-row.is-catchup .sd-pill{background:none;border:1px dashed var(--border);color:var(--dim)}
+    .sched-stage{padding:10px 2px 4px;background:none;border-bottom:1px solid var(--border)}
+    .m-weeks-all{display:block;width:100%;min-height:44px;margin-top:8px;background:none;border:1px solid var(--border);border-radius:10px;
+      font:inherit;font-weight:700;font-size:14.5px;color:var(--orange);cursor:pointer}
+
+    /* 6. Standings: a narrow # column, one-line names, even digits. */
+    .stand-box{border:none;padding:0;max-height:none;overflow:visible}
+    .tbl-wrap:not(.show-all) .m-far{display:none}
+    .stand-box .lg-table{table-layout:fixed;font-size:15px}
+    .stand-box .lg-table th:first-child,.stand-box .lg-table td:first-child{width:30px;padding-left:2px;padding-right:2px;text-align:center}
+    .stand-box .lg-table td:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .stand-box .lg-table th.num,.stand-box .lg-table td.num{width:62px;font-variant-numeric:tabular-nums}
+    .stand-box .lg-table tr[data-team]{height:44px}
+    .chips .chip{font-size:13px}
+
+    /* 7. Hole stats: one line each, the label left and the figure right. */
+    .hs-lead{grid-template-columns:1fr;gap:6px}
+    .hs-lead .tile{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:10px 12px}
+    .hs-lead .tile .t-k{margin:0}
+    .hs-lead .tile:has(ol){display:block}
+
+    /* 8. Invite: a real two-way toggle, clear help, phone-sized inputs. */
+    .inv-role{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:3px;background:var(--surface-2);border-radius:11px}
+    .inv-role button{min-height:44px;border:none;background:none;border-radius:9px;font-size:14px}
+    .inv-role button.is-on{background:var(--surface);color:var(--orange);box-shadow:0 1px 3px rgba(16,24,40,.15)}
+    .inv-role button:disabled{background:none;color:var(--dim);opacity:1;text-decoration:none}
+    .m-count{display:block;margin-top:6px;font-weight:700;color:var(--white)}
+    .seat-pick button{min-height:44px}
+    .sc-btn{min-height:44px;padding:8px 14px}
+    .inv-link .btn{min-height:48px}
+
+    /* 9 & 11. Label above value where values run long. */
+    .lg-side .kv,.m-g .kv,#panel-profile .kv{flex-direction:column;align-items:flex-start;gap:2px;padding:9px 0}
+    .lg-side .kv .v,.m-g .kv .v,#panel-profile .kv .v{text-align:left}
+    #panel-profile .ph-hint{text-align:left!important;margin:0 0 6px!important}
+    #panel-profile .card{max-width:none!important}
+    #d-edit{background:var(--orange);color:#fff;border:none;min-height:48px;padding:0!important}
+    #o-out{background:none;border:none;color:var(--muted);text-decoration:underline;font-weight:600;margin-top:32px!important;min-height:44px}
+
+    /* 12. Bookings. */
+    .bk-cols{grid-template-columns:minmax(0,1fr);gap:16px}
+    .bk .pill{margin-left:6px;vertical-align:1px}
+
+    /* Pop-ups and small targets. */
+    .lg-dlg{width:calc(100vw - 16px)}
+    .dlg-in{padding:18px 16px}
+    .dlg-x{width:44px;height:44px}
+    .course-card .cc-more{display:inline-flex;align-items:center;min-height:44px;margin-top:4px}
+    .sch-row{min-height:48px}
+    .psc-grid,.par-row{gap:3px}
+    .psc-cell b{font-size:15px}
+  }
 </style>
 <link rel="stylesheet" href="/assets/brand.css" />
 </head>
@@ -794,7 +931,7 @@ function drawProfile(c, bks, justInherited, opts){
   const past = list.filter(b => b.booking_date < today || b.status === 'cancelled');
   const hhmm = m => { if(m===1440) return 'Midnight'; m%=1440; const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
   const bkRow = b => `<div class="bk">
-      <div class="b-main"><b>${esc(fmtDate(b.booking_date))}</b><div class="b-sub">${hhmm(b.start_min)}–${hhmm(b.end_min)} · ${esc(bayName(b.bay_id))}${b.status==='cancelled'?' · cancelled':''}</div></div>
+      <div class="b-main"><b>${esc(fmtDate(b.booking_date))}</b>${b.status==='cancelled'?' <span class="pill off m-only">Cancelled</span>':''}<div class="b-sub">${hhmm(b.start_min)}–${hhmm(b.end_min)} · ${esc(bayName(b.bay_id))}${b.status==='cancelled'?'<span class="d-only"> · cancelled</span>':''}</div></div>
       <div>${b.amount_cents ? '$'+(b.amount_cents/100).toFixed(2) : ''}</div>
     </div>`;
 
@@ -821,8 +958,8 @@ function drawProfile(c, bks, justInherited, opts){
     </div>` : ''}
     ${justInherited && justInherited.hoursMin ? `<div class="inherit">Welcome back — we've attached <b>${fmtHrs(justInherited.hoursMin)}</b> of prepaid time from your previous visits.</div>` : ''}
     <div class="card acct-head">
-      <div><h1>${esc(c.name || 'My account')}</h1>
-        <div class="sub">${[c.email, c.phone].filter(Boolean).map(esc).join(' · ')}</div></div>
+      <div class="ah-who"><h1>${esc(c.name || 'My account')}</h1>
+        <div class="sub ah-contact">${c.email ? `<span>${esc(c.email)}</span>` : ''}${c.phone ? `<span class="d-only">${c.email ? ' · ' : ''}${esc(c.phone)}</span><span class="m-only">${esc(fmtPhone(c.phone))}</span>` : ''}</div></div>
       <div class="ah-stats">
         <div class="ah-stat"><div class="t-k">Prepaid hours</div><b>${fmtHrs(c.hours_balance_min)}</b></div>
         <div class="ah-stat"><div class="t-k">Waiver</div>${c.waiver_signed_at ? '<b style="color:var(--ok)">Signed</b>' : '<b style="color:var(--danger)">Not signed</b><a href="/waiver">Sign it now</a>'}</div>
@@ -831,6 +968,7 @@ function drawProfile(c, bks, justInherited, opts){
       </div>
     </div>
 
+    ${c.waiver_signed_at ? '' : `<div class="m-waiver m-only" role="note"><div><b>Waiver not signed.</b> You need to sign it before you play.</div><a class="btn btn-primary" href="/waiver">Sign now</a></div>`}
     <nav class="tabs" role="tablist" aria-label="My account">${TABS.map(([k, label]) =>
       `<button type="button" role="tab" id="tab-${k}" data-tab="${k}" aria-controls="panel-${k}" aria-selected="${k===first}" tabindex="${k===first?0:-1}" ${k==='rewards'?'hidden':''}>${label}</button>`).join('')}</nav>
 
@@ -860,7 +998,7 @@ function drawProfile(c, bks, justInherited, opts){
         <div id="details"></div>
         <div class="sec-title">Waiver</div>
         <div class="kv"><span class="k">Status</span><span class="v">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span>'}</span></div>
-        ${c.waiver_signed_at ? '' : '<div class="sub" style="margin:4px 0 0">You need to sign it before you play. <a href="/waiver" style="color:var(--orange);font-weight:700">Sign the waiver</a></div>'}
+        ${c.waiver_signed_at ? '' : '<div class="sub d-only-block" style="margin:4px 0 0">You need to sign it before you play. <a href="/waiver" style="color:var(--orange);font-weight:700">Sign the waiver</a></div>'}
         ${dev ? '' : '<button class="btn btn-ghost" id="o-out" style="margin-top:22px">Sign out</button>'}
       </div>
     </section>
@@ -1014,8 +1152,15 @@ function teamCard(t, idx, opts){
     : inSpan(w.number, stg.ranking) ? ['Division rounds', `weeks ${stg.ranking[0]}–${stg.ranking[1]}`]
     : inSpan(w.number, stg.playoffs) ? ['Playoffs', `weeks ${stg.playoffs[0]}–${stg.playoffs[1]}`] : null;
   let lastStage = null;
-  const weekRows = weeks.map(w => {
-    const st = stageOf(w), head = st && st[0] !== lastStage ? `<div class="sched-stage">${esc(st[0])}<span>${esc(st[1])}</span></div>` : '';
+  // On a phone the list shows three weeks — this one (or the first, before the season; the last
+  // three after it) — and a button opens the rest. Rows outside them are marked m-far.
+  const nearAt = (() => { const i = weeks.findIndex(w => w.current); if(i >= 0) return i;
+    const j = weeks.findIndex(w => w.end >= today); return j >= 0 ? j : Math.max(0, weeks.length - 3); })();
+  const near = i => i >= nearAt && i < nearAt + 3;
+  const weekRows = weeks.map((w, i) => {
+    const st = stageOf(w);
+    const head = st && st[0] !== lastStage ? `<div class="sched-stage${near(i) ? '' : ' m-far'}">${esc(st[0])}<span>${esc(st[1])}</span></div>`
+      : (st && i === nearAt ? `<div class="sched-stage m-only m-near">${esc(st[0])}<span>${esc(st[1])}</span></div>` : '');
     if(st) lastStage = st[0];
     const what = w.round
       ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${(w.round.booking_date && L.weekIn(lg, w.round.booking_date) !== w.start) ? ' · make-up' : ''}${w.score!=null ? ` · <b>${esc(w.score)}</b>` : ''}`
@@ -1027,10 +1172,10 @@ function teamCard(t, idx, opts){
     // Once a round has been played (or is today), anyone on the team can add its scoreboard photo.
     const photo = (w.round && w.round.booking_date && w.round.booking_date <= today && team.id)
       ? `<span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span>` : '';
-    return `${head}<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}" data-week="${esc(w.start)}" role="button" tabindex="0" aria-label="Week ${w.number}: details">
+    return `${head}<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}${w.catchup ? ' is-catchup' : ''}${w.round ? ' has-round' : ''}${near(i) ? '' : ' m-far'}" data-week="${esc(w.start)}" role="button" tabindex="0" aria-label="Week ${w.number}: details">
       <span class="sd-n">${w.number}</span>
       <span class="sd-date">${esc(shortDate(w.start))} – ${esc(shortDate(w.end))}</span>
-      <span class="sd-what">${what}${photo}</span></div>`;
+      <span class="sd-what"><span class="sd-pill">${what}</span>${photo}</span></div>`;
   }).join('');
 
   const by = lg.team_mode === false ? 'Player' : 'Team';
@@ -1093,13 +1238,13 @@ function teamCard(t, idx, opts){
     // Here: the scorecards still to fill in (or to update while staff haven't confirmed them). Every
     // card already sent is in the Scorecards box on the right (scorecardHistory).
     const open = hs.weeks.filter(w => w.status !== 'confirmed' && (hs.canEnter || !w.status));
-    return `<div class="sec-title">Scorecards</div>
+    return mAcc('cards', 'Scorecards', open.length ? `${open.length} to fill in` : 'Nothing to fill in', `<div class="sec-title">Scorecards</div>
       <div class="sub" style="margin:0 0 4px">After each round, add a photo of the scoreboard, then any player on the team enters the score for every hole. It counts once our staff check it against the photo.</div>
       ${open.length ? [...open].reverse().map(card).join('')
-        : `<div class="empty" style="padding:8px 0">${hs.weeks.length ? 'Nothing to fill in right now. Your past scorecards are in the Scorecards box.' : 'No rounds played yet.'}</div>`}
-      <div class="sec-title">Hole stats</div>
+        : `<div class="empty" style="padding:8px 0">${hs.weeks.length ? 'Nothing to fill in right now. Your past scorecards are in the Scorecards box.' : 'No rounds played yet.'}</div>`}`, 'm-g m-g-cards')
+      + mAcc('holes', 'Hole stats', me && me.rounds ? `${me.rounds} round${me.rounds === 1 ? '' : 's'} counted` : 'None yet', `<div class="sec-title">Hole stats</div>
       ${me && me.rounds ? `<div class="sub" style="margin:0 0 6px">Your team: ${me.eagles} eagles or better · ${me.birdies} birdies · ${me.pars} pars · ${me.bogeys} bogeys · ${me.doubles} double bogeys or worse</div>` : ''}
-      <div class="hs-lead">${lead}</div>`;
+      <div class="hs-lead">${lead}</div>`, 'm-g m-g-holes');
   })();
   const table = sg ? stagedTable : standings.some(r => r.played) ? `<div class="tbl-wrap"><table class="lg-table">
       <thead><tr><th>#</th><th>${by}</th><th class="num">Played</th><th class="num">${strokes ? 'Average' : 'Points'}</th><th class="num">Best</th></tr></thead>
@@ -1168,7 +1313,7 @@ function teamCard(t, idx, opts){
       <button type="button" role="radio" data-role="player" aria-checked="${role0==='player'}" class="${role0==='player'?'is-on':''}" tabindex="${role0==='player'?0:-1}" ${canPlayer?'':'disabled'}>Teammate${canPlayer?'':' · team full'}</button>
       <button type="button" role="radio" data-role="sub" aria-checked="${role0==='sub'}" class="${role0==='sub'?'is-on':''}" tabindex="${role0==='sub'?0:-1}" ${canSub?'':'disabled'}>Substitute${canSub?'':` · ${subMax} of ${subMax}`}</button>
     </div>
-    <div class="sub inv-help-sub" style="margin-bottom:10px" ${role0==='sub'?'':'hidden'}>A substitute fills in when a teammate is away. They pay no league fee and take no spot on the team. Up to ${subMax}${subLeft?`; you can add ${subLeft} more`:''}.</div>` : ''}
+    <div class="sub inv-help-sub" style="margin-bottom:10px" ${role0==='sub'?'':'hidden'}><span class="d-only">A substitute fills in when a teammate is away. They pay no league fee and take no spot on the team. Up to ${subMax}${subLeft?`; you can add ${subLeft} more`:''}.</span><span class="m-only">A substitute fills in when a teammate is away. They pay no league fee and take no spot on the team.<span class="m-count">Up to ${subMax} substitutes · ${subLeft} left</span></span></div>` : ''}
     <div class="sub inv-help-player" style="margin-bottom:10px" ${role0==='player'?'':'hidden'}>${iAmCaptain === null ? 'If you are the captain, you' : 'You'} can add players by mobile number${room!=null ? ` — room for ${room} more` : ''}. We give you a link to send them; they tap it${st ? `, pay their own ${money(st.shareCents)} share (nothing if you have covered their seat),` : ''} and they are on the team.</div>
     <label class="fld" for="inv-phone-${idx}">Their mobile number</label>
     <input class="input inv-phone" id="inv-phone-${idx}" type="tel" inputmode="tel" placeholder="(204) 000-0000" ${canPlayer||canSub?'':'disabled'} />
@@ -1225,29 +1370,35 @@ function teamCard(t, idx, opts){
     </div>
     <div class="lg-grid">
       <div class="lg-main">
+        <div class="m-g m-g-top">
         ${courseCard}
         ${iAmSub ? '<div class="lg-note">You are a <b>substitute</b> for this team: you fill in when a teammate is away. The team’s players book the weekly round.</div>' : now}
         ${owedNote}
         ${ruleNotes}
+        </div>
+        <div class="m-g m-g-stand">
         <div class="sec-title">Standings <span class="sec-hint">· tap a team for its stats</span></div>
         <div class="stand-box">${table}</div>
-        <div class="sec-title">Week by week <span class="sec-hint">· tap a week for its details</span></div>
-        ${weeks.length ? `<div class="sched">${weekRows}</div>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`
-          : '<div class="empty" style="padding:8px 0">The shop has not set this season\'s dates yet.</div>'}
+        </div>
+        ${mAcc('weeks', 'Week by week', !weeks.length ? 'Dates to come' : cur ? `Week ${cur.number} of ${weeks.length}` : today < weeks[0].start ? `Starts ${esc(shortDate(weeks[0].start))} · ${weeks.length} weeks` : `${weeks.length} weeks`,
+        `<div class="sec-title">Week by week <span class="sec-hint">· tap a week for its details</span></div>
+        ${weeks.length ? `<div class="sched">${weekRows}</div><button type="button" class="m-only m-weeks-all" aria-expanded="false" data-label="Show all ${weeks.length} weeks">Show all ${weeks.length} weeks</button>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`
+          : '<div class="empty" style="padding:8px 0">The shop has not set this season\'s dates yet.</div>'}`, 'm-g m-g-weeks')}
         ${holesBlock}
       </div>
       <aside class="lg-side">
-        <div class="side-box"><div class="sec-title">On the team</div>${chips}${subsBlock}</div>
-        ${hs ? `<div class="side-box"><div class="sec-title">Scorecards</div>${(() => {
-          const sent = hs.weeks.filter(w => w.status).slice().reverse();
+        <div class="side-box m-g m-g-team"><div class="sec-title">On the team</div>${chips}${subsBlock}</div>
+        ${hs ? (() => { const sent = hs.weeks.filter(w => w.status).slice().reverse();
+          return mAcc('past', 'Past scorecards', sent.length ? `${sent.length} sent` : 'None yet', `<div class="sec-title">Scorecards</div>${(() => {
           return sent.length ? `<div class="sch-list">${sent.map(w => `<button type="button" class="sch-row" data-week="${esc(w.start)}">
               <span><b>Week ${w.week}</b>${w.course ? `<span class="sch-course">${esc(w.course)}</span>` : ''}</span>
               <span class="sch-right"><b>${w.total != null ? w.total : '—'}</b>${w.status === 'confirmed' ? '<span class="pill ok">Confirmed</span>' : '<span class="pill warn">Waiting</span>'}</span></button>`).join('')}</div>`
-            : '<div class="empty" style="padding:4px 0">No scorecards yet. They show here after your first round.</div>'; })()}</div>` : ''}
-        ${seatsBlock ? `<div class="side-box" id="seats-${idx}">${seatsBlock}</div>` : ''}
-        ${inviteHTML ? `<div class="side-box">${inviteHTML}</div>` : ''}
-        <div class="side-box"><div class="sec-title">League details</div>
-          ${details.map(([k,v]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>
+            : '<div class="empty" style="padding:4px 0">No scorecards yet. They show here after your first round.</div>'; })()}`, 'side-box m-g m-g-past'); })() : ''}
+        ${seatsBlock ? `<div class="side-box m-g m-g-seats" id="seats-${idx}">${seatsBlock}</div>` : ''}
+        ${inviteHTML ? `<div class="side-box m-g m-g-invite">${inviteHTML}</div>` : ''}
+        ${mAcc('details', 'League details', (lg.season_start && lg.season_end) ? `${esc(shortDate(lg.season_start))} – ${esc(shortDate(lg.season_end))}` : 'Dates to come',
+          `<div class="sec-title">League details</div>
+          ${details.map(([k,v]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}`, 'side-box m-g m-g-details')}
       </aside>
     </div>
   </div>`;
@@ -1262,7 +1413,32 @@ function pinMyRows(card){
     pin.setAttribute('aria-label', 'Your team, shown again at the top');
     tbl.tBodies[0].insertBefore(pin, tbl.tBodies[0].firstChild);
   });
+  // On a phone each table shows its first ten teams and a button opens the rest (no box that
+  // scrolls inside the page). Wider screens show every row, as before.
+  card.querySelectorAll('.stand-box .tbl-wrap').forEach(wrap => {
+    const rows = [...wrap.querySelectorAll('tbody tr')].filter(tr => !tr.classList.contains('is-pin'));
+    if(rows.length <= 10 || wrap.nextElementSibling && wrap.nextElementSibling.classList.contains('m-weeks-all')) return;
+    rows.slice(10).forEach(tr => tr.classList.add('m-far'));
+    wrap.insertAdjacentHTML('afterend', `<button type="button" class="m-only m-weeks-all" aria-expanded="false" data-label="Show all ${rows.length} teams">Show all ${rows.length} teams</button>`);
+  });
 }
+
+// ---------- Mobile only (max-width 640px) ----------
+// A collapsible section: on a phone a header button (title, a one-line summary, a chevron) opens and
+// closes it; on a wider screen the header is hidden and the body shows as it always has.
+const mAcc = (key, title, summary, inner, cls = '') => `<div class="m-acc ${cls}" data-acc="${key}">
+  <button type="button" class="m-acc-head" aria-expanded="false"><span class="m-acc-t">${title}</span><span class="m-acc-s">${summary}</span><span class="m-acc-chev" aria-hidden="true"></span></button>
+  <div class="m-acc-body">${inner}</div></div>`;
+document.addEventListener('click', e => {
+  const h = e.target.closest && e.target.closest('.m-acc-head');
+  if(h){ const a = h.parentElement; a.classList.toggle('is-open'); h.setAttribute('aria-expanded', a.classList.contains('is-open')); return; }
+  const all = e.target.closest && e.target.closest('.m-weeks-all');
+  if(all){ const box = all.previousElementSibling; const on = box.classList.toggle('show-all');
+    all.textContent = on ? 'Show fewer weeks' : all.dataset.label; all.setAttribute('aria-expanded', on); }
+});
+// (204) 990-6530 for a North American number; anything else as it was typed.
+const fmtPhone = p => { const d = String(p || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+  return d.length === 10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : String(p || ''); };
 
 // ---------- The pop-ups: a week of the season, and a team's stats ----------
 const TEAM_CTX = {};
