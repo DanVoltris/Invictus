@@ -194,6 +194,22 @@
   .sched-stage{padding:8px 12px 6px;font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;
     color:var(--orange);background:var(--surface-2);border-bottom:1px solid var(--border)}
   .sched-stage span{color:var(--dim);font-weight:500;letter-spacing:0;text-transform:none;margin-left:6px}
+  /* Past scorecards: the list in the side column, and the card in its pop-up. */
+  .sch-list{display:flex;flex-direction:column;gap:6px}
+  .sch-row{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;font-size:13.5px;
+    color:var(--white);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 12px;cursor:pointer}
+  .sch-row:hover{border-color:var(--orange)}
+  .sch-course{display:block;font-size:12px;color:var(--dim);margin-top:1px}
+  .sch-right{display:flex;align-items:center;gap:8px;flex:none}
+  .sch-right b{font-family:'Space Grotesk';font-size:16px}
+  .psc-grid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:5px;margin-top:14px}
+  .psc-cell{text-align:center;border:1px solid var(--border);border-radius:8px;padding:5px 0;background:var(--near-black)}
+  .psc-cell small{display:block;font-size:10px;color:var(--dim)}
+  .psc-cell b{display:block;font-family:'Space Grotesk';font-size:16px}
+  .psc-cell.is-under{background:rgba(6,118,71,.1);border-color:rgba(6,118,71,.35)}
+  .psc-cell.is-over{background:rgba(217,45,32,.07);border-color:rgba(217,45,32,.3)}
+  .psc-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+  .psc-photos img{width:100%;height:150px;object-fit:cover;border-radius:10px;border:1px solid var(--border)}
   .sec-hint{font-family:'Raleway';font-weight:500;font-size:12.5px;color:var(--dim)}
   .stand-box tr[data-team]:not([data-team=""]){cursor:pointer}
   .stand-box tr[data-team]:not([data-team=""]):hover td{background:rgba(154,105,15,.05)}
@@ -1074,9 +1090,13 @@ function teamCard(t, idx, opts){
     const lead = Object.entries(hs.stats.leaders).map(([k, list]) => `<div class="tile"><div class="t-k">Most ${HOLE_LABEL[k].toLowerCase()}</div>${list.length
       ? `<ol>${list.map(r => `<li class="${r.you ? 'is-you' : ''}">${esc(r.name)} · ${r.count}</li>`).join('')}</ol>` : '<div class="t-s">None yet</div>'}</div>`).join('');
     const me = hs.stats.mine;
+    // Here: the scorecards still to fill in (or to update while staff haven't confirmed them). Every
+    // card already sent is in the Scorecards box on the right (scorecardHistory).
+    const open = hs.weeks.filter(w => w.status !== 'confirmed' && (hs.canEnter || !w.status));
     return `<div class="sec-title">Scorecards</div>
       <div class="sub" style="margin:0 0 4px">After each round, add a photo of the scoreboard, then any player on the team enters the score for every hole. It counts once our staff check it against the photo.</div>
-      ${hs.weeks.length ? [...hs.weeks].reverse().map(card).join('') : '<div class="empty" style="padding:8px 0">No rounds played yet.</div>'}
+      ${open.length ? [...open].reverse().map(card).join('')
+        : `<div class="empty" style="padding:8px 0">${hs.weeks.length ? 'Nothing to fill in right now. Your past scorecards are in the Scorecards box.' : 'No rounds played yet.'}</div>`}
       <div class="sec-title">Hole stats</div>
       ${me && me.rounds ? `<div class="sub" style="margin:0 0 6px">Your team: ${me.eagles} eagles or better · ${me.birdies} birdies · ${me.pars} pars · ${me.bogeys} bogeys · ${me.doubles} double bogeys or worse</div>` : ''}
       <div class="hs-lead">${lead}</div>`;
@@ -1218,6 +1238,12 @@ function teamCard(t, idx, opts){
       </div>
       <aside class="lg-side">
         <div class="side-box"><div class="sec-title">On the team</div>${chips}${subsBlock}</div>
+        ${hs ? `<div class="side-box"><div class="sec-title">Scorecards</div>${(() => {
+          const sent = hs.weeks.filter(w => w.status).slice().reverse();
+          return sent.length ? `<div class="sch-list">${sent.map(w => `<button type="button" class="sch-row" data-week="${esc(w.start)}">
+              <span><b>Week ${w.week}</b>${w.course ? `<span class="sch-course">${esc(w.course)}</span>` : ''}</span>
+              <span class="sch-right"><b>${w.total != null ? w.total : '—'}</b>${w.status === 'confirmed' ? '<span class="pill ok">Confirmed</span>' : '<span class="pill warn">Waiting</span>'}</span></button>`).join('')}</div>`
+            : '<div class="empty" style="padding:4px 0">No scorecards yet. They show here after your first round.</div>'; })()}</div>` : ''}
         ${seatsBlock ? `<div class="side-box" id="seats-${idx}">${seatsBlock}</div>` : ''}
         ${inviteHTML ? `<div class="side-box">${inviteHTML}</div>` : ''}
         <div class="side-box"><div class="sec-title">League details</div>
@@ -1274,6 +1300,23 @@ function weekDetails(ctx, start){
     <div class="sec-title">Your team</div><div class="lg-note">${status}</div>
     ${canBook ? '<a class="btn btn-primary" href="/?league-round=1">Book a league round</a>' : ''}`);
 }
+// A scorecard already sent: every hole against its par, the total, the scoreboard photo.
+function pastScorecard(ctx, card, start){
+  const w = ((ctx.holes || {}).weeks || []).find(x => x.start === start); if(!w) return;
+  const vals = w.holes || [], pars = w.pars;
+  const cell = (i) => { const v = vals[i], p = pars ? pars[i] : null, d = v != null && p != null ? v - p : null;
+    return `<div class="psc-cell${d == null ? '' : d < 0 ? ' is-under' : d > 0 ? ' is-over' : ' is-par'}"><small>${i + 1}</small><b>${v == null ? '—' : v}</b>${p != null ? `<small>par ${p}</small>` : ''}</div>`; };
+  const parTotal = pars ? pars.reduce((a, b) => a + b, 0) : null;
+  const photos = (card._photos || []).filter(c => c.week === start && c.url);
+  openDialog(`<h2>Week ${w.week} scorecard</h2>
+    <div class="sub" style="margin:0">${w.course ? esc(w.course) + ' · ' : ''}${w.status === 'confirmed' ? '<span class="pill ok">Confirmed</span>' : '<span class="pill warn">Waiting for staff</span>'}</div>
+    <div class="psc-grid">${Array.from({ length: 18 }, (_, i) => cell(i)).join('')}</div>
+    <div class="hs-total" style="margin-top:12px">Total: ${w.total != null ? w.total : '—'}${parTotal ? ` <span style="color:var(--dim);font-weight:500">· par ${parTotal} (${w.total - parTotal > 0 ? '+' : ''}${w.total - parTotal})</span>` : ''}</div>
+    ${photos.length ? `<div class="sec-title">Scoreboard photo${photos.length > 1 ? 's' : ''}</div><div class="psc-photos">${photos.map(c =>
+      `<a href="${esc(c.url)}" target="_blank" rel="noopener"><img src="${esc(c.url)}" alt="Scoreboard photo for week ${w.week}" loading="lazy" /></a>`).join('')}</div>` : ''}
+    ${w.status !== 'confirmed' && (ctx.holes || {}).canEnter ? '<div class="sub" style="margin:12px 0 0">Staff haven’t confirmed it yet, so you can still change it in the Scorecards section.</div>' : ''}`);
+}
+
 async function teamStats(ctx, otherId){
   const L = window.InvictusLeagues;
   const d = openDialog('<div class="spin">Loading…</div>');
@@ -1357,7 +1400,7 @@ function wireScorecards(){
     const teamId = card.dataset.teamId;
     if(!ctls.length || !teamId) return;
     // Which weeks have a photo: the scorecard's Submit button waits for one.
-    const show = cards => { card._photoWeeks = new Set(cards.map(c => c.week)); ctls.forEach(ctl => {
+    const show = cards => { card._photoWeeks = new Set(cards.map(c => c.week)); card._photos = cards; ctls.forEach(ctl => {
       const mine = cards.filter(c => c.week === ctl.dataset.week), st = ctl.querySelector('.sc-state');
       st.classList.remove('is-err');
       st.innerHTML = mine.length ? `✓ ${mine.length} photo${mine.length===1?'':'s'} saved · ${mine.map((c, i) => c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">View${mine.length>1?' '+(i+1):''}</a>` : '').filter(Boolean).join(' · ')}` : '';
@@ -1396,6 +1439,7 @@ function wireTeams(teams){
     const ctx = TEAM_CTX[card.dataset.teamCard]; if(!ctx) return;
     const act = (el, fn) => { el.addEventListener('click', fn); el.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); fn(); } }); };
     card.querySelectorAll('.sched-row[data-week], .cc-more').forEach(el => act(el, () => weekDetails(ctx, el.dataset.week)));
+    card.querySelectorAll('.sch-row').forEach(el => el.onclick = () => pastScorecard(ctx, card, el.dataset.week));
     pinMyRows(card);
     card.querySelectorAll('.stand-box tr[data-team]').forEach(tr => { if(tr.dataset.team) act(tr, () => teamStats(ctx, tr.dataset.team)); });
   });
