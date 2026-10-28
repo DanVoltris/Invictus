@@ -8833,23 +8833,38 @@ function openContestPeriod(p){
     body:`Delete <b>${esc(p.name)}</b>? Nobody has spun in it yet.`,
     onOk:async()=>{ if(await dbDelete('contest_periods',p.id)){ closeSheet(); toast('Period deleted','ok'); loadContestSetup(); } } });
 }
+// The draw the prize odds are read against: the one running, else the next, else the latest.
+function ctRefPeriod(){
+  const now=Date.now(), ps=[...CT_PERIODS].sort((a,b)=>Date.parse(a.starts_at)-Date.parse(b.starts_at));
+  return ps.find(p=>Date.parse(p.starts_at)<=now && now<Date.parse(p.ends_at)) || ps.find(p=>Date.parse(p.starts_at)>now) || ps[ps.length-1] || null;
+}
+// A prize's "winners in each group" (its weight) as staff think of it: how many of the draw's X
+// winners per Y spins go to it. A winning spin picks its prize by these numbers, so they hold on
+// average over many spins.
+function prizeOdds(weight, total){
+  const p=ctRefPeriod(); if(!p || !total || !weight) return null;
+  const per=p.wins_per_block*weight/total, r=x=>Math.round(x*10)/10;
+  return { period:p, per:r(per), of:p.block_size, total, wins:p.wins_per_block };
+}
 function renderContestPrizes(){
   const tbl=$('#ct-prizes'), live=CT_PRIZES.filter(z=>z.active && z.weight>0), total=live.reduce((s,z)=>s+z.weight,0);
-  tbl.innerHTML = CT_PRIZES.length ? `<thead><tr><th>Prize</th><th>Type</th><th style="text-align:right">Approx. value</th><th>Age</th><th style="text-align:right">Chance when a spin wins</th><th>Status</th></tr></thead><tbody>${
+  tbl.innerHTML = CT_PRIZES.length ? `<thead><tr><th>Prize</th><th>Type</th><th style="text-align:right">Approx. value</th><th>Age</th><th style="text-align:right">How often it's won</th><th>Status</th></tr></thead><tbody>${
     CT_PRIZES.map(z=>{ const on=z.active && z.weight>0;
       return `<tr data-id="${z.id}" style="cursor:pointer">
         <td><b>${esc(z.name)}</b>${z.description?`<div class="dim" style="font-size:12px">${esc(z.description)}</div>`:''}</td>
         <td class="muted">${esc(PRIZE_KIND[z.kind]||z.kind)}</td>
         <td style="text-align:right">${money(z.value_cents)}</td>
         <td>${z.adults_only?'<span class="pill blocked">18+ only</span>':'<span class="dim">All ages</span>'}</td>
-        <td style="text-align:right;font-family:'Space Grotesk';font-weight:700">${on&&total?Math.round(z.weight/total*1000)/10+'%':'—'}<div class="dim" style="font-size:12px;font-weight:400">weight ${z.weight}</div></td>
+        <td style="text-align:right">${(()=>{ const o=on?prizeOdds(z.weight,total):null;
+          return o ? `<b style="font-family:'Space Grotesk'">about ${o.per} out of ${o.of} spins</b><div class="dim" style="font-size:12px">${z.weight} of every ${total} winners</div>`
+            : on ? `<b>${z.weight} of every ${total} winners</b>` : '<span class="dim">—</span>'; })()}</td>
         <td><span class="pill ${on?'confirmed':'cancelled'}">${on?'Active':'Off'}</span></td></tr>`; }).join('')}</tbody>` : emptyRow('No prizes yet. A winning spin needs at least one active prize.',6);
   tbl.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>openContestPrize(CT_PRIZES.find(x=>x.id===tr.dataset.id)));
 }
 $('#ct-add-prize').onclick=()=>openContestPrize(null);
 function openContestPrize(z){
   const isNew=!z;
-  z = z || { name:'', description:'', kind:'credit', value_cents:1000, adults_only:false, weight:1, active:true, sort:CT_PRIZES.length };
+  z = z || { name:'', description:'', kind:'credit', value_cents:1000, adults_only:false, weight:1, active:true };
   sheet.innerHTML=`
     <button class="sheet-close" id="x">✕</button>
     <h3>${isNew?'New prize':esc(z.name)}</h3>
@@ -8861,11 +8876,8 @@ function openContestPrize(z){
       <div class="field"><label>Approx. retail value ($)</label><input class="input" id="pz-value" type="number" min="0" step="0.01" value="${(z.value_cents||0)/100}" /></div>
     </div>
     <div class="dim" style="font-size:12.5px;margin:-4px 0 10px" id="pz-kind-note"></div>
-    <div class="grid2">
-      <div class="field"><label>Chance weight</label><input class="input" id="pz-weight" type="number" min="0" step="1" value="${z.weight}" />
-        <div class="dim" style="font-size:12px;margin-top:6px">Relative to the other active prizes. 6 vs 3 vs 1 → 60% / 30% / 10%.</div></div>
-      <div class="field"><label>Order</label><input class="input" id="pz-sort" type="number" step="1" value="${z.sort||0}" /></div>
-    </div>
+    <div class="field"><label>Winners in each group</label><input class="input" id="pz-weight" type="number" min="0" step="1" value="${z.weight}" style="max-width:160px" />
+      <div class="dim" style="font-size:12.5px;margin-top:6px;line-height:1.5" id="pz-odds"></div></div>
     <label class="row" style="gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="pz-adult" ${z.adults_only?'checked':''} /> 18+ only — staff check ID when it is redeemed</label>
     <label class="row" style="gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="pz-active" ${z.active?'checked':''} /> Active — can be won</label>
     <button class="btn btn-primary" id="pz-save" style="width:100%;margin-top:16px">${isNew?'Add prize':'Save changes'}</button>
@@ -8877,10 +8889,22 @@ function openContestPrize(z){
     $('#pz-kind-note').textContent = k==='credit' ? 'A dollar credit the winner can spend on anything at the venue — never a free alcoholic drink.'
       : k==='hours' ? 'Staff apply the hours discount at the venue when it is redeemed.' : ''; };
   $('#pz-kind').onchange=kindNote; kindNote();
+  // What the number means, worked out live against the draw and the other active prizes.
+  const others=CT_PRIZES.filter(x=>x.id!==z.id && x.active && x.weight>0).reduce((s,x)=>s+x.weight,0);
+  const oddsNote=()=>{
+    const w=Math.max(0,Math.round(+$('#pz-weight').value||0)), on=$('#pz-active').checked, total=others+(on?w:0);
+    const o=on?prizeOdds(w,total):null, p=ctRefPeriod();
+    $('#pz-odds').innerHTML = !on ? 'Off — this prize can’t be won.' : !w ? 'At 0 this prize is never won.'
+      : !p ? `Gets ${w} of every ${total} winners. Set up a draw to see how many spins that is.`
+      : `The draw <b>${esc(p.name)}</b> has <b>${p.wins_per_block} winner${p.wins_per_block===1?'':'s'} in every ${p.block_size} spins</b>. `
+        + `This prize gets ${w} of every ${total} winners${others?' (the other active prizes have '+others+')':''} — `
+        + `<b>about ${o.per} winner${o.per===1?'':'s'} out of ${o.of} spins</b>. It works out over many spins; a single group can differ.`;
+  };
+  $('#pz-weight').oninput=oddsNote; $('#pz-active').onchange=oddsNote; oddsNote();
   $('#pz-save').onclick=async()=>{
     const row={ name:$('#pz-name').value.trim(), description:$('#pz-desc').value.trim()||null, kind:$('#pz-kind').value,
       value_cents:Math.max(0,Math.round((+$('#pz-value').value||0)*100)), weight:Math.max(0,Math.round(+$('#pz-weight').value||0)),
-      sort:Math.round(+$('#pz-sort').value||0), adults_only:$('#pz-adult').checked, active:$('#pz-active').checked };
+      adults_only:$('#pz-adult').checked, active:$('#pz-active').checked };
     if(!row.name){ toast('Give the prize a name.','err'); return; }
     $('#pz-save').disabled=true;
     const { error } = isNew ? await sb.from('contest_prizes').insert(row) : await sb.from('contest_prizes').update(row).eq('id',z.id);
