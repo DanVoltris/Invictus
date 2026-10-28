@@ -574,6 +574,10 @@
   .tb-player{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
   .tb-player:first-child{border-top:none}
   /* A player's buttons wrap under their name when the column is narrow, rather than run out of the card. */
+  .li-pars{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:6px}
+  .li-par-cell{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--dim);font-weight:600}
+  .li-par-cell .input{width:100%;padding:7px 0;text-align:center;font-size:15px}
+  .li-par-cell span{text-transform:none;letter-spacing:0;white-space:nowrap;font-size:11.5px}
   .tb-player{flex-wrap:wrap}
   .tb-player > div:first-child{flex:1 1 130px;min-width:0;overflow-wrap:anywhere}
   .tb-player > .row{flex-wrap:wrap!important;justify-content:flex-end;max-width:100%;margin-left:auto}
@@ -3410,7 +3414,9 @@ function openLeagueEditor(x){
   // when a week is added or removed and again at save, so nothing typed is lost to a re-draw.
   let weeks=info.schedule.map(w=>({ ...w }));
   const readWeeks=()=>[...sheet.querySelectorAll('.li-week')].map(r=>({ ...Object.fromEntries(
-    ['from','to','phase','event','course','location','note','pars'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])),
+    ['from','to','phase','event','course','location','note'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])),
+    // The 18 par boxes: nothing typed = no pars for the week; otherwise all 18 (checked on save).
+    pars: (v=>v.every(x=>x==='')?'':v)([...r.querySelectorAll('.li-par')].map(i=>i.value.trim())),
     optional: r.querySelector('[data-k="optional"]').checked, catchup: r.querySelector('[data-k="catchup"]').checked }));
   const drawWeeks=()=>{
     const host=$('#li-weeks'); if(!host) return;
@@ -3424,8 +3430,9 @@ function openLeagueEditor(x){
         <div><label>Course</label><input class="input" data-k="course" maxlength="120" value="${esc(w.course||'')}" placeholder="e.g. Deer Ridge Golf Club" /></div>
         <div><label>Location</label><input class="input" data-k="location" maxlength="120" value="${esc(w.location||'')}" placeholder="e.g. Kitchener, Ontario" /></div>
         <div class="li-week-note"><label>Notes <span class="dim">(optional)</span></label><input class="input" data-k="note" maxlength="240" value="${esc(w.note||'')}" placeholder="e.g. Sign-ups for the branded event on Nov 17th" /></div>
-        <div class="li-week-note"><label>Par for each hole <span class="dim">(18 numbers, holes 1–18 — for the birdie, par and bogey counts)</span></label><input class="input" data-k="pars" inputmode="numeric" value="${esc((w.pars||[]).join(' '))}" placeholder="e.g. 4 4 3 5 4 4 3 4 5 4 4 3 5 4 4 3 4 5" />
-          <div class="dim li-par-total" style="font-size:12px;margin-top:4px">${w.pars&&w.pars.length===18?'Par '+w.pars.reduce((a,b)=>a+b,0):''}</div></div>
+        <div class="li-week-note"><label>Par for each hole <span class="dim">(for the birdie, par and bogey counts — leave all empty if you don’t have the card yet)</span></label>
+          <div class="li-pars">${Array.from({length:18},(_,i)=>`<label class="li-par-cell"><span>Hole ${i+1}</span><input class="input li-par" inputmode="numeric" maxlength="1" value="${w.pars&&w.pars[i]!=null?w.pars[i]:''}" aria-label="Par for hole ${i+1}" /></label>`).join('')}</div>
+          <div class="dim li-par-total" style="font-size:12px;margin-top:6px">${w.pars&&w.pars.length===18?'Course par '+w.pars.reduce((a,b)=>a+b,0):''}</div></div>
       </div>
       <label class="row lea-switch li-week-off">
         <span class="switch"><input type="checkbox" data-k="optional" ${w.optional?'checked':''} /><span class="track"></span></span>
@@ -3435,6 +3442,16 @@ function openLeagueEditor(x){
         <span><b>Catch-up weeks</b><span class="dim" style="display:block;font-size:12px">No course of its own: a round played here only makes up a week the team missed. A team that is up to date plays nothing.</span></span></label>
       </div>`).join('') || '<div class="dim" style="font-size:12.5px;margin-bottom:8px">No weeks yet.</div>';
     host.querySelectorAll('input[type="date"]').forEach(buildDatePicker);
+    // Par boxes: one digit each, jump to the next hole, and the course par adds itself up.
+    host.querySelectorAll('.li-pars').forEach(grid=>{
+      const ins=[...grid.querySelectorAll('.li-par')], tot=grid.parentNode.querySelector('.li-par-total');
+      ins.forEach((inp,n)=>inp.addEventListener('input',()=>{
+        inp.value=inp.value.replace(/\D/g,'').slice(0,1);
+        if(inp.value && ins[n+1]) ins[n+1].focus();
+        const v=ins.map(i=>i.value).filter(Boolean).map(Number);
+        tot.textContent = v.length ? `Course par ${v.reduce((a,b)=>a+b,0)}${v.length<18?` · ${18-v.length} hole${18-v.length===1?'':'s'} to go`:''}` : '';
+      }));
+    });
     host.querySelectorAll('.li-week-del').forEach(b=>b.onclick=()=>{ weeks=readWeeks(); weeks.splice(+b.dataset.i,1); drawWeeks(); });
   };
   if(cols39){
@@ -3471,7 +3488,7 @@ function openLeagueEditor(x){
       const bad=sched.findIndex(w=>w.from && w.to && w.to<w.from);
       if(bad>=0) return err(`Week ${bad+1} in the schedule ends before it starts.`);
       const badPar=sched.findIndex(w=>w.pars && !InvictusLeagues.normalizePars(w.pars));
-      if(badPar>=0) return err(`Week ${badPar+1}’s pars need 18 numbers, one per hole, each from 2 to 7.`);
+      if(badPar>=0) return err(`Week ${badPar+1}: fill in the par for all 18 holes (each 2 to 7), or leave them all empty.`);
       details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value, rules:$('#li-rules').value,
         settings:$('#li-settings').value, challenges:$('#li-challenges').value,
         schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value,
