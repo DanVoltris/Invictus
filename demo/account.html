@@ -262,137 +262,266 @@
      Everything below changes the page on a phone and nothing wider. The phone-only pieces in the
      markup (.m-only, the section headers .m-acc-head) are hidden on wider screens by the line below. */
   .m-only,.m-acc-head{display:none}
+  .m-group,.m-group > .m-list,.m-list-wrap{display:contents}
+  /* The side column in its usual order on a wider screen (the phone groups Seats and Invite with the team). */
+  .lg-side .m-g-team{order:1} .lg-side .m-g-past{order:2} .lg-side .m-g-seats{order:3} .lg-side .m-g-invite{order:4} .lg-side .m-g-details{order:5}
   @media (max-width:640px){
-    :root{--dim:#69707D}                                   /* grey labels at 4.5:1 or better */
-    body{padding:12px 16px calc(env(safe-area-inset-bottom) + 80px)}
-    header{padding:4px 0 12px}
+    /* ---- Scale: type 22/18/16/15/13/12 · weights 400/500/600 · space 4/8/12/16/24 ·
+       radius 12 containers, 10 controls, 999 small pills · hairlines, not shadows. ---- */
+    :root{--dim:#5F6672;--muted:#4A515C;--hair:rgba(16,24,40,.08);--orange:#946B27}
+    body{padding:0 16px calc(env(safe-area-inset-bottom) + 96px);font-size:15px;background:#F6F7F9}
+    .wrap > header{display:none}
     .m-only{display:revert}
     .d-only,.d-only-block{display:none}
-    .card{padding:16px;border-radius:14px;margin-bottom:12px}
-    .sub,.lg-note,.wn-sub,.kv,.bk,.empty,.muted-note,.sched-row,.inv-ok{font-size:15px}
-    .input{font-size:16px;min-height:48px}
-    .btn{min-height:48px}
+    b,strong,h1,h2,h3,.sec-title,.btn{font-weight:600}
+    .sub,.lg-note,.wn-sub,.kv,.bk,.empty,.muted-note,.inv-ok,.sched-row,p{font-size:15px}
+    .t-k,.fld,.lgt-k,.week-now .t-k,.course-card .t-k,.lg-table th,.sched-stage,.pill,.tile .t-k,.hs-n,.side-box .sec-title{
+      text-transform:none!important;letter-spacing:0!important}
+    .pill{font-size:12px;font-weight:500;padding:2px 8px}
+    .input{font-size:16px;min-height:44px;border-radius:10px;padding:10px 12px}
+    .input::placeholder{font-size:13px}
+    .fld{font-size:13px;font-weight:500;color:var(--muted);margin-bottom:4px}
+    .btn{min-height:44px;border-radius:10px;font-size:16px;margin-top:12px;box-shadow:none}
+    .card{border:1px solid var(--hair);border-radius:12px;box-shadow:none;padding:16px;margin-bottom:24px}
 
-    /* 2. A compact header: name on one line, contact beneath, two equal chips, Book a bay. */
-    .acct-head{display:block;padding:16px}
-    .acct-head h1{font-size:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .ah-contact{font-size:13.5px;margin-top:2px}
-    .ah-contact > span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .ah-contact > .d-only{display:none}
-    .ah-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;align-items:stretch}
-    .ah-stat{min-width:0;display:flex;flex-direction:column;justify-content:center;padding:10px 12px}
-    .ah-stat a{display:none}                               /* the sign link is in the banner below */
-    #ah-spin{grid-column:1/-1}
-    .ah-spin{min-width:0}
-    .ah-book{grid-column:1/-1;display:flex;align-items:center;justify-content:center;width:100%;height:48px;padding:0}
+    /* ---- 1. Top bar: logo, section switcher, back link. The old tabs and page header go. ---- */
+    .tabs{display:none}
+    .acct-head{display:none}
+    .m-top{display:block}
+    .m-bar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:12px;height:52px;margin:0 -16px;padding:0 16px;
+      background:#F6F7F9;border-bottom:1px solid transparent}
+    .m-bar.is-scrolled{border-bottom-color:var(--hair)}
+    .m-logo{height:28px;width:auto;flex:none}
+    .m-switch{display:flex;align-items:center;gap:6px;min-height:44px;padding:0 4px;border:0;background:none;font:inherit;
+      font-family:'Space Grotesk';font-size:16px;font-weight:600;color:var(--white);cursor:pointer;flex:1 1 auto;min-width:0}
+    .m-switch > span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .m-caret{flex:none;width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin:-3px 0 0 2px}
+    .m-switch[aria-expanded="true"] .m-caret{transform:rotate(-135deg);margin-top:3px}
+    .m-switch:focus-visible,.m-row:focus-visible,.m-back:focus-visible{outline:2px solid var(--orange);outline-offset:2px;border-radius:10px}
+    .m-back{display:flex;align-items:center;gap:2px;min-height:44px;font-size:14px;color:var(--muted);text-decoration:none;white-space:nowrap;flex:none}
+    .m-back svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
+    /* Section menu: a bottom sheet. */
+    .m-sheet-wrap{position:fixed;inset:0;z-index:60}
+    .m-sheet-wrap[hidden]{display:none}
+    .m-sheet-back{position:absolute;inset:0;background:rgba(16,24,40,.35)}
+    .m-sheet{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border-radius:12px 12px 0 0;
+      padding:8px 16px calc(env(safe-area-inset-bottom) + 16px);border-top:1px solid var(--hair)}
+    .m-sheet::before{content:'';display:block;width:36px;height:4px;border-radius:999px;background:#D0D5DD;margin:4px auto 8px}
+    .m-row.m-menu-row{min-height:48px;padding:4px 12px}
+    .m-menu-row[hidden]{display:none}
+    .m-hint{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
+    .m-hint.is-alert{color:var(--danger)}
+    .m-hint.is-alert::before{content:'';display:inline-block;width:6px;height:6px;border-radius:999px;background:var(--danger);margin-right:6px;vertical-align:1px}
+    .m-check{flex:none;width:16px;height:16px}
+    .m-menu-row[aria-checked="true"] .m-check{background:no-repeat center/16px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23946B27' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E")}
+    .m-menu-row[aria-checked="true"] b{color:var(--orange)}
 
-    /* 3. One warning for an unsigned waiver. */
-    .m-waiver{display:flex;flex-direction:column;gap:10px;background:rgba(217,45,32,.07);border:1px solid rgba(217,45,32,.35);
-      color:#7A1F17;border-radius:14px;padding:14px 16px;margin-bottom:12px;font-size:15px;line-height:1.45}
-    .m-waiver .btn{margin:0;height:44px;min-height:44px;padding:0;display:flex;align-items:center;justify-content:center}
+    /* ---- Rows and grouped lists (iOS Settings style). ---- */
+    .m-label{font-size:13px;font-weight:500;color:var(--dim);margin:24px 4px 8px}
+    .m-list{background:var(--surface);border:1px solid var(--hair);border-radius:12px;overflow:hidden}
+    .m-list > * + *{border-top:1px solid var(--hair)}
+    .m-row{display:flex;align-items:center;gap:12px;width:100%;min-height:56px;padding:8px 12px;background:none;border:0;
+      font:inherit;font-size:15px;color:var(--white);text-align:left;text-decoration:none;cursor:pointer}
+    .m-ic-wrap{flex:none;width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:#F0F1F4;color:var(--muted)}
+    .m-ic-wrap.is-red{background:rgba(217,45,32,.1);color:var(--danger)}
+    .m-ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .m-row-txt{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+    .m-row-txt b{font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .m-row-txt small{font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .m-chev{flex:none;width:8px;height:8px;border-right:2px solid #A0A6B1;border-bottom:2px solid #A0A6B1;transform:rotate(-45deg);margin-right:4px}
 
-    /* 1. Tabs: a sticky segmented control, four equal parts, no sideways scroll. */
-    .tabs{position:sticky;top:0;z-index:30;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:4px;
-      padding:4px;margin:0 0 12px;background:#E4E7EC;border:none;border-radius:12px;overflow:visible;
-      box-shadow:0 -12px 0 var(--black),0 0 0 4px var(--black)}
-    .tabs button{min-height:44px;padding:0 4px;font-size:14px;border:none;border-radius:9px;min-width:0;overflow:hidden;text-overflow:ellipsis}
-    .tabs button[aria-selected="true"]{background:var(--surface);color:var(--white);box-shadow:0 1px 3px rgba(16,24,40,.15)}
-    .tabs button[hidden]{display:none}
+    /* ---- 2. Dashboard top. ---- */
+    .m-hello{margin:12px 4px 0}
+    .m-hello h1{font-size:22px;font-weight:600;margin:0;line-height:1.25}
+    .m-contact{font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
+    .m-att[hidden]{display:none}
+    .m-att .m-label{margin-top:16px}
+    #m-fb-row[aria-expanded="true"] .m-chev{transform:rotate(45deg)}
+    #m-fb-slot[hidden]{display:none}
+    #m-fb-slot{padding:0 12px 12px}
+    #m-fb-slot #fb-card{border:0;padding:0;margin:0;background:none;border-radius:0}
+    #m-fb-slot #fb-card > .sec-title,#m-fb-slot #fb-card > .sec-title + .sub{display:none}   /* the row already says it */
+    #m-fb-slot .stars{gap:4px;margin:0 0 8px}
+    #m-fb-slot .star{width:44px;height:44px;border:0;background:none;font-size:30px;border-radius:10px;color:#C9CED6}
+    #m-fb-slot .star.is-on{color:#E8A317;background:none}
+    #m-fb-slot #fb-card:not(:has(.star.is-on)) :is(.fld,#fb-comment,.err,.row2){display:none}
+    #m-fb-slot .row2{display:flex;flex-direction:row-reverse;align-items:center;gap:12px;margin-top:8px}
+    #m-fb-slot #fb-send{flex:1;margin:0}
+    #m-fb-slot #fb-skip{flex:none;width:auto;min-width:0;margin:0;border:0;background:none;color:var(--muted);text-decoration:underline;font-weight:500;padding:0 8px}
+    #m-fb-slot .err{min-height:0}
+    .m-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:24px 0 0;padding:0}
+    .m-stats > div{padding:0 12px;min-width:0}
+    .m-stats > div:first-child{padding-left:4px}
+    .m-stats > div + div{border-left:1px solid var(--hair)}
+    .m-stats b{display:block;font-size:17px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .m-stats b.is-ok{color:var(--ok)} .m-stats b.is-bad{color:var(--danger)}
+    .m-stats small{display:block;font-size:12px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .m-book{display:flex;align-items:center;justify-content:center;height:48px;margin:16px 0 0;border-radius:12px;background:var(--orange);
+      color:#fff;font-family:'Space Grotesk';font-size:16px;font-weight:600;text-decoration:none}
+    #fb-home + #fb-card{display:none}                      /* on a phone the form lives in its row */
+    .inherit{margin:16px 0 0;font-size:13px}
+    .tab-panel{margin-top:24px}
 
-    /* 4. The league tab in order of what matters: one column, the team card unboxed, each part its own card. */
-    .card[data-team-card]{background:none;box-shadow:none;border:none;padding:0}
-    .team-top{padding:0 2px;margin-bottom:12px}
-    .team-top .lg-name{font-size:21px}
-    .team-top .rules-link{display:inline-flex;align-items:center;min-height:44px;padding:0}
-    .lg-grid{display:flex;flex-direction:column;gap:12px;align-items:stretch}
+    /* ---- 3. League: grouped lists; a card only for the course. ---- */
+    .card[data-team-card]{background:none;border:0;padding:0;margin:0}
+    /* brand.css loads after this page's styles: these win over its card shadows and grey fills. */
+    body .card{box-shadow:none}
+    body .card[data-team-card]{box-shadow:none;background:none}
+    body .stand-box{background:var(--surface);border:1px solid var(--hair)}
+    body .sched{background:none;border:0}
+    body .m-g-myteam .side-box{background:none}
+    .m-g-myteam .side-box + .side-box{border-top:1px solid var(--hair)}
+    .team-top{margin:0 4px 12px;display:block}
+    .team-top .lg-name{font-size:18px;font-weight:600;margin:0}
+    .team-top .sub{font-size:13px;margin-top:4px;color:var(--dim)}
+    .team-top .rules-link{display:inline-flex;align-items:center;min-height:44px;font-size:15px;font-weight:500;color:var(--orange);padding:0}
+    .lg-grid{display:flex;flex-direction:column;gap:0;align-items:stretch}
     .lg-main,.lg-side{display:contents}
     .m-g{order:20}
-    .m-g-top{order:1} .m-g-team{order:2} .m-g-seats{order:3} .m-g-invite{order:4} .m-g-stand{order:5}
-    .m-g-weeks{order:6} .m-g-cards{order:7} .m-g-past{order:8} .m-g-holes{order:9} .m-g-details{order:10}
-    .m-g:not(.m-g-top){background:var(--surface);border:none;border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 2px 8px rgba(16,24,40,.06)}
-    .m-g .sec-title:first-child,.m-g-stand > .sec-title{margin-top:0}
-    .m-g-top .course-card{margin-bottom:12px}
-    /* Collapsible sections: closed, with a chevron and a one-line summary. */
-    .m-acc{padding:4px 16px!important}
-    .m-acc-head{display:flex;align-items:center;gap:10px;width:100%;min-height:52px;background:none;border:0;padding:0;
+    .m-g-top{order:1} .m-g-myteam{order:2} .m-g-stand{order:3}
+    .m-g-weeks{order:4} .m-g-cards{order:5} .lg-side .m-g-past{order:6} .m-g-holes{order:7} .lg-side .m-g-details{order:8}
+    /* a) This week */
+    .m-g-top{display:flex;flex-direction:column;gap:12px}
+    .course-card{padding:16px;margin:0;border-radius:12px}
+    .course-card .t-k{font-size:12px;font-weight:500}
+    .cc-name{font-size:18px;font-weight:600;margin-top:4px}
+    .cc-loc{font-size:13px}
+    .course-card .chips{gap:4px;margin-top:8px}
+    .course-card .chip{font-size:12px;height:32px;display:inline-flex;align-items:center;padding:0 12px;border-radius:999px}
+    .course-card .cc-more{display:inline-flex;align-items:center;min-height:44px;margin-top:4px;font-size:15px;font-weight:500}
+    .week-now,.lg-note{border:1px solid var(--hair)!important;border-left-width:1px!important;border-radius:12px;background:var(--surface)!important;padding:12px 16px;margin:0}
+    .week-now .t-k{font-size:12px;font-weight:500;color:var(--dim)}
+    .wn-main{font-size:16px;font-weight:600;margin-top:4px}
+    .wn-sub{font-size:15px}
+    .lg-note.is-owed{background:#FDF3F2!important;border-color:rgba(217,45,32,.25)!important;color:#8A2A1F}
+    /* b) My team: one list; Seats and Invite open in place. */
+    .m-g-myteam{display:block}
+    .m-group > .m-list{display:block}
+    .m-g-myteam .side-box{background:none;border:0;border-radius:0;padding:0 12px}
+    .m-acc-head{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;background:none;border:0;padding:0;
       font:inherit;color:var(--white);text-align:left;cursor:pointer}
-    .m-acc-t{font-family:'Space Grotesk';font-weight:700;font-size:16px;flex:1 1 auto;min-width:0}
-    .m-acc-s{font-size:13.5px;color:var(--dim);text-align:right;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .m-acc-chev{flex:none;width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin:-4px 4px 0 2px;transition:transform .15s}
-    .m-acc.is-open .m-acc-chev{transform:rotate(-135deg);margin-top:4px}
+    .m-acc-t{font-size:15px;font-weight:500;flex:none}
+    .m-acc-s{font-size:12px;color:var(--dim);text-align:right;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .m-acc-chev{flex:none;width:8px;height:8px;border-right:2px solid #A0A6B1;border-bottom:2px solid #A0A6B1;transform:rotate(-45deg);margin-right:4px;transition:transform .15s}
+    .m-acc.is-open .m-acc-chev{transform:rotate(45deg)}
     .m-acc:not(.is-open) > .m-acc-body{display:none}
-    .m-acc > .m-acc-body{padding-bottom:12px}
+    .m-acc > .m-acc-body{padding:0 0 12px}
     .m-acc-body > .sec-title:first-child{display:none}
-    .m-acc-head:focus-visible{outline:2px solid var(--orange);outline-offset:2px;border-radius:8px}
-
-    /* 5. Week by week: no box inside the page scroll; three weeks and a button for the rest. */
-    .lg-main .sched,.sched{max-height:none;overflow:visible;border:none;background:none;border-radius:0}
+    .m-acc-head:focus-visible{outline:2px solid var(--orange);outline-offset:-2px;border-radius:10px}
+    .seat-bar{margin:4px 0 8px}
+    .side-box .lg-note{margin-top:8px}
+    .inv-role{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:2px;margin:0 0 12px;background:#EEF0F3;border-radius:10px}
+    .inv-role button{height:36px;min-height:0;border:0;background:none;border-radius:8px;font-size:13px;font-weight:500;padding:0 8px;color:var(--muted);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    .inv-role button.is-on{background:var(--surface);color:var(--white);box-shadow:0 1px 2px rgba(16,24,40,.12)}
+    .inv-role button:disabled{color:#9AA1AC;opacity:1}
+    .inv-help-sub,.inv-help-player{font-size:13px!important;color:var(--dim)}
+    .m-count{display:block;margin-top:4px;font-weight:500;color:var(--white);font-size:13px}
+    .seat-pick button{min-height:44px;border-radius:10px;font-weight:500}
+    .chips .chip{font-size:13px;border-radius:999px}
+    /* c) Standings */
+    .m-g-stand .sec-title{font-size:13px;font-weight:500;color:var(--dim);margin:24px 4px 8px;font-family:inherit}
+    .m-g-stand .sec-hint{font-size:13px}
+    .stand-box{background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:4px 12px;max-height:none;overflow:visible}
+    .stand-box .team-h{font-size:13px;font-weight:600;margin:8px 0 4px}
+    .stand-box .sub{font-size:13px;color:var(--dim)}
+    .stand-box .chip{font-size:12px}
+    .stand-box .lg-table{table-layout:fixed;font-size:15px;margin-top:4px}
+    .stand-box .lg-table th{font-size:11px;font-weight:500;color:var(--dim);padding:8px 4px;background:none}
+    .stand-box .lg-table td{padding:0 4px;height:44px;border-bottom:1px solid var(--hair)}
+    .stand-box .lg-table tr:last-child td{border-bottom:0}
+    .stand-box .lg-table th:first-child,.stand-box .lg-table td:first-child{width:28px;text-align:center;padding-left:0;padding-right:0}
+    .stand-box .lg-table td:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .stand-box .lg-table th.num,.stand-box .lg-table td.num{width:56px;font-variant-numeric:tabular-nums;font-weight:500}
+    .stand-box tr.is-you td{background:rgba(148,107,39,.08)}
+    .stand-box tr.is-you td:first-child{box-shadow:none}                 /* no decorative edge */
+    .stand-box tr.is-pin td{background:rgba(148,107,39,.08);border-bottom:1px solid var(--hair)}
+    .m-you-top tr.is-pin{display:none}                                   /* your row is already in the top five */
+    .tbl-wrap:not(.show-all) .m-far{display:none}
+    .m-weeks-all{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin:0;background:none;border:0;
+      font:inherit;font-size:15px;font-weight:500;color:var(--orange);cursor:pointer}
+    /* d) The rest of the season: rows in one list. */
+    .m-g-weeks,.m-g-cards,.m-g-past,.m-g-holes,.m-g-details{background:var(--surface);border:1px solid var(--hair);border-radius:0;padding:0 12px;margin:0}
+    .m-g-weeks + *,.m-g-cards,.m-g-past,.m-g-holes,.m-g-details{border-top:0}
+    .m-g-weeks{border-radius:12px 12px 0 0;margin-top:24px}
+    .m-g-details{border-radius:0 0 12px 12px}
+    .m-g-cards,.m-g-past,.m-g-holes,.m-g-details{box-shadow:inset 0 1px 0 var(--hair)}
+    .m-g-past.side-box,.m-g-details.side-box{background:var(--surface)}
+    .lg-main .sched,.sched{max-height:none;overflow:visible;border:0;background:none;border-radius:0}
     .sched:not(.show-all) .m-far{display:none}
-    .stand-box .m-weeks-all{margin-bottom:4px}
     .sched.show-all .m-near{display:none}
     .sched-more{display:none}
-    .sched-row{grid-template-columns:24px auto minmax(0,1fr);gap:10px;min-height:48px;padding:8px 2px}
-    .sched-row .sd-date{white-space:nowrap}
+    .sched-row{grid-template-columns:24px auto minmax(0,1fr);gap:8px;min-height:44px;padding:8px 0;border-bottom:1px solid var(--hair)}
+    .sched-row .sd-n{font-weight:500}
+    .sched-row .sd-date{white-space:nowrap;font-variant-numeric:tabular-nums}
     .sched-row .sd-what{text-align:right}
-    .sd-pill{display:inline-block;font-size:12.5px;line-height:1.3;padding:4px 9px;border-radius:999px;background:var(--surface-2);color:var(--muted);text-align:left}
-    .sched-row.is-current .sd-pill{background:rgba(154,105,15,.12);color:var(--orange)}
+    .sd-pill{display:inline-block;font-size:12px;line-height:1.3;padding:3px 8px;border-radius:999px;background:#F0F1F4;color:var(--muted);text-align:left}
+    .sched-row.is-current .sd-pill{background:rgba(148,107,39,.12);color:var(--orange)}
     .sched-row.is-missed .sd-pill{background:rgba(217,45,32,.08);color:var(--danger)}
-    /* A week with a round: its details (when, where, score, photo) get their own line under the date. */
+    .sched-row.is-catchup .sd-pill{background:none;border:1px dashed #C9CED6;color:var(--dim)}
+    .sched-row.is-current{background:none}
     .sched-row.has-round .sd-what{grid-column:2/-1;text-align:left}
-    .sched-row.has-round .sd-pill{border-radius:10px;padding:6px 10px;display:block}
+    .sched-row.has-round .sd-pill{border-radius:10px;padding:6px 8px;display:block}
     .sched-row.has-round .sc-ctl{margin-top:8px}
-    .sched-row.is-catchup{background:repeating-linear-gradient(135deg,transparent 0 8px,rgba(20,22,26,.03) 8px 16px)}
-    .sched-row.is-catchup .sd-pill{background:none;border:1px dashed var(--border);color:var(--dim)}
-    .sched-stage{padding:10px 2px 4px;background:none;border-bottom:1px solid var(--border)}
-    .m-weeks-all{display:block;width:100%;min-height:44px;margin-top:8px;background:none;border:1px solid var(--border);border-radius:10px;
-      font:inherit;font-weight:700;font-size:14.5px;color:var(--orange);cursor:pointer}
-
-    /* 6. Standings: a narrow # column, one-line names, even digits. */
-    .stand-box{border:none;padding:0;max-height:none;overflow:visible}
-    .tbl-wrap:not(.show-all) .m-far{display:none}
-    .stand-box .lg-table{table-layout:fixed;font-size:15px}
-    .stand-box .lg-table th:first-child,.stand-box .lg-table td:first-child{width:30px;padding-left:2px;padding-right:2px;text-align:center}
-    .stand-box .lg-table td:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .stand-box .lg-table th.num,.stand-box .lg-table td.num{width:62px;font-variant-numeric:tabular-nums}
-    .stand-box .lg-table tr[data-team]{height:44px}
-    .chips .chip{font-size:13px}
-
-    /* 7. Hole stats: one line each, the label left and the figure right. */
-    .hs-lead{grid-template-columns:1fr;gap:6px}
-    .hs-lead .tile{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:10px 12px}
-    .hs-lead .tile .t-k{margin:0}
+    .sched-stage{padding:12px 0 4px;background:none;border-bottom:1px solid var(--hair);font-size:12px;font-weight:600;color:var(--orange)}
+    .sched-stage span{font-size:12px}
+    .hs-week{border:1px solid var(--hair);border-radius:12px;padding:12px}
+    .hs-head{font-size:15px}
+    .hs-photo{font-size:13px}
+    .sc-btn{min-height:44px;border-radius:10px;font-weight:500;font-size:15px;padding:0 12px}
+    .hs-cell input{min-height:40px;font-size:16px}
+    .hs-foot .btn{min-height:44px}
+    .hs-lead{grid-template-columns:1fr;gap:0}
+    .hs-lead .tile{display:flex;justify-content:space-between;align-items:center;gap:12px;background:none;border:0;border-bottom:1px solid var(--hair);border-radius:0;padding:12px 0;min-height:44px}
+    .hs-lead .tile:last-child{border-bottom:0}
+    .hs-lead .tile .t-k{margin:0;font-size:15px;font-weight:400;color:var(--white)}
+    .hs-lead .tile .t-s{margin:0;font-size:13px;color:var(--dim)}
     .hs-lead .tile:has(ol){display:block}
+    .sch-row{min-height:52px;border-radius:10px;font-size:15px}
+    .sch-row b{font-weight:500}
+    .hs-foot .btn{font-size:15px}
+    .kv{flex-direction:column;align-items:flex-start;gap:2px;padding:8px 0;border-bottom:1px solid var(--hair)}
+    .kv:last-child{border-bottom:0}
+    .kv .k{font-size:13px;color:var(--dim)}
+    .kv .v{text-align:left;font-size:15px}
 
-    /* 8. Invite: a real two-way toggle, clear help, phone-sized inputs. */
-    .inv-role{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:3px;background:var(--surface-2);border-radius:11px}
-    .inv-role button{min-height:44px;border:none;background:none;border-radius:9px;font-size:14px}
-    .inv-role button.is-on{background:var(--surface);color:var(--orange);box-shadow:0 1px 3px rgba(16,24,40,.15)}
-    .inv-role button:disabled{background:none;color:var(--dim);opacity:1;text-decoration:none}
-    .m-count{display:block;margin-top:6px;font-weight:700;color:var(--white)}
-    .seat-pick button{min-height:44px}
-    .sc-btn{min-height:44px;padding:8px 14px}
-    .inv-link .btn{min-height:48px}
+    /* ---- Bookings, Profile, Rewards: the same grouped lists. ---- */
+    #panel-bookings > .card,#panel-profile > .card,#panel-rewards .card{background:none;border:0;padding:0;margin:0;max-width:none!important}
+    #panel-bookings .sec-title,#panel-profile .sec-title,#panel-rewards .sec-title{font-family:inherit;font-size:13px;font-weight:500;color:var(--dim);margin:24px 4px 8px}
+    #panel-bookings .bk-cols{grid-template-columns:minmax(0,1fr);gap:0}
+    #panel-bookings .bk-cols > div:first-child .sec-title{margin-top:0}
+    #panel-profile .sec-title:first-child,#panel-rewards .sec-title:first-child{margin-top:0}
+    .m-list-wrap{display:block;background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:0 12px}
+    .bk{min-height:56px;padding:8px 0;border-bottom:1px solid var(--hair)}
+    .bk b{font-weight:500}
+    .bk .b-sub{font-size:13px;color:var(--dim)}
+    .bk .pill{margin-left:8px}
+    .m-list-wrap .empty{padding:12px 0}
+    .muted-note{margin:16px 4px 0;font-size:13px}
+    #details{background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:0 12px 12px}
+    #details .kv{flex-direction:row;justify-content:space-between;align-items:center;gap:12px;min-height:44px}
+    #details .kv .v{text-align:right}
+    #details .kv:has(+ .ph-hint),#details .kv.is-long{flex-direction:column;align-items:flex-start}
+    #details .kv:has(+ .ph-hint) .v{text-align:left}
+    #details .ph-hint{text-align:left!important;margin:-4px 0 8px!important;font-size:12px}
+    #details .btn{background:var(--orange);color:#fff;border:0;min-height:44px;padding:0!important}
+    .prof-waiver{flex-direction:row!important;justify-content:space-between;align-items:center;background:var(--surface);border:1px solid var(--hair)!important;border-radius:12px;padding:0 12px!important;min-height:52px}
+    #o-out{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin-top:24px!important;background:var(--surface);
+      border:1px solid var(--hair);border-radius:12px;color:var(--danger);font-weight:500;font-size:15px;text-decoration:none}
+    #rewards .card{background:var(--surface)!important;border:1px solid var(--hair)!important;padding:12px!important}
 
-    /* 9 & 11. Label above value where values run long. */
-    .lg-side .kv,.m-g .kv,#panel-profile .kv{flex-direction:column;align-items:flex-start;gap:2px;padding:9px 0}
-    .lg-side .kv .v,.m-g .kv .v,#panel-profile .kv .v{text-align:left}
-    #panel-profile .ph-hint{text-align:left!important;margin:0 0 6px!important}
-    #panel-profile .card{max-width:none!important}
-    #d-edit{background:var(--orange);color:#fff;border:none;min-height:48px;padding:0!important}
-    #o-out{background:none;border:none;color:var(--muted);text-decoration:underline;font-weight:600;margin-top:32px!important;min-height:44px}
-
-    /* 12. Bookings. */
-    .bk-cols{grid-template-columns:minmax(0,1fr);gap:16px}
-    .bk .pill{margin-left:6px;vertical-align:1px}
-
-    /* Pop-ups and small targets. */
-    .lg-dlg{width:calc(100vw - 16px)}
-    .dlg-in{padding:18px 16px}
-    .dlg-x{width:44px;height:44px}
-    .course-card .cc-more{display:inline-flex;align-items:center;min-height:44px;margin-top:4px}
-    .sch-row{min-height:48px}
-    .psc-grid,.par-row{gap:3px}
-    .psc-cell b{font-size:15px}
+    /* ---- Pop-ups. ---- */
+    .lg-dlg{width:calc(100vw - 16px);border-radius:12px}
+    .dlg-in{padding:16px}
+    .dlg-in h2{font-size:18px}
+    .dlg-x{width:44px;height:44px;border-radius:10px}
+    .tile{border-radius:12px}
+    .tile .t-v{font-size:18px}
+    .psc-grid,.par-row{gap:4px}
+  }
+  @media (max-width:360px){
+    .m-stats{grid-template-columns:auto auto auto;justify-content:space-between}
+    .m-stats > div{padding:0 8px}
   }
 </style>
 <link rel="stylesheet" href="/assets/brand.css" />
@@ -942,7 +1071,75 @@ function drawProfile(c, bks, justInherited, opts){
   const want = location.hash.slice(1);
   const first = TABS.some(([k]) => k === want) ? want : fromContest() ? 'profile' : hasLeague ? 'league' : 'bookings';
 
+  // ---- Phones (≤640px): a top bar with a section switcher, then a small dashboard. Hidden on wider screens.
+  const ICON = {
+    league: '<path d="M12 3v12M12 3l7 3-7 3"/><path d="M6 21c0-2.2 2.7-4 6-4s6 1.8 6 4"/>',
+    bookings: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
+    rewards: '<path d="M20 12v9H4v-9M2 7h20v5H2zM12 21V7M12 7c-2-4-6-4-6-1s6 1 6 1zm0 0c2-4 6-4 6-1s-6 1-6 1z"/>',
+    waiver: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+    star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+    card: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    money: '<circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1.3 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"/>',
+    wheel: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/>',
+  };
+  const svg = k => `<svg class="m-ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
+  const chev = '<span class="m-chev" aria-hidden="true"></span>';
+  const shortWd = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{ weekday:'short', month:'short', day:'numeric' }); } catch(e){ return iso; } };
+  const mDay = iso => iso === today ? 'Today' : shortWd(iso);
+  const nextBk = upcoming.slice().sort((a,b) => a.booking_date.localeCompare(b.booking_date) || a.start_min - b.start_min)[0] || null;
+  // What each section is up to, for the switcher's menu.
+  const t0 = teams[0], lgW = t0 && Array.isArray(t0.weeks) ? t0.weeks : [];
+  const lgCur = lgW.find(w => w.start === LGS().weekIn(t0.league || {}, today));
+  const HINT = {
+    league: MY_SOLOS.length && !teams.length ? 'Waiting to be placed' : !lgW.length ? 'Your team'
+      : lgCur ? `Week ${lgCur.number} of ${lgW.length}` : today < lgW[0].start ? `Week 1 starts ${shortWd(lgW[0].start).replace(/^\w+, /,'')}` : 'Season over',
+    bookings: upcoming.length ? `${upcoming.length} upcoming` : 'Nothing booked',
+    profile: c.waiver_signed_at ? 'Your details' : 'Waiver not signed',
+    rewards: 'Your prizes',
+  };
+  // Things to do now: compact rows, only when there is something.
+  const att = [];
+  if(!c.waiver_signed_at) att.push(`<a class="m-row m-att-row" href="/waiver"><span class="m-ic-wrap is-red">${svg('waiver')}</span><span class="m-row-txt"><b>Sign your waiver</b><small>Required before you play</small></span>${chev}</a>`);
+  if(ask) att.push(`<div class="m-att-fb"><button type="button" class="m-row m-att-row" id="m-fb-row" aria-expanded="false" aria-controls="m-fb-slot"><span class="m-ic-wrap">${svg('star')}</span><span class="m-row-txt"><b>Rate your session</b><small>${esc(mDay(ask.booking_date))} ${hhmm(ask.start_min)} · ${esc(bayName(ask.bay_id))}</small></span>${chev}</button><div id="m-fb-slot" hidden></div></div>`);
+  teams.forEach((t, i) => {
+    const hs = t.holes, wk = Array.isArray(t.weeks) ? t.weeks : [], now = venueNow();
+    const due = hs && hs.canEnter ? hs.weeks.find(h => { if(h.status) return false; const w = wk.find(x => x.start === h.start), r = w && w.round;
+      return !r || r.booking_date < now.date || (r.booking_date === now.date && (r.start_min || 0) <= now.min); }) : null;
+    if(due) att.push(`<button type="button" class="m-row m-att-row" data-m-go="league" data-m-open="cards" data-m-card="${i}"><span class="m-ic-wrap">${svg('card')}</span><span class="m-row-txt"><b>Fill in your scorecard</b><small>Week ${due.week}${due.course ? ' · ' + esc(due.course) : ''}</small></span>${chev}</button>`);
+    const sh = t.seats && t.seats.myShareCents;
+    if(sh) att.push(`<button type="button" class="m-row m-att-row" data-m-go="league" data-m-open="seats" data-m-card="${i}"><span class="m-ic-wrap">${svg('money')}</span><span class="m-row-txt"><b>Pay your league share</b><small>$${(sh/100).toFixed(sh % 100 ? 2 : 0)} · ${esc((t.team||{}).name || 'your team')}</small></span>${chev}</button>`);
+  });
+  const mobileTop = `<div class="m-only m-top">
+    <div class="m-bar" id="m-bar">
+      <img class="m-logo" src="/assets/invictus-logo.png" alt="Invictus Golf" />
+      <button type="button" class="m-switch" id="m-switch" aria-haspopup="menu" aria-expanded="false" aria-controls="m-menu"><span id="m-switch-label">${esc((TABS.find(x => x[0] === first) || TABS[0])[1])}</span><span class="m-caret" aria-hidden="true"></span></button>
+      <a class="m-back" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Back to booking</a>
+    </div>
+    <div class="m-sheet-wrap" id="m-sheet" hidden>
+      <div class="m-sheet-back" data-m-close></div>
+      <div class="m-sheet" role="menu" id="m-menu" aria-label="Sections">
+        ${TABS.map(([k, label]) => `<button type="button" role="menuitemradio" class="m-row m-menu-row" data-m-tab="${k}" aria-checked="${k===first}" ${k==='rewards'?'hidden':''}>
+          <span class="m-ic-wrap">${svg(k)}</span><span class="m-row-txt"><b>${label}</b></span>
+          <span class="m-hint${k==='profile' && !c.waiver_signed_at ? ' is-alert' : ''}" data-m-hint="${k}">${esc(HINT[k] || '')}</span><span class="m-check" aria-hidden="true"></span></button>`).join('')}
+      </div>
+    </div>
+    <div class="m-hello">
+      <h1>Hi ${esc(c.first_name || String(c.name || '').split(' ')[0] || 'there')}</h1>
+      <div class="m-contact">${[c.email ? esc(c.email) : '', c.phone ? esc(fmtPhone(c.phone)) : ''].filter(Boolean).join(' · ')}</div>
+    </div>
+    <div class="m-att"${att.length ? '' : ' hidden'} id="m-att"><div class="m-label">Needs your attention</div><div class="m-list">${att.join('')}<span id="m-att-spin"></span></div></div>
+    <div class="m-stats">
+      <div><b>${fmtHrs(c.hours_balance_min)}</b><small>Prepaid hours</small></div>
+      <div><b class="${c.waiver_signed_at ? 'is-ok' : 'is-bad'}">${c.waiver_signed_at ? 'Signed' : 'Not signed'}</b><small>Waiver</small></div>
+      <div title="${nextBk ? esc(mDay(nextBk.booking_date) + ' · ' + hhmm(nextBk.start_min)) : ''}"><b>${nextBk ? (nextBk.booking_date === today ? hhmm(nextBk.start_min) : esc(shortWd(nextBk.booking_date).replace(/^\w+, /,''))) : 'None'}</b><small>${nextBk && nextBk.booking_date === today ? 'Next · today' : 'Next booking'}</small></div>
+    </div>
+    <a class="m-book" href="/">Book a bay</a>
+  </div>`;
+
   render(`
+    ${mobileTop}
+    <span id="fb-home" hidden></span>
     ${ask ? `<div class="card" id="fb-card">
       <div class="sec-title" style="margin-top:0">How was your session?</div>
       <div class="sub" style="margin-bottom:12px">${esc(fmtDate(ask.booking_date))} · ${hhmm(ask.start_min)}–${hhmm(ask.end_min)} · ${esc(bayName(ask.bay_id))}</div>
@@ -968,7 +1165,6 @@ function drawProfile(c, bks, justInherited, opts){
       </div>
     </div>
 
-    ${c.waiver_signed_at ? '' : `<div class="m-waiver m-only" role="note"><div><b>Waiver not signed.</b> You need to sign it before you play.</div><a class="btn btn-primary" href="/waiver">Sign now</a></div>`}
     <nav class="tabs" role="tablist" aria-label="My account">${TABS.map(([k, label]) =>
       `<button type="button" role="tab" id="tab-${k}" data-tab="${k}" aria-controls="panel-${k}" aria-selected="${k===first}" tabindex="${k===first?0:-1}" ${k==='rewards'?'hidden':''}>${label}</button>`).join('')}</nav>
 
@@ -985,9 +1181,9 @@ function drawProfile(c, bks, justInherited, opts){
     <section class="tab-panel" id="panel-bookings" role="tabpanel" aria-labelledby="tab-bookings" ${first==='bookings'?'':'hidden'}>
       <div class="card"><div class="bk-cols">
         <div><div class="sec-title">Upcoming</div>
-          ${upcoming.length ? upcoming.map(bkRow).join('') : '<div class="empty">Nothing booked yet. <a href="/" style="color:var(--orange);font-weight:700">Book a bay</a></div>'}</div>
+          <div class="m-list-wrap">${upcoming.length ? upcoming.map(bkRow).join('') : '<div class="empty">Nothing booked yet. <a href="/" style="color:var(--orange);font-weight:700">Book a bay</a></div>'}</div></div>
         <div><div class="sec-title">Past visits</div>
-          ${past.length ? past.slice(0,10).map(bkRow).join('') : '<div class="empty">No visits yet.</div>'}</div>
+          <div class="m-list-wrap">${past.length ? past.slice(0,10).map(bkRow).join('') : '<div class="empty">No visits yet.</div>'}</div></div>
       </div>
       ${!hasLeague ? '<div class="muted-note">Want to play in a league? <a href="/leagues" style="color:var(--orange);font-weight:700">Start a team</a></div>' : ''}</div>
     </section>
@@ -997,7 +1193,7 @@ function drawProfile(c, bks, justInherited, opts){
         <div class="sec-title" style="margin-top:0">Your details</div>
         <div id="details"></div>
         <div class="sec-title">Waiver</div>
-        <div class="kv"><span class="k">Status</span><span class="v">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span>'}</span></div>
+        <div class="kv prof-waiver"><span class="k">Status</span><span class="v">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span>'}</span></div>
         ${c.waiver_signed_at ? '' : '<div class="sub d-only-block" style="margin:4px 0 0">You need to sign it before you play. <a href="/waiver" style="color:var(--orange);font-weight:700">Sign the waiver</a></div>'}
         ${dev ? '' : '<button class="btn btn-ghost" id="o-out" style="margin-top:22px">Sign out</button>'}
       </div>
@@ -1012,8 +1208,12 @@ function drawProfile(c, bks, justInherited, opts){
   const show = k => {
     tabBtns.forEach(b => { const on = b.dataset.tab === k; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
     document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.id !== 'panel-' + k; });
-    history.replaceState(null, '', '#' + k);
+    if(location.hash !== '#' + k) history.replaceState(null, '', '#' + k);
+    mSyncSection(k);
   };
+  // The phone switcher changes the address (#bookings…), so refresh and the back button both work.
+  window.onhashchange = () => { const k = location.hash.slice(1), b = tabBtns.find(x => x.dataset.tab === k && !x.hidden); if(b) show(k); };
+  wireMobileTop(show, dev);
   tabBtns.forEach((b, i) => {
     b.onclick = () => show(b.dataset.tab);
     b.onkeydown = e => {
@@ -1387,15 +1587,17 @@ function teamCard(t, idx, opts){
         ${holesBlock}
       </div>
       <aside class="lg-side">
-        <div class="side-box m-g m-g-team"><div class="sec-title">On the team</div>${chips}${subsBlock}</div>
+        <div class="m-group m-g m-g-myteam"><div class="m-label m-only">My team</div><div class="m-list">
+        ${mAcc('team', 'Captain', captain ? `${esc(L.publicName(captain.name))}${isMe(captain) ? ' (you)' : ''}` : 'Not recorded', `<div class="sec-title">On the team</div>${chips}${subsBlock}`, 'side-box m-g-team')}
+        ${seatsBlock ? mAcc('seats', 'Seats', `${st.paidSeats} of ${st.seats} paid · ${money(st.shareCents)}`, seatsBlock, 'side-box m-g-seats').replace('class="m-acc side-box m-g-seats"', `class="m-acc side-box m-g-seats" id="seats-${idx}"`) : ''}
+        ${inviteHTML ? mAcc('invite', iAmCaptain === false ? 'Adding players' : !(canPlayer || canSub) ? 'Team full' : role0 === 'sub' ? 'Invite a substitute' : 'Invite a teammate', '', inviteHTML, 'side-box m-g-invite') : ''}
+        </div></div>
         ${hs ? (() => { const sent = hs.weeks.filter(w => w.status).slice().reverse();
           return mAcc('past', 'Past scorecards', sent.length ? `${sent.length} sent` : 'None yet', `<div class="sec-title">Scorecards</div>${(() => {
           return sent.length ? `<div class="sch-list">${sent.map(w => `<button type="button" class="sch-row" data-week="${esc(w.start)}">
               <span><b>Week ${w.week}</b>${w.course ? `<span class="sch-course">${esc(w.course)}</span>` : ''}</span>
               <span class="sch-right"><b>${w.total != null ? w.total : '—'}</b>${w.status === 'confirmed' ? '<span class="pill ok">Confirmed</span>' : '<span class="pill warn">Waiting</span>'}</span></button>`).join('')}</div>`
             : '<div class="empty" style="padding:4px 0">No scorecards yet. They show here after your first round.</div>'; })()}`, 'side-box m-g m-g-past'); })() : ''}
-        ${seatsBlock ? `<div class="side-box m-g m-g-seats" id="seats-${idx}">${seatsBlock}</div>` : ''}
-        ${inviteHTML ? `<div class="side-box m-g m-g-invite">${inviteHTML}</div>` : ''}
         ${mAcc('details', 'League details', (lg.season_start && lg.season_end) ? `${esc(shortDate(lg.season_start))} – ${esc(shortDate(lg.season_end))}` : 'Dates to come',
           `<div class="sec-title">League details</div>
           ${details.map(([k,v]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}`, 'side-box m-g m-g-details')}
@@ -1417,13 +1619,64 @@ function pinMyRows(card){
   // scrolls inside the page). Wider screens show every row, as before.
   card.querySelectorAll('.stand-box .tbl-wrap').forEach(wrap => {
     const rows = [...wrap.querySelectorAll('tbody tr')].filter(tr => !tr.classList.contains('is-pin'));
-    if(rows.length <= 10 || wrap.nextElementSibling && wrap.nextElementSibling.classList.contains('m-weeks-all')) return;
-    rows.slice(10).forEach(tr => tr.classList.add('m-far'));
+    if(rows.length <= 5 || wrap.nextElementSibling && wrap.nextElementSibling.classList.contains('m-weeks-all')) return;
+    rows.slice(5).forEach(tr => tr.classList.add('m-far'));
+    if(rows.findIndex(tr => tr.classList.contains('is-you')) < 5) wrap.classList.add('m-you-top');
     wrap.insertAdjacentHTML('afterend', `<button type="button" class="m-only m-weeks-all" aria-expanded="false" data-label="Show all ${rows.length} teams">Show all ${rows.length} teams</button>`);
   });
 }
 
 // ---------- Mobile only (max-width 640px) ----------
+const LGS = () => window.InvictusLeagues;
+const MQ_PHONE = window.matchMedia('(max-width: 640px)');
+// The switcher's label, menu ticks and the page title follow the section on screen.
+function mSyncSection(k){
+  const row = document.querySelector(`.m-menu-row[data-m-tab="${k}"]`);
+  if(row) $('#m-switch-label').textContent = row.querySelector('b').textContent;
+  document.querySelectorAll('.m-menu-row').forEach(r => r.setAttribute('aria-checked', String(r.dataset.mTab === k)));
+}
+// Top bar, section menu, the "needs your attention" rows, and the feedback form's place on a phone.
+function wireMobileTop(show, dev){
+  const btn = $('#m-switch'), wrap = $('#m-sheet'); if(!btn) return;
+  const rows = () => [...document.querySelectorAll('.m-menu-row')].filter(r => !r.hidden);
+  const close = (focusBack = true) => { wrap.hidden = true; btn.setAttribute('aria-expanded', 'false'); if(focusBack) btn.focus(); };
+  const open = () => { wrap.hidden = false; btn.setAttribute('aria-expanded', 'true');
+    (rows().find(r => r.getAttribute('aria-checked') === 'true') || rows()[0]).focus(); };
+  btn.onclick = () => wrap.hidden ? open() : close();
+  wrap.addEventListener('click', e => {
+    if(e.target.closest('[data-m-close]')) return close();
+    const r = e.target.closest('.m-menu-row'); if(!r) return;
+    close(false);
+    if(location.hash !== '#' + r.dataset.mTab) location.hash = r.dataset.mTab; else show(r.dataset.mTab);   // a history entry: back works
+    window.scrollTo(0, 0); btn.focus();
+  });
+  wrap.addEventListener('keydown', e => {
+    if(e.key === 'Escape'){ e.preventDefault(); return close(); }
+    if(e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault(); const list = rows(), i = list.indexOf(document.activeElement);
+    list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length].focus();
+  });
+  // A hairline under the bar once the page has scrolled.
+  const bar = $('#m-bar'); const onScroll = () => bar && bar.classList.toggle('is-scrolled', window.scrollY > 4);
+  window.removeEventListener('scroll', window._mBarScroll); window._mBarScroll = onScroll;
+  window.addEventListener('scroll', onScroll, { passive: true }); onScroll();
+  // Rows that lead into the league: open the part they are about.
+  document.querySelectorAll('.m-att-row[data-m-go]').forEach(r => r.onclick = () => {
+    if(location.hash !== '#' + r.dataset.mGo) location.hash = r.dataset.mGo; else show(r.dataset.mGo);
+    const card = document.querySelector(`[data-team-card="${r.dataset.mCard}"]`); if(!card) return;
+    const acc = card.querySelector(`.m-acc[data-acc="${r.dataset.mOpen}"]`);
+    if(acc && !acc.classList.contains('is-open')) acc.querySelector('.m-acc-head').click();
+    setTimeout(() => (acc || card).scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+  });
+  // "Rate your session": the feedback form opens inside the row on a phone, and goes back above the
+  // header on a wider screen. One form either way.
+  const fbRow = $('#m-fb-row');
+  if(fbRow) fbRow.onclick = () => { const slot = $('#m-fb-slot'), on = slot.hidden; slot.hidden = !on; fbRow.setAttribute('aria-expanded', String(on)); };
+  const placeFb = () => { const fb = $('#fb-card'), slot = $('#m-fb-slot'), home = $('#fb-home'); if(!fb || !slot || !home) return;
+    if(MQ_PHONE.matches){ if(fb.parentElement !== slot) slot.appendChild(fb); } else if(fb.parentElement === slot) home.after(fb); };
+  MQ_PHONE.removeEventListener('change', window._mPlaceFb || (() => {})); window._mPlaceFb = placeFb;
+  MQ_PHONE.addEventListener('change', placeFb); placeFb();
+}
 // A collapsible section: on a phone a header button (title, a one-line summary, a chevron) opens and
 // closes it; on a wider screen the header is hidden and the body shows as it always has.
 const mAcc = (key, title, summary, inner, cls = '') => `<div class="m-acc ${cls}" data-acc="${key}">
@@ -1883,6 +2136,9 @@ async function loadSpinButton(){
   if(!claim && !canSpin) return;
   host.innerHTML = `<a class="ah-spin" href="/contest">${claim ? '<b>You won!</b><span>Claim your prize →</span>' : '<b>Spin the Wheel</b><span>Your spin today is waiting →</span>'}</a>`;
   host.hidden = false;
+  const mRow = $('#m-att-spin');
+  if(mRow){ mRow.outerHTML = `<a class="m-row m-att-row" href="/contest"><span class="m-ic-wrap">${'<svg class="m-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/></svg>'}</span><span class="m-row-txt"><b>${claim ? 'Claim your prize' : 'Spin the Wheel'}</b><small>${claim ? 'You won — answer the question to claim it' : 'Your spin today is waiting'}</small></span><span class="m-chev" aria-hidden="true"></span></a>`;
+    const att = $('#m-att'); if(att) att.hidden = false; }
 }
 
 async function loadRewards(){
@@ -1920,6 +2176,7 @@ async function loadRewards(){
     </div>`;
   };
   const tb = document.querySelector('[data-tab="rewards"]'); if(tb) tb.hidden = false;
+  const mr = document.querySelector('.m-menu-row[data-m-tab="rewards"]'); if(mr) mr.hidden = false;
   host.innerHTML = `<div class="card">
     <div class="sec-title" style="margin-top:0">Rewards</div>
     ${list.length ? `<div class="sub" style="margin-bottom:6px">To redeem a prize, see our staff at the venue — they will find it on your account.</div>${list.map(item).join('')}`
