@@ -3754,7 +3754,8 @@ function promptSheet({ title, body = '', fields = [], okLabel, danger = false, o
     <h3>${esc(title)}</h3>
     ${body?`<div class="sub" style="margin:6px 0 10px;line-height:1.5">${body}</div>`:''}
     ${fields.map(f=>`<div class="field"><label for="pf-${f.id}">${esc(f.label)}</label>
-      <input class="input" id="pf-${f.id}" type="${f.type||'text'}" value="${esc(f.value==null?'':f.value)}" ${f.step?`step="${f.step}"`:''} ${f.min!=null?`min="${f.min}"`:''} placeholder="${esc(f.placeholder||'')}" /></div>`).join('')}
+      ${f.options ? `<select class="input" id="pf-${f.id}">${f.options.map(([v,t])=>`<option value="${esc(v)}" ${v===f.value?'selected':''}>${esc(t)}</option>`).join('')}</select>`
+      : `<input class="input" id="pf-${f.id}" type="${f.type||'text'}" value="${esc(f.value==null?'':f.value)}" ${f.step?`step="${f.step}"`:''} ${f.min!=null?`min="${f.min}"`:''} placeholder="${esc(f.placeholder||'')}" />`}</div>`).join('')}
     <div class="err" id="pf-err"></div>
     <div class="row" style="gap:10px;margin-top:12px">
       <button class="btn btn-ghost" id="pf-no" style="flex:1">Cancel</button>
@@ -4537,11 +4538,13 @@ function leagueResults(ctx){
   // Hole-by-hole leagues (0047): 18 boxes a team, the total adds itself up, players' entries confirmed here.
   const byHole=!!(league.team_mode && league.details && league.details.holeScoring);
   const scored=new Set(results.map(r=>weekFor(r.played_on)));
-  // A catch-up week has no round of its own, so it never takes a score. A week a team played early
-  // (staff booked it ahead) can be scored as soon as that round exists.
-  const early=new Set((rounds||[]).filter(x=>x.status!=='cancelled').map(x=>roundWeek(x,league)).filter(s=>s>LG().weekIn(league,today)));
   const cols=all.filter(w=>!w.catchup && (w.end<today || scored.has(w.start)));                      // weeks already gone, plus any with scores
-  const pickable=all.filter(w=>!w.catchup && (w.start<=LG().weekIn(league,today) || scored.has(w.start) || early.has(w.start)));  // never next month's results
+  // Every week of the season, in order. A catch-up week only once staff booked a round into it.
+  const booked=new Set((rounds||[]).filter(x=>x.status!=='cancelled').map(x=>roundWeek(x,league)));
+  const pickable=all.filter(w=>!w.catchup || scored.has(w.start) || booked.has(w.start));
+  // The tab opens on this week; before the season, week 1; after it, the last week.
+  const nowWk=LG().weekIn(league,today);
+  const openOn=(pickable.find(w=>w.start>=nowWk)||pickable[pickable.length-1]||{}).start;
   const weekAt=s=>all.find(w=>w.start===s);
   // Before the season starts there is no week to enter yet. Say when it opens, rather than show an
   // empty week list over a score table that cannot be saved.
@@ -4562,7 +4565,7 @@ function leagueResults(ctx){
     <div class="sec-h" style="margin-top:18px">Enter or edit a week</div>
     <div class="grid2" style="align-items:end">
       <div class="field" style="margin:0"><label for="lr-week">Week</label>
-        <select class="input" id="lr-week">${[...pickable].reverse().map(w=>`<option value="${w.start}">Week ${w.number} · ${esc(weekLabel(w))}${scored.has(w.start)?' · entered':''}</option>`).join('')}</select></div>
+        <select class="input" id="lr-week">${pickable.map(w=>`<option value="${w.start}" ${w.start===openOn?'selected':''}>Week ${w.number}${w.catchup?' (catch-up)':''} · ${esc(weekLabel(w))}${scored.has(w.start)?' · entered':''}</option>`).join('')}</select></div>
       <div class="dim" style="font-size:12.5px;padding-bottom:10px">${league.scoring==='strokes'?'Lower is better; standings rank by average.':'Higher is better; standings rank by total.'} Leave a box empty for anyone who didn’t play that week.</div>
     </div>
     <div class="tbl-scroll" style="margin-top:12px"><table id="lr-table"></table></div>
@@ -5193,7 +5196,7 @@ function renderOverrideBanner(date){
 function updateStats(){
   const mine=BK.filter(onSheet);
   const booked=mine.filter(b=>b.status!=='blocked'&&b.status!=='held').length, blocked=mine.filter(b=>b.status==='blocked').length;
-  const rev=mine.reduce((s,b)=>s+(b.source==='online'?(b.amount_cents||0):0),0);
+  const rev=mine.reduce((s,b)=>s+(b.source==='online'?(b.amount_cents||0):0)+(Number(b.counter_paid_cents)||0),0);
   $('#stat-booked').textContent=booked; $('#stat-blocked').textContent=blocked;
   $('#stat-rev').textContent='$'+(rev/100).toFixed(rev%100?2:0);
 }
@@ -5444,7 +5447,7 @@ function renderBookingList(){
     const members=grp ? (GROUP_MEMBERS[b.group_id]||[]).slice().sort((x,y)=>String(x.bay_id).localeCompare(String(y.bay_id))) : [];
     const where=grp ? `${members.length} bays · ${esc(members.map(r=>bayName(r.bay_id)).join(', '))}` : esc(bayName(b.bay_id));
     const who=b.status==='blocked' ? '<span class="muted">Blocked</span>' : esc(b.customer_name||'Booked');
-    const cents=b.source==='online' ? (b.amount_cents||0) : 0;
+    const cents=(b.source==='online' ? (b.amount_cents||0) : 0)+(Number(b.counter_paid_cents)||0);
     rows+=`<tr class="lrow" ${grp?`data-group="${b.group_id}"`:`data-id="${b.id}"`}>
       <td style="white-space:nowrap;font-family:'Space Grotesk';font-weight:700">${bkTimeText(b)}</td>
       <td>${where}</td>
@@ -5903,7 +5906,16 @@ function openManage(id){
     return;
   }
 
-  const payLine = (lgRound && lgOff>0
+  // Paid at the counter (migration 0049): cash, the card machine or an e-transfer, recorded by staff.
+  const counterPaid = b.counter_paid_cents!=null ? Number(b.counter_paid_cents) : null;
+  const counterLine = counterPaid!=null
+    ? `<div class="kv"><span class="k">Paid at the counter</span><span class="pill confirmed">Paid ${fmt(counterPaid)} · ${esc(PAID_METHODS[b.counter_paid_method]||'Other')}</span></div>` : '';
+  const counterTxn = counterPaid!=null
+    ? `<div class="txn-row"><span>Paid at the counter · ${esc(PAID_METHODS[b.counter_paid_method]||'Other')}</span><span class="dim">${fmt(counterPaid)} · ${fmtTs(b.counter_paid_at||b.created_at)}${b.counter_paid_by?' · '+esc(b.counter_paid_by):''}</span></div>` : '';
+  // Shown on a booking nobody has paid for yet, whatever else it says; never over a live card hold
+  // (that is charged with "Charge"), nor over money Stripe already took.
+  const canMarkPaid = can('booking.write') && counterPaid==null && !isHeld(b) && !isCaptured(b) && !onlinePaid && b.status!=='cancelled';
+  const payLine = counterLine + (lgRound && lgOff>0
     ? `<div class="kv"><span class="k">League discount</span><span>−${fmt(lgOff)} <span class="dim">(${fmt(leagueOffPerHourCents())} an hour, before tax)</span></span></div>`
     : '') + (isHeld(b)
     ? `<div class="kv"><span class="k">On hold</span><span><b>${fmt(heldCents(b))}</b> <span class="dim">— not taken</span></span></div>`
@@ -5911,6 +5923,7 @@ function openManage(id){
     ? `<div class="kv"><span class="k">Charged</span><span class="pill confirmed">Paid ${fmt(b.amount_cents||0)}</span></div>`
     : onlinePaid
     ? `<div class="kv"><span class="k">Paid online</span><span class="pill confirmed">Paid ${fmt(total)}</span></div>`
+    : counterPaid!=null ? ''
     : acceptDep
       ? `<div class="kv"><span class="k">Deposit held</span><span>${fmt(held)} <span class="dim">(${pay.chargeAmount?'flat':((pay.chargePercent||0)+'%')})</span></span></div>`
       : `<div class="kv"><span class="k">Payment</span><span class="dim">No payment collected</span></div>`);
@@ -5926,6 +5939,7 @@ function openManage(id){
        <div class="txn-row"><span>Charged at check-in</span><span class="dim">${fmt(b.amount_cents||0)} · ${fmtTs(b[HOLD_COLS.captured]||b.created_at)}</span></div>`
     : onlinePaid
     ? `<div class="txn-row"><span>Payment received</span><span class="dim">${fmt(total)} · ${fmtTs(b.created_at)}</span></div>`
+    : counterPaid!=null ? ''
     : acceptDep
       ? `<div class="txn-row"><span>Hold placed</span><span class="dim">${fmt(held)} · ${fmtTs(b.created_at)}</span></div>`
       : `<div class="dim" style="font-size:13px;padding:6px 0">No transactions yet.</div>`;
@@ -5963,6 +5977,8 @@ function openManage(id){
     ${oweBoxHTML(b)}
     ${holdBoxHTML(b)}
     <div class="pay-box">${payLine}${cardLine}</div>
+    ${canMarkPaid?`<button class="btn btn-ghost" id="m-paid" style="width:100%;margin-top:10px">Mark paid at the counter</button>`:''}
+    ${counterPaid!=null && can('money.write')?`<button class="btn btn-ghost btn-sm" id="m-unpaid" style="margin-top:8px">Undo — not paid</button>`:''}
     <!-- "Capture held funds" / "Cancel hold" / "Capture total balance" used to sit here and only
          ever raised a toast — no money was captured or released — while appearing on genuinely
          paid bookings too. These two replace them, and they really do move money: they are shown
@@ -6027,6 +6043,30 @@ function openManage(id){
     sheet.querySelectorAll('.owe-collect').forEach(btn=>btn.onclick=()=>
       leagueCollectFlow(LEAGUE_OWED.rows.find(r=>r.team.id===btn.dataset.team), ()=>{ closeSheet(); loadSchedule(); }));
     if($('#m-release')) $('#m-release').onclick=()=>releaseHoldFlow(b, settled);
+    const reopen=()=>{ closeSheet(); loadSchedule().then(()=>openManage(id)); };
+    if($('#m-paid')) $('#m-paid').onclick=()=>{
+      if(!('counter_paid_cents' in b)){ toast('Run migration 0049 in Supabase first — it adds somewhere to record a counter payment.','err'); return; }
+      promptSheet({ title:`Mark ${b.customer_name||'this booking'} as paid`,
+        body:'For a booking paid in person. Nothing is charged to a card — this only records the payment.',
+        fields:[{ id:'amt', label:'Amount paid ($)', type:'number', step:'0.01', min:0, value:(total/100).toFixed(2) },
+                { id:'how', label:'Paid by', value:'card', options:Object.entries(PAID_METHODS) }],
+        okLabel:'Mark paid',
+        onOk:async v=>{
+          const cents=Math.round(Number(v.amt)*100);
+          if(!Number.isFinite(cents) || cents<0) return 'Enter the amount paid.';
+          const r=await sb.from('bookings').update({ counter_paid_cents:cents, counter_paid_method:v.how,
+            counter_paid_at:new Date().toISOString(), counter_paid_by:ME.email||ME.name||'staff' }).eq('id',id);
+          if(r.error) return 'Could not save: '+r.error.message;
+          toast('Marked as paid','ok'); reopen();
+        } });
+    };
+    if($('#m-unpaid')) $('#m-unpaid').onclick=()=>confirmSheet({ title:'Mark as not paid?',
+      body:`This removes the ${fmt(counterPaid)} recorded as paid at the counter. It stays in the audit log.`, okLabel:'Mark not paid', danger:true,
+      onOk:async()=>{
+        const r=await sb.from('bookings').update({ counter_paid_cents:null, counter_paid_method:null, counter_paid_at:null, counter_paid_by:null }).eq('id',id);
+        if(r.error){ toast('Could not save: '+r.error.message,'err'); return; }
+        toast('Marked as not paid','ok'); reopen();
+      } });
   }
   if($('#m-wv-copy')) $('#m-wv-copy').onclick=()=>{ const link=`${location.origin}/waiver?c=${cust.id}`; navigator.clipboard&&navigator.clipboard.writeText(link); toast('Waiver link copied — text or email it to the customer','ok'); };
   if($('#m-wv-mark')) $('#m-wv-mark').onclick=async()=>{
@@ -6107,10 +6147,10 @@ function openManage(id){
   // what happens to it: a hold is released (never charged); money already taken is NOT refunded.
   if($('#s-cancel')) $('#s-cancel').onclick=()=>{
     const who=esc(b.customer_name||'This booking'), when=`${esc(dateLabel(b.booking_date))}, ${fmtMin(b.start_min)}–${fmtMin(b.end_min)}`;
-    const paid=isCaptured(b) ? (b.amount_cents||0) : (onlinePaid ? total : 0);
+    const paid=(isCaptured(b) ? (b.amount_cents||0) : (onlinePaid ? total : 0)) + (Number(b.counter_paid_cents)||0);
     const money = isHeld(b) ? `The <b>${fmt(heldCents(b))}</b> hold on their card is released — they are never charged.`
       : hasSavedCard(b) ? 'Nothing has been charged; their saved card is forgotten.'
-      : paid>0 ? `<b>They paid ${fmt(paid)}.</b> Cancelling does not refund it — refund it in Stripe if it is owed.`
+      : paid>0 ? `<b>They paid ${fmt(paid)}.</b> Cancelling does not refund it — refund it ${b.counter_paid_cents!=null && !onlinePaid && !isCaptured(b) ? 'at the counter' : 'in Stripe'} if it is owed.`
       : 'No payment was taken.';
     confirmSheet({ title:'Cancel this booking?', okLabel:'Cancel booking', onOk:cancelBooking,
       body:`${who} · ${when}<br><br>${money} The slot is freed for someone else.` });
@@ -6636,6 +6676,8 @@ const HOLD_SELECT = 'id,bay_id,booking_date,start_min,end_min,status,status_labe
   + 'customer_phone,customer_email,amount_cents,created_at,'
   + [HOLD_COLS.state,HOLD_COLS.amount,HOLD_COLS.expires,HOLD_COLS.captured,HOLD_COLS.released].join(',');
 
+// How a booking was paid at the counter (migration 0049).
+const PAID_METHODS = { card:'Card machine', cash:'Cash', e_transfer:'E-transfer', other:'Other' };
 const payState   = b => (b && b[HOLD_COLS.state]) ? String(b[HOLD_COLS.state]) : null;
 const isHeld     = b => payState(b)==='held';
 // A far-ahead booking (migration 0035): the card is saved and nothing is held or charged yet.
