@@ -321,6 +321,13 @@
   .empty{color:var(--dim);text-align:center;padding:30px 0;font-size:14px}
   .hidden{display:none!important}
   .tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* Hole-by-hole entry: the hole numbers and pars stay in view under the page's toolbar as staff
+     scroll down (--lr-off, kept by fillHoles), and the team names stay on the left as they scroll across. */
+  table.lr-holes thead th,table.lr-holes thead td{position:sticky;top:var(--lr-off,0px);z-index:2;background:var(--surface)}
+  table.lr-holes thead tr+tr>*{top:calc(var(--lr-off,0px) + var(--lr-row1,36px));box-shadow:inset 0 -1px 0 var(--border)}
+  table.lr-holes caption{caption-side:top;text-align:left;font-size:12.5px;padding:0 0 8px}
+  table.lr-holes tr>:first-child{position:sticky;left:0;z-index:1;background:var(--surface)}
+  table.lr-holes thead tr>:first-child{z-index:3}
   /* Tee sheet · List mode. A row opens the same sheet its grid tile would. */
   #bk-list tr.lrow{cursor:pointer}
   #bk-list tr.lrow:hover td{background:var(--surface-2)}
@@ -4564,20 +4571,36 @@ function leagueResults(ctx){
   const fill=()=>{
     const w=weekAt($('#lr-week').value);
     if(byHole) return fillHoles(w);
+    $('#lr-table').classList.remove('lr-holes'); $('#lr-table').style.removeProperty('--lr-off');
     $('#lr-table').innerHTML=`<thead><tr><th>${league.team_mode?'Team':'Player'}</th><th style="width:170px">Score (${unit})</th></tr></thead><tbody>${
       entrants.map(x=>{ const s=w?scoreFor(w.start,x.key):null; return `<tr><td>${esc(x.name)}</td><td><input class="input lr-score" data-key="${x.key}" type="number" step="0.5" value="${s==null?'':s}" ${edit?'':'disabled'} style="padding:7px 10px" aria-label="Score for ${esc(x.name)}" /></td></tr>`; }).join('')}</tbody>`;
   };
   const fillHoles=w=>{
     const pars=w?LG().parsFor(league,w.start):null, H=LG().HOLES;
     const box=(x,i,v)=>`<input class="input lr-h" data-key="${x.key}" data-i="${i}" inputmode="numeric" maxlength="2" value="${v==null?'':v}" ${edit?'':'disabled'} aria-label="${esc(x.name)} hole ${i+1}" style="width:40px;padding:6px 4px;text-align:center" />`;
-    $('#lr-table').innerHTML=`<thead><tr><th>Team</th>${Array.from({length:H},(_,i)=>`<th style="text-align:center">${i+1}</th>`).join('')}<th style="text-align:right">Total</th><th>Status</th></tr>
+    $('#lr-table').innerHTML=`${pars?'':'<caption class="dim">No pars set for this week (Edit league → schedule): the hole stats skip it.</caption>'}<thead><tr><th>Team</th>${Array.from({length:H},(_,i)=>`<th style="text-align:center">${i+1}</th>`).join('')}<th style="text-align:right">Total</th><th>Status</th></tr>
       <tr><td class="dim">Par</td>${Array.from({length:H},(_,i)=>`<td class="dim" style="text-align:center">${pars?pars[i]:'—'}</td>`).join('')}<td class="dim" style="text-align:right">${pars?pars.reduce((a,b)=>a+b,0):'—'}</td>
-        <td class="dim" style="font-size:12px">${pars?'':'No pars set for this week (Edit league → schedule): the stats skip it.'}</td></tr></thead><tbody>${
+        <td></td></tr></thead><tbody>${
       entrants.map(x=>{ const r=w?rowFor(w.start,x.key):null, hs=r&&Array.isArray(r.holes)?r.holes:[];
         const st=!r?'':r.status==='pending'?`<label class="row" style="gap:6px;align-items:center;font-size:12.5px;white-space:nowrap"><input type="checkbox" class="lr-ok" data-key="${x.key}" ${edit?'':'disabled'} /> Confirm</label><div class="dim" style="font-size:11.5px">Entered by a player — check it against the scorecard</div>`
           :'<span class="pill confirmed">Confirmed</span>';
         return `<tr data-key="${x.key}"><td><b>${esc(x.name)}</b></td>${Array.from({length:H},(_,i)=>`<td>${box(x,i,hs[i])}</td>`).join('')}
           <td class="lr-tot" style="text-align:right;font-weight:700">${hs.length?hs.reduce((a,b)=>a+Number(b),0):'—'}</td><td>${st}</td></tr>`; }).join('')}</tbody>`;
+    const tbl=$('#lr-table'); tbl.classList.add('lr-holes');
+    // The par row sits just under the hole numbers, however tall that row turns out.
+    const head=tbl.querySelector('thead'), row1=head.querySelector('tr');
+    tbl.style.setProperty('--lr-row1', row1.getBoundingClientRect().height+'px');
+    // The table scrolls sideways in its own box, which stops the header sticking to the page, so
+    // --lr-off moves it down by however much of the table has gone under the toolbar.
+    window.removeEventListener('scroll', window._lrPin);
+    window._lrPin=()=>{
+      if(!tbl.isConnected || !tbl.classList.contains('lr-holes')) return window.removeEventListener('scroll', window._lrPin);
+      const bar=[...document.querySelectorAll('.toolbar')].find(e=>e.offsetParent);
+      const top=bar ? bar.getBoundingClientRect().bottom : 0, r=tbl.getBoundingClientRect();
+      const off=Math.max(0, Math.min(top-r.top, r.height-head.offsetHeight));
+      tbl.style.setProperty('--lr-off', off+'px');
+    };
+    window.addEventListener('scroll', window._lrPin, { passive:true }); window._lrPin();
     $('#lr-table').querySelectorAll('.lr-h').forEach(inp=>inp.oninput=()=>{
       const tr=inp.closest('tr'), vals=[...tr.querySelectorAll('.lr-h')].map(i=>i.value.trim()).filter(Boolean).map(Number);
       tr.querySelector('.lr-tot').textContent=vals.length?vals.reduce((a,b)=>a+b,0):'—';
