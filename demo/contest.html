@@ -6,24 +6,24 @@
 <title>Invictus Golf — Spin the Wheel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Basic&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
 <style>
-  :root{ --black:#FFFBF6;--near-black:#FFF7F0;--surface:#FFFFFF;--surface-2:#F3E8D8;--border:#E6D8C3;
-    --white:#1A0E00;--muted:#5C4A33;--dim:#8C7A63;--orange:#9A690F;--danger:#D92D20;--ok:#067647;--radius:4px; }
+  :root{ --black:#F6F7F9;--near-black:#F5F7FA;--surface:#FFFFFF;--surface-2:#EDEFF3;--border:#D7DCE3;
+    --white:#14161A;--muted:#555C68;--dim:#858C99;--orange:#9A690F;--danger:#D92D20;--ok:#067647;--radius:16px; }
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:radial-gradient(1200px 600px at 70% -10%,#FFFFFF 0%,var(--black) 55%),var(--black);
-    color:var(--white);font-family:'Basic',system-ui,sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;padding:12px 16px 24px}
-  h1,h2,h3{font-family:'Bebas Neue',sans-serif;letter-spacing:-.01em}
+    color:var(--white);font-family:'Raleway',system-ui,sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;padding:12px 16px 24px}
+  h1,h2,h3{font-family:'Space Grotesk',sans-serif;letter-spacing:-.01em}
   .wrap{max-width:560px;margin:0 auto}
   header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:2px 0 8px}
   header img{height:34px;width:auto}
-  .brand-fallback{font-family:'Bebas Neue';font-weight:700;font-size:18px}
+  .brand-fallback{font-family:'Space Grotesk';font-weight:700;font-size:18px}
   .brand-fallback .joy{color:var(--orange);margin-right:6px}
   header a{color:var(--muted);text-decoration:none;font-size:13px}
   header a:hover{color:var(--white)}
   .title{text-align:center;font-size:22px;margin:2px 0 2px}
   .status{text-align:center;color:var(--muted);font-size:13.5px;min-height:19px;margin-bottom:6px}
-  .status b{font-family:'Bebas Neue';color:var(--white)}
+  .status b{font-family:'Space Grotesk';color:var(--white)}
   /* The wheel is sized so the wheel, the button and the fine print all fit a phone screen without scrolling. */
   .wheel-box{position:relative;width:min(74vw,40svh,340px);aspect-ratio:1;margin:4px auto 0}
   .wheel-box svg{width:100%;height:100%;display:block}
@@ -31,9 +31,9 @@
   @media (prefers-reduced-motion: reduce){ #wheel{transition-duration:1.2s} }
   .pointer{position:absolute;left:50%;top:-6px;transform:translateX(-50%);width:0;height:0;
     border-left:13px solid transparent;border-right:13px solid transparent;border-top:24px solid var(--white);filter:drop-shadow(0 2px 2px rgba(0,0,0,.25));z-index:2}
-  .btn{display:block;width:100%;border:none;border-radius:3px;padding:14px;font-weight:700;font-size:16px;font-family:'Bebas Neue';cursor:pointer;transition:.15s;text-align:center;text-decoration:none}
+  .btn{display:block;width:100%;border:none;border-radius:11px;padding:14px;font-weight:700;font-size:16px;font-family:'Space Grotesk';cursor:pointer;transition:.15s;text-align:center;text-decoration:none}
   .btn-primary{background:var(--orange);color:#fff}.btn-primary:hover{background:#7A520B}
-  .btn-primary:disabled{background:#EDE3D3;color:#A89880;cursor:not-allowed}
+  .btn-primary:disabled{background:#E4E7EC;color:#98A2B3;cursor:not-allowed}
   .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:var(--white);border-color:var(--dim)}
   .btn:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
   #spin{max-width:340px;margin:12px auto 0}
@@ -49,17 +49,17 @@
   .panel p{font-size:14px;line-height:1.55;color:var(--muted);margin-bottom:10px}
   .panel ul{margin:0 0 12px 18px;font-size:14px;line-height:1.6}
   .panel .btn{margin-top:10px}
-  .prize{background:rgba(154,105,15,.07);border:1px solid rgba(154,105,15,.35);border-radius:3px;padding:12px 14px;margin:6px 0 12px}
-  .prize b{font-family:'Bebas Neue';font-size:17px}
+  .prize{background:rgba(154,105,15,.07);border:1px solid rgba(154,105,15,.35);border-radius:12px;padding:12px 14px;margin:6px 0 12px}
+  .prize b{font-family:'Space Grotesk';font-size:17px}
   .prize .d{font-size:13px;color:var(--muted);margin-top:3px}
-  .terms{background:var(--near-black);border:1px solid var(--border);border-radius:3px;padding:12px 14px;margin:6px 0 4px}
+  .terms{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin:6px 0 4px}
   .terms li{margin-bottom:2px}
-  .q{font-family:'Bebas Neue';font-weight:700;font-size:26px;text-align:center;margin:10px 0 12px;letter-spacing:.01em}
-  .clock{font-family:'Bebas Neue';font-weight:700;text-align:center;font-size:15px;color:var(--muted)}
+  .q{font-family:'Space Grotesk';font-weight:700;font-size:26px;text-align:center;margin:10px 0 12px;letter-spacing:.01em}
+  .clock{font-family:'Space Grotesk';font-weight:700;text-align:center;font-size:15px;color:var(--muted)}
   .clock.low{color:var(--danger)}
-  .input{width:100%;background:var(--near-black);border:1px solid var(--border);border-radius:3px;padding:13px 14px;color:var(--white);font-family:'Bebas Neue';font-size:20px;text-align:center;outline:none;margin-top:10px}
+  .input{width:100%;background:var(--near-black);border:1px solid var(--border);border-radius:11px;padding:13px 14px;color:var(--white);font-family:'Space Grotesk';font-size:20px;text-align:center;outline:none;margin-top:10px}
   .input:focus{border-color:var(--orange)}
-  .note{font-size:13px;line-height:1.5;border-radius:3px;padding:10px 12px;margin:8px 0}
+  .note{font-size:13px;line-height:1.5;border-radius:10px;padding:10px 12px;margin:8px 0}
   .note.warn{background:rgba(154,105,15,.08);border:1px solid rgba(154,105,15,.4);color:#7A520B}
   .note.info{background:var(--near-black);border:1px solid var(--border);color:var(--muted)}
 </style>
@@ -81,7 +81,7 @@
   <div class="wheel-box">
     <div class="pointer" aria-hidden="true"></div>
     <svg viewBox="-110 -110 220 220" role="img" aria-label="Prize wheel"><g id="wheel"></g>
-      <circle r="13" fill="#1A0E00"/><circle r="5" fill="#9A690F"/></svg>
+      <circle r="13" fill="#14161A"/><circle r="5" fill="#9A690F"/></svg>
   </div>
   <button class="btn btn-primary" id="spin" disabled>Spin</button>
   <div class="err" id="err" role="alert"></div>
@@ -141,20 +141,20 @@ function drawWheel(prizes){
   while(SEGS.length < 8) SEGS = SEGS.concat(SEGS.length ? SEGS : [{ label:'Next time', win:false }]);
   SEGS = SEGS.slice(0, Math.max(8, Math.min(SEGS.length, 16)));
   const n = SEGS.length, a = 2*Math.PI/n, R = 104;
-  const fills = ['#9A690F','#FFFFFF','#1A0E00','#FFFFFF'];
+  const fills = ['#9A690F','#FFFFFF','#14161A','#FFFFFF'];
   $('#wheel').innerHTML = SEGS.map((s,i) => {
     const a0 = -Math.PI/2 + i*a, a1 = a0 + a, mid = a0 + a/2;
     const x0 = R*Math.cos(a0), y0 = R*Math.sin(a0), x1 = R*Math.cos(a1), y1 = R*Math.sin(a1);
     const fill = s.win ? (i%4===0 ? fills[0] : fills[2]) : fills[1];
-    const ink = fill === '#FFFFFF' ? '#1A0E00' : '#FFFFFF';
+    const ink = fill === '#FFFFFF' ? '#14161A' : '#FFFFFF';
     // A long name gets smaller type before it gets cut: about 84 units of room from hub to rim.
     const label = s.label.length > 26 ? s.label.slice(0,25)+'…' : s.label;
     const size = Math.min(n>12 ? 6.5 : 8, 84/(label.length*0.6));
     const tx = 58*Math.cos(mid), ty = 58*Math.sin(mid), rot = mid*180/Math.PI;
-    return `<path d="M0 0 L${x0.toFixed(2)} ${y0.toFixed(2)} A${R} ${R} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z" fill="${fill}" stroke="#E6D8C3" stroke-width=".8"/>
+    return `<path d="M0 0 L${x0.toFixed(2)} ${y0.toFixed(2)} A${R} ${R} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z" fill="${fill}" stroke="#D7DCE3" stroke-width=".8"/>
       <text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" transform="rotate(${rot.toFixed(2)} ${tx.toFixed(2)} ${ty.toFixed(2)})" fill="${ink}"
         font-family="Space Grotesk, sans-serif" font-weight="700" font-size="${size.toFixed(2)}" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`;
-  }).join('') + `<circle r="${R}" fill="none" stroke="#1A0E00" stroke-width="3"/>`;
+  }).join('') + `<circle r="${R}" fill="none" stroke="#14161A" stroke-width="3"/>`;
 }
 // Turn so a segment matching the outcome stops under the pointer (top). Resolves when it stops.
 function turnTo(won, prizeName){
