@@ -1469,9 +1469,7 @@
           <div class="sec-head"><div><h3 class="card-h">Logs</h3>
             <div class="sub">Every spin, every prize and its skill-testing question, and every group of spins. A group's winning positions are shown only once it has closed.</div></div>
             <div class="row" style="gap:8px;flex-wrap:wrap">
-              <select class="input" id="ct-log-period" style="width:auto"></select>
-              <button class="btn btn-ghost" id="ct-csv-winners">Export winners CSV</button>
-              <button class="btn btn-ghost" id="ct-csv-spins">Export audit log CSV</button></div></div>
+              <select class="input" id="ct-log-period" style="width:auto"></select></div></div>
           <div class="seg seg-sm" id="ct-log-view" role="tablist" aria-label="Which log" style="max-width:420px;margin-bottom:12px">
             <button type="button" role="tab" data-v="claims" class="on" aria-selected="true">Winners</button>
             <button type="button" role="tab" data-v="spins" aria-selected="false">Spins</button>
@@ -8581,14 +8579,6 @@ function claimState(c){
   return ['cancelled', c.status];
 }
 const CLAIM_COLS = 'id,customer_id,period_id,source,prize_name,prize_description,prize_kind,prize_value_cents,prize_adults_only,status,question,question_issued_at,question_expires_at,given_answer,answered_at,returned_to_pool,redeemed_at,redeemed_by_email,refused_note,created_at';
-function toCSV(cols, rows){
-  const cell=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
-  return [cols.map(c=>cell(c[0])).join(',')].concat(rows.map(r=>cols.map(c=>cell(c[1](r))).join(','))).join('\n');
-}
-function downloadCSV(name, text){
-  const url=URL.createObjectURL(new Blob([text],{type:'text/csv'}));
-  const a=document.createElement('a'); a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url);
-}
 
 /* ---------- Contest Rewards ---------- */
 let CR_ROWS=[], CR_SHOW='open';
@@ -8941,31 +8931,6 @@ async function loadContestLog(){
       <td>${b.winning_positions?esc(b.winning_positions.join(', ')):'<span class="dim">Hidden until the group closes</span>'}</td>
       <td class="muted" style="white-space:nowrap">${esc(fmtCT(b.created_at))}</td><td class="muted" style="white-space:nowrap">${b.closed_at?esc(fmtCT(b.closed_at)):'Open'}</td></tr>`).join('')}</tbody>` : emptyRow('No groups yet — the first spin opens one.',6);
 }
-const periodSlug = () => { const p=CT_PERIODS.find(x=>x.id===$('#ct-log-period').value); return p ? p.name.replace(/[^\w]+/g,'-').toLowerCase() : 'contest'; };
-$('#ct-csv-winners').onclick=async()=>{
-  const pid=$('#ct-log-period').value; if(!pid) return;
-  const { data, error } = await contestClaims(pid, 10000);
-  if(error){ if(!isAuthError(error)) toast(error.message,'err'); return; }
-  downloadCSV(`contest-winners-${periodSlug()}.csv`, toCSV([
-    ['won_at',r=>r.created_at], ['source',r=>r.source], ['customer',r=>(r.customers||{}).name], ['phone',r=>(r.customers||{}).phone],
-    ['email',r=>(r.customers||{}).email], ['date_of_birth',r=>(r.customers||{}).date_of_birth], ['prize',r=>r.prize_name],
-    ['prize_type',r=>r.prize_kind], ['approx_value',r=>(r.prize_value_cents/100).toFixed(2)], ['adults_only',r=>r.prize_adults_only?'yes':'no'],
-    ['question',r=>r.question], ['correct_answer',r=>contestAnswerOf(r.question)], ['given_answer',r=>r.given_answer],
-    ['question_shown_at',r=>r.question_issued_at], ['answered_at',r=>r.answered_at], ['status',r=>r.status],
-    ['returned_to_pool',r=>r.returned_to_pool==null?'':(r.returned_to_pool?'yes':'no')],
-    ['redeemed_at',r=>r.redeemed_at], ['redeemed_by',r=>r.redeemed_by_email], ['note',r=>r.refused_note],
-  ], data||[]));
-};
-$('#ct-csv-spins').onclick=async()=>{
-  const pid=$('#ct-log-period').value; if(!pid) return;
-  const { data, error } = await contestSpins(pid, 10000);
-  if(error){ if(!isAuthError(error)) toast(error.message,'err'); return; }
-  downloadCSV(`contest-spins-${periodSlug()}.csv`, toCSV([
-    ['spun_at',r=>r.created_at], ['customer',r=>(r.customers||{}).name], ['phone',r=>(r.customers||{}).phone], ['email',r=>(r.customers||{}).email],
-    ['period_id',()=>pid], ['group',r=>r.seq], ['group_id',r=>r.block_id], ['position',r=>r.position],
-    ['result',r=>r.won?'win':'no win'], ['prize',r=>prizeName(r.prize_id)], ['ip',r=>r.ip], ['spin_id',r=>r.id],
-  ], data));
-};
 </script>
 </body>
 </html>
