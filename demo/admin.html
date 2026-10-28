@@ -3418,10 +3418,19 @@ function openLeagueEditor(x){
     // The 18 par boxes: nothing typed = no pars for the week; otherwise all 18 (checked on save).
     pars: (v=>v.every(x=>x==='')?'':v)([...r.querySelectorAll('.li-par')].map(i=>i.value.trim())),
     optional: r.querySelector('[data-k="optional"]').checked, catchup: r.querySelector('[data-k="catchup"]').checked }));
+  // A card's real week number(s), counted in 7-day weeks from the first card — the way the league
+  // page numbers them — so a two-week card reads "Weeks 9–10" and the cards after it stay right.
+  const weekNo=(w,i)=>{
+    const day0=(weeks.find(x=>x.from)||{}).from;
+    if(!day0 || !w.from) return `Week ${i+1}`;
+    const at=iso=>Math.floor((Date.parse(iso+'T00:00:00Z')-Date.parse(day0+'T00:00:00Z'))/6048e5)+1;
+    const a=at(w.from), b=w.to?at(w.to):a;
+    return b>a ? `Weeks ${a}–${b}` : `Week ${a}`;
+  };
   const drawWeeks=()=>{
     const host=$('#li-weeks'); if(!host) return;
     host.innerHTML=weeks.map((w,i)=>`<div class="li-week">
-      <div class="li-week-h"><b>Week ${i+1}</b><button type="button" class="link-btn li-week-del" data-i="${i}" aria-label="Remove week ${i+1}">Remove</button></div>
+      <div class="li-week-h"><b>${weekNo(w,i)}</b><button type="button" class="link-btn li-week-del" data-i="${i}" aria-label="Remove ${weekNo(w,i).toLowerCase()}">Remove</button></div>
       <div class="li-week-grid">
         <div><label>From</label><input class="input" type="date" data-k="from" value="${esc(w.from||'')}" /></div>
         <div><label>To</label><input class="input" type="date" data-k="to" value="${esc(w.to||'')}" /></div>
@@ -3486,9 +3495,9 @@ function openLeagueEditor(x){
     if(cols39){
       const sched=readWeeks();
       const bad=sched.findIndex(w=>w.from && w.to && w.to<w.from);
-      if(bad>=0) return err(`Week ${bad+1} in the schedule ends before it starts.`);
+      if(bad>=0) return err(`${weekNo(sched[bad],bad)} in the schedule ends before it starts.`);
       const badPar=sched.findIndex(w=>w.pars && !InvictusLeagues.normalizePars(w.pars));
-      if(badPar>=0) return err(`Week ${badPar+1}: fill in the par for all 18 holes (each 2 to 7), or leave them all empty.`);
+      if(badPar>=0) return err(`${weekNo(sched[badPar],badPar)}: fill in the par for all 18 holes (each 2 to 7), or leave them all empty.`);
       details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value, rules:$('#li-rules').value,
         settings:$('#li-settings').value, challenges:$('#li-challenges').value,
         schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value,
