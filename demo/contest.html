@@ -34,7 +34,7 @@
   .prize-line:empty{display:none}
   .prize-line b{color:var(--white)}
   /* The wheel is sized so the wheel, the button and the fine print all fit a phone screen without scrolling. */
-  .wheel-box{position:relative;width:min(74vw,40svh,340px);aspect-ratio:1;margin:4px auto 0}
+  .wheel-box{position:relative;width:min(92vw,56svh,560px);aspect-ratio:1;margin:6px auto 0}
   .wheel-box svg{position:absolute;inset:0;width:100%;height:100%;display:block}
   /* The whole drawing turns, not a group inside it: an <svg> element turns about its own middle in
      every browser, where a <g> could swing about a point off to the side (Safari). The hub is a
@@ -147,6 +147,14 @@ async function api(action, body){
 
 /* ---------- the wheel (cosmetic: the server has already decided before it turns) ---------- */
 let SEGS = [];
+// A wheel label as one line, or two split at the space nearest the middle; never more than 30 letters.
+function wheelLines(label){
+  let t = String(label || '').trim(); if(t.length > 30) t = t.slice(0, 29) + '…';
+  if(t.length <= 13 || !t.includes(' ')) return [t];
+  let best = -1;
+  for(let i = 0; i < t.length; i++) if(t[i] === ' ' && (best < 0 || Math.abs(i - t.length/2) < Math.abs(best - t.length/2))) best = i;
+  return [t.slice(0, best), t.slice(best + 1)];
+}
 function drawWheel(prizes){
   const names = (prizes||[]).map(p => p.name);
   SEGS = [];
@@ -160,13 +168,19 @@ function drawWheel(prizes){
     const x0 = R*Math.cos(a0), y0 = R*Math.sin(a0), x1 = R*Math.cos(a1), y1 = R*Math.sin(a1);
     const fill = s.win ? (i%4===0 ? fills[0] : fills[2]) : fills[1];
     const ink = fill === '#FFFFFF' ? '#14161A' : '#FFFFFF';
-    // A long name gets smaller type before it gets cut: about 84 units of room from hub to rim.
-    const label = s.label.length > 26 ? s.label.slice(0,25)+'…' : s.label;
-    const size = Math.min(n>12 ? 6.5 : 8, 84/(label.length*0.6));
-    const tx = 58*Math.cos(mid), ty = 58*Math.sin(mid), rot = mid*180/Math.PI;
+    // Readable labels: big type, a long name on two lines (split at the space nearest its middle)
+    // rather than shrunk, and the left half turned the right way up while the wheel stands still.
+    // There are about 80 units from the hub to the rim.
+    const lines = wheelLines(s.label);
+    const longest = Math.max(...lines.map(l => l.length));
+    const size = Math.min(n>12 ? 8 : n>8 ? 10 : 11.5, 80/(longest*0.62));
+    const tx = 58*Math.cos(mid), ty = 58*Math.sin(mid);
+    let rot = mid*180/Math.PI; if(Math.cos(mid) < -0.01) rot += 180;
+    const lh = size*1.1, first = -(lines.length-1)*lh/2;
     return `<path d="M0 0 L${x0.toFixed(2)} ${y0.toFixed(2)} A${R} ${R} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z" fill="${fill}" stroke="#D7DCE3" stroke-width=".8"/>
       <text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" transform="rotate(${rot.toFixed(2)} ${tx.toFixed(2)} ${ty.toFixed(2)})" fill="${ink}"
-        font-family="Space Grotesk, sans-serif" font-weight="700" font-size="${size.toFixed(2)}" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`;
+        font-family="Space Grotesk, sans-serif" font-weight="700" font-size="${size.toFixed(2)}" text-anchor="middle" dominant-baseline="middle">${
+        lines.map((l, k) => `<tspan x="${tx.toFixed(2)}" dy="${(k ? lh : first).toFixed(2)}">${esc(l)}</tspan>`).join('')}</text>`;
   }).join('') + `<circle r="${R}" fill="none" stroke="#14161A" stroke-width="3"/>`;
 }
 // Turn so a segment matching the outcome stops under the pointer (top). Resolves when it stops.
