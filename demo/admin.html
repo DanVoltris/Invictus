@@ -8856,7 +8856,7 @@ function renderContestPrizes(){
         <td style="text-align:right">${money(z.value_cents)}</td>
         <td>${z.adults_only?'<span class="pill blocked">18+ only</span>':'<span class="dim">All ages</span>'}</td>
         <td style="text-align:right">${(()=>{ const o=on?prizeOdds(z.weight,total):null;
-          return o ? `<b style="font-family:'Space Grotesk'">about ${o.per} out of ${o.of} spins</b><div class="dim" style="font-size:12px">${z.weight} of every ${total} winners</div>`
+          return o ? `<b style="font-family:'Space Grotesk'">${total===o.wins?'exactly '+z.weight:'about '+o.per} out of ${o.of} spins</b><div class="dim" style="font-size:12px">${z.weight} of every ${total} winners${total===o.wins?'':' · add up to '+o.wins+' for exact'}</div>`
             : on ? `<b>${z.weight} of every ${total} winners</b>` : '<span class="dim">—</span>'; })()}</td>
         <td><span class="pill ${on?'confirmed':'cancelled'}">${on?'Active':'Off'}</span></td></tr>`; }).join('')}</tbody>` : emptyRow('No prizes yet. A winning spin needs at least one active prize.',6);
   tbl.querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>openContestPrize(CT_PRIZES.find(x=>x.id===tr.dataset.id)));
@@ -8897,8 +8897,10 @@ function openContestPrize(z){
     $('#pz-odds').innerHTML = !on ? 'Off — this prize can’t be won.' : !w ? 'At 0 this prize is never won.'
       : !p ? `Gets ${w} of every ${total} winners. Set up a draw to see how many spins that is.`
       : `The draw <b>${esc(p.name)}</b> has <b>${p.wins_per_block} winner${p.wins_per_block===1?'':'s'} in every ${p.block_size} spins</b>. `
-        + `This prize gets ${w} of every ${total} winners${others?' (the other active prizes have '+others+')':''} — `
-        + `<b>about ${o.per} winner${o.per===1?'':'s'} out of ${o.of} spins</b>. It works out over many spins; a single group can differ.`;
+        + (total===p.wins_per_block
+          ? `This prize gets ${w} of them${others?' (the other active prizes get '+others+')':''} — <b>exactly ${w} winner${w===1?'':'s'} in every ${p.block_size} spins</b>.`
+          : `The prizes add up to ${total}, not ${p.wins_per_block}, so this prize gets <b>about ${o.per} winner${o.per===1?'':'s'} in every ${p.block_size} spins</b>. `
+            + `Make the prizes add up to ${p.wins_per_block} for exact counts.`);
   };
   $('#pz-weight').oninput=oddsNote; $('#pz-active').onchange=oddsNote; oddsNote();
   $('#pz-save').onclick=async()=>{
