@@ -4539,9 +4539,9 @@ function leagueResults(ctx){
   const byHole=!!(league.team_mode && league.details && league.details.holeScoring);
   const scored=new Set(results.map(r=>weekFor(r.played_on)));
   const cols=all.filter(w=>!w.catchup && (w.end<today || scored.has(w.start)));                      // weeks already gone, plus any with scores
-  // Every week of the season, in order. A catch-up week only once staff booked a round into it.
-  const booked=new Set((rounds||[]).filter(x=>x.status!=='cancelled').map(x=>roundWeek(x,league)));
-  const pickable=all.filter(w=>!w.catchup || scored.has(w.start) || booked.has(w.start));
+  // Every week of the season, in order, except catch-up weeks: a round played in one counts for the
+  // week the team missed, so it is scored there. (One shows only if a score was filed under it.)
+  const pickable=all.filter(w=>!w.catchup || scored.has(w.start));
   // The tab opens on this week; before the season, week 1; after it, the last week.
   const nowWk=LG().weekIn(league,today);
   const openOn=(pickable.find(w=>w.start>=nowWk)||pickable[pickable.length-1]||{}).start;
