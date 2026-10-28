@@ -26,9 +26,12 @@
   .status b{font-family:'Space Grotesk';color:var(--white)}
   /* The wheel is sized so the wheel, the button and the fine print all fit a phone screen without scrolling. */
   .wheel-box{position:relative;width:min(74vw,40svh,340px);aspect-ratio:1;margin:4px auto 0}
-  .wheel-box svg{width:100%;height:100%;display:block}
-  #wheel{transform-origin:50% 50%;transition:transform 4.8s cubic-bezier(.12,.72,.16,1)}
-  @media (prefers-reduced-motion: reduce){ #wheel{transition-duration:1.2s} }
+  .wheel-box svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+  /* The whole drawing turns, not a group inside it: an <svg> element turns about its own middle in
+     every browser, where a <g> could swing about a point off to the side (Safari). The hub is a
+     second, still layer on top. */
+  #wheel-spin{transform-origin:50% 50%;transition:transform 4.8s cubic-bezier(.12,.72,.16,1);will-change:transform}
+  @media (prefers-reduced-motion: reduce){ #wheel-spin{transition-duration:1.2s} }
   .pointer{position:absolute;left:50%;top:-6px;transform:translateX(-50%);width:0;height:0;
     border-left:13px solid transparent;border-right:13px solid transparent;border-top:24px solid var(--white);filter:drop-shadow(0 2px 2px rgba(0,0,0,.25));z-index:2}
   .btn{display:block;width:100%;border:none;border-radius:11px;padding:14px;font-weight:700;font-size:16px;font-family:'Space Grotesk';cursor:pointer;transition:.15s;text-align:center;text-decoration:none}
@@ -80,8 +83,8 @@
   <div class="status" id="status" aria-live="polite">Loading…</div>
   <div class="wheel-box">
     <div class="pointer" aria-hidden="true"></div>
-    <svg viewBox="-110 -110 220 220" role="img" aria-label="Prize wheel"><g id="wheel"></g>
-      <circle r="13" fill="#14161A"/><circle r="5" fill="#9A690F"/></svg>
+    <svg id="wheel-spin" viewBox="-110 -110 220 220" role="img" aria-label="Prize wheel"><g id="wheel"></g></svg>
+    <svg viewBox="-110 -110 220 220" aria-hidden="true"><circle r="13" fill="#14161A"/><circle r="5" fill="#9A690F"/></svg>
   </div>
   <button class="btn btn-primary" id="spin" disabled>Spin</button>
   <div class="err" id="err" role="alert"></div>
@@ -166,7 +169,7 @@ function turnTo(won, prizeName){
   TURNS += 1;
   const deg = TURNS*360*6 - (pick*seg + seg/2) + jitter;
   return new Promise(done => {
-    const w = $('#wheel');
+    const w = $('#wheel-spin');
     const end = () => { w.removeEventListener('transitionend', end); done(); };
     w.addEventListener('transitionend', end);
     setTimeout(end, 5500);   // a browser that skips the transition still moves on
