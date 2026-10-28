@@ -1,0 +1,36 @@
+/* Invictus Golf brand — matched to invictusgolfwpg.ca: warm white and cream, dark brown ink, gold
+   accents, Bebas Neue capitals for headings, Basic for text, square-cornered uppercase buttons.
+   Loaded after each customer page's own styles, so it has the last word on the shared pieces;
+   the colours themselves live in each page's :root tokens. */
+
+/* Bebas Neue has one weight. Registered across every weight so text the pages ask to be bold is
+   drawn in the real face, not a smeared fake bold. */
+@font-face { font-family: 'Bebas Neue'; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url(https://fonts.gstatic.com/s/bebasneue/v16/JTUSjIg69CK48gW7PXoo9WlhyyTh89Y.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Bebas Neue'; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url(https://fonts.gstatic.com/s/bebasneue/v16/JTUSjIg69CK48gW7PXoo9WdhyyTh89ZNpQ.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+
+body { font-family: 'Basic', system-ui, sans-serif; background: var(--black); }
+
+/* Headings: tall capitals, a touch of tracking, never bold. */
+h1, h2, h3 { font-family: 'Bebas Neue', sans-serif; font-weight: 400; letter-spacing: .5px; line-height: 1.05; }
+h1 { font-size: clamp(30px, 4vw, 40px); }
+
+/* Buttons: square, gold, uppercase — the "BOOK NOW" of the main site. */
+.btn { border-radius: 0; font-family: 'Basic', sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: .06em; }
+.btn-primary { background: #9A690F; color: #fff; }
+.btn-primary:hover { background: #7A520B; }
+.btn-ghost { border-color: #9A690F; color: #9A690F; }
+.btn-ghost:hover { background: rgba(154,105,15,.08); color: #7A520B; border-color: #7A520B; }
+
+/* Inputs and tags: squared off to match. */
+.input { border-radius: 2px; font-family: 'Basic', sans-serif; }
+.input:focus { border-color: #9A690F; }
+.pill, .chip { border-radius: 2px; }
+a { color: inherit; }
+
+/* Header links on the booking page: square and uppercase, like the main site's navigation. */
+.nav-mem { border-radius: 0; font-family: 'Basic', sans-serif; font-weight: 400; letter-spacing: .06em; font-size: 13px; }
+.feat-tag, .wl-bay { border-radius: 2px; }

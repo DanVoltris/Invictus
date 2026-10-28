@@ -6,26 +6,26 @@
 <title>Invictus Golf — Book a Bay</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,400;0,500;0,700;1,500&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Basic&display=swap" rel="stylesheet" />
 <script src="https://js.stripe.com/v3/"></script>
 <style>
   :root {
     /* Light theme. Token names are historical — they denote role, not literal colour:
        --black is the page background, --white is primary text. */
-    --black: #F6F7F9;      /* page background */
-    --near-black: #F5F7FA; /* inset areas: inputs, cells, recaps */
+    --black: #FFFBF6;      /* page background */
+    --near-black: #FFF7F0; /* inset areas: inputs, cells, recaps */
     --surface: #FFFFFF;    /* cards — pure white, lifts off the grey page */
-    --surface-2: #EDEFF3;  /* subtle fill */
-    --border: #D7DCE3;
-    --white: #14161A;      /* primary text */
-    --muted: #555C68;      /* secondary text */
-    --dim: #858C99;        /* tertiary text */
-    --green: #F0523D;      /* brand orange accent (var name kept for simplicity) */
-    --green-dim: #c7402e;
-    --orange: #F0523D;     /* same accent; referenced by .nav-mem, .btn-line, toggles */
-    --red: #F0523D;
+    --surface-2: #F3E8D8;  /* subtle fill */
+    --border: #E6D8C3;
+    --white: #1A0E00;      /* primary text */
+    --muted: #5C4A33;      /* secondary text */
+    --dim: #8C7A63;        /* tertiary text */
+    --green: #9A690F;      /* brand orange accent (var name kept for simplicity) */
+    --green-dim: #7A520B;
+    --orange: #9A690F;     /* same accent; referenced by .nav-mem, .btn-line, toggles */
+    --red: #9A690F;
     --danger: #D92D20;     /* error red, darkened for contrast on light */
-    --radius: 14px;
+    --radius:4px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   * { scrollbar-width: none; -ms-overflow-style: none; }
@@ -34,12 +34,12 @@
   body {
     background: radial-gradient(1200px 600px at 70% -10%, #FFFFFF 0%, var(--black) 55%) , var(--black);
     color: var(--white);
-    font-family: 'Raleway', system-ui, sans-serif;
+    font-family: 'Basic', system-ui, sans-serif;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
   }
-  h1, h2, h3, .display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.01em; }
+  h1, h2, h3, .display { font-family: 'Bebas Neue', sans-serif; letter-spacing: -0.01em; }
   .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
 
   /* Header */
@@ -52,15 +52,15 @@
   .nav { display: flex; align-items: center; justify-content: space-between; height: 76px; }
   .brand { display: flex; align-items: center; gap: 14px; }
   .brand img { height: 66px; width: auto; display: block; }
-  .brand-fallback { font-family: 'Space Grotesk'; font-weight: 700; font-size: 22px; }
+  .brand-fallback { font-family: 'Bebas Neue'; font-weight: 700; font-size: 22px; }
   .brand-fallback .joy { color: var(--white); }
   .brand-fallback .hg { color: var(--green); }
   .nav-cta { font-size: 13px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
-  .nav-mem { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 13px; color: var(--orange); text-decoration: none; border: 1px solid var(--orange); padding: 8px 16px; border-radius: 999px; transition: .15s; white-space: nowrap; }
-  .nav-mem:hover { background: rgba(240,82,61,.12); }
+  .nav-mem { font-family: 'Bebas Neue', sans-serif; font-weight: 700; font-size: 13px; color: var(--orange); text-decoration: none; border: 1px solid var(--orange); padding: 8px 16px; border-radius:999px; transition: .15s; white-space: nowrap; }
+  .nav-mem:hover { background: rgba(154,105,15,.12); }
   .nav-links { display: flex; align-items: center; gap: 10px; }
   .nav-acct { background: var(--orange); color: #fff; }
-  .nav-acct:hover { background: #ff6450; }
+  .nav-acct:hover { background: #7A520B; }
   @media (max-width: 520px){ .nav-mem { padding: 7px 12px; font-size: 12px; } .nav-links { gap: 7px; } }
 
   /* Hero / progress */
@@ -98,16 +98,16 @@
   .date-layout.full .cal-day { height: 66px; font-size: 17px; }
 
   .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-  .cal-title { font-family: 'Space Grotesk'; font-weight: 700; font-size: 20px; }
+  .cal-title { font-family: 'Bebas Neue'; font-weight: 700; font-size: 20px; }
   .cal-nav { display: flex; gap: 8px; }
-  .cal-btn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--border); background: var(--near-black);
+  .cal-btn { width: 38px; height: 38px; border-radius:3px; border: 1px solid var(--border); background: var(--near-black);
     color: var(--white); cursor: pointer; font-size: 18px; display: grid; place-items: center; transition: .15s; }
   .cal-btn:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
   .cal-btn:disabled { opacity: .3; cursor: not-allowed; }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
   .cal-dow { font-size: 11px; color: var(--dim); text-align: center; padding-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
-  .cal-day { height: 54px; display: grid; place-items: center; border-radius: 11px; border: 1px solid var(--border);
-    background: var(--near-black); cursor: pointer; font-family: 'Space Grotesk'; font-weight: 700; font-size: 15px;
+  .cal-day { height: 54px; display: grid; place-items: center; border-radius:3px; border: 1px solid var(--border);
+    background: var(--near-black); cursor: pointer; font-family: 'Bebas Neue'; font-weight: 700; font-size: 15px;
     transition: border-color .12s, box-shadow .12s, background .12s, color .12s, height .45s cubic-bezier(.4,0,.2,1), font-size .45s; }
   .cal-day.empty { background: transparent; border: none; cursor: default; }
   .cal-day.past { opacity: .45; cursor: not-allowed; }
@@ -121,7 +121,7 @@
   .day-summary { border-left: 1px solid var(--border); padding-left: 44px; display: flex; flex-direction: column; justify-content: center;
     min-width: 0; overflow: hidden; opacity: 1; transition: opacity .4s ease .18s; }
   @media (max-width: 720px){ .day-summary { border-left: none; padding-left: 0; padding-top: 6px; } }
-  .day-summary .picked { font-family: 'Space Grotesk'; font-weight: 700; font-size: 30px; margin-bottom: 6px; }
+  .day-summary .picked { font-family: 'Bebas Neue'; font-weight: 700; font-size: 30px; margin-bottom: 6px; }
   .day-summary .picked.placeholder { color: var(--dim); font-size: 20px; }
   .day-summary .open { color: var(--green); font-size: 16px; font-weight: 600; }
   .hours-list { margin-top: 26px; display: grid; gap: 11px; }
@@ -135,9 +135,9 @@
   /* Availability grid */
   .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--dim); align-items: center; }
   .legend span { display: inline-flex; align-items: center; gap: 7px; }
-  .swatch { width: 12px; height: 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-block; }
+  .swatch { width: 12px; height: 12px; border-radius:4px; border: 1px solid var(--border); display: inline-block; }
   .swatch.avail { background: var(--near-black); border-color: var(--green-dim); }
-  .swatch.buf { background: repeating-linear-gradient(45deg,#E4E7EC,#E4E7EC 3px,#F5F7FA 3px,#F5F7FA 6px); border-color: var(--border); }
+  .swatch.buf { background: repeating-linear-gradient(45deg,#EDE3D3,#EDE3D3 3px,#FFF7F0 3px,#FFF7F0 6px); border-color: var(--border); }
   .swatch.bk { background: rgba(229,57,53,.12); border-color: #E53935; border-style: dashed; }
 
   /* The time grid scrolls inside its own box, both ways, so the bay names can stay pinned to the
@@ -153,10 +153,10 @@
   .grid thead th.timehead { z-index: 4; box-shadow: -10px 0 0 var(--surface), 6px 0 0 var(--surface), 0 -6px 0 var(--surface), 0 1px 0 var(--border); }
   /* Swiped across: a soft edge on the pinned times, so a bay sliding under them reads as "more
      this way" and not as a blank gap. (.is-across is set from the box's own scroll position.) */
-  .grid-scroll.is-across .grid td.time { box-shadow: -10px 0 0 var(--surface), 6px 0 0 var(--surface), 16px 0 12px -8px rgba(16,24,40,.22); }
-  .grid-scroll.is-across .grid thead th.timehead { box-shadow: -10px 0 0 var(--surface), 6px 0 0 var(--surface), 0 -6px 0 var(--surface), 0 1px 0 var(--border), 16px 0 12px -8px rgba(16,24,40,.22); }
-  .promo-note { background: rgba(240,82,61,.09); border: 1px solid rgba(240,82,61,.38); color: #A8321F;
-    border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 14.5px; font-weight: 500; }
+  .grid-scroll.is-across .grid td.time { box-shadow: -10px 0 0 var(--surface), 6px 0 0 var(--surface), 16px 0 12px -8px rgba(26,14,0,.22); }
+  .grid-scroll.is-across .grid thead th.timehead { box-shadow: -10px 0 0 var(--surface), 6px 0 0 var(--surface), 0 -6px 0 var(--surface), 0 1px 0 var(--border), 16px 0 12px -8px rgba(26,14,0,.22); }
+  .promo-note { background: rgba(154,105,15,.09); border: 1px solid rgba(154,105,15,.38); color: #7A520B;
+    border-radius:3px; padding: 12px 16px; margin-bottom: 16px; font-size: 14.5px; font-weight: 500; }
   /* table-layout:fixed so every bay column is the same width. With the default (auto) the
      browser sizes each column to its content, so "Assiniboine Credit Union Bay #1" got a
      visibly wider column of slots than "Public Bay #4" — the grid read as though the bays
@@ -164,72 +164,72 @@
      long names wrap instead of stretching their column. */
   .grid { width: 100%; min-width: 680px; border-collapse: separate; border-spacing: 6px;
     table-layout: fixed; }
-  .grid th { font-family: 'Space Grotesk'; font-weight: 700; font-size: 13.5px; text-align: center; padding: 4px 6px 10px;
+  .grid th { font-family: 'Bebas Neue'; font-weight: 700; font-size: 13.5px; text-align: center; padding: 4px 6px 10px;
     color: var(--white); vertical-align: bottom; }
-  .grid th .bmeta { display: block; font-family: 'Raleway'; font-weight: 500; font-size: 11px; color: var(--dim); margin-top: 3px; letter-spacing: .02em; }
-  .grid th .bmeta.promo { color: #A8321F; font-weight: 600; margin-top: 5px; white-space: normal; line-height: 1.25; }
+  .grid th .bmeta { display: block; font-family: 'Basic'; font-weight: 500; font-size: 11px; color: var(--dim); margin-top: 3px; letter-spacing: .02em; }
+  .grid th .bmeta.promo { color: #7A520B; font-weight: 600; margin-top: 5px; white-space: normal; line-height: 1.25; }
   .grid th .bmeta.desc { color: var(--muted); font-weight: 600; margin-top: 4px; white-space: normal; line-height: 1.25; }
   .grid th.timehead { width: 70px; }
   /* Past midnight (0038): one line where the date changes, and the day named on each late row. */
-  .grid tr.midnight td { padding: 10px 8px 6px; text-align: left; font-family: 'Space Grotesk'; font-weight: 700;
+  .grid tr.midnight td { padding: 10px 8px 6px; text-align: left; font-family: 'Bebas Neue'; font-weight: 700;
     font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--orange); border-top: 2px solid var(--orange); }
   /* The day sits on its own small line above the time: "Thu 12:00 AM" on one line is wider than
      the time column and ran into the first bay's slots. */
   .grid td.time .nxt { display: block; font-size: 9.5px; line-height: 1.1; color: var(--orange); letter-spacing: .06em; text-transform: uppercase; }
-  .grid td.time { font-family: 'Space Grotesk'; font-weight: 700; font-size: 12.5px; color: var(--muted); text-align: right;
+  .grid td.time { font-family: 'Bebas Neue'; font-weight: 700; font-size: 12.5px; color: var(--muted); text-align: right;
     padding-right: 10px; white-space: nowrap; width: 70px; }
   .cell {
-    text-align: center; padding: 11px 4px; border-radius: 10px; border: 1px solid var(--border);
+    text-align: center; padding: 11px 4px; border-radius:3px; border: 1px solid var(--border);
     background: var(--near-black); cursor: pointer; transition: .12s; user-select: none; line-height: 1.15;
   }
-  .cell .price { font-family: 'Space Grotesk'; font-weight: 700; font-size: 14px; }
+  .cell .price { font-family: 'Bebas Neue'; font-weight: 700; font-size: 14px; }
   .cell .per { font-size: 10px; color: var(--dim); }
   .cell:not(.booked):not(.tight):hover { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
   .cell:not(.booked):not(.tight):hover .per { color: var(--muted); }
   .cell.tight { opacity: .28; cursor: not-allowed; }
   .input.invalid { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger) inset; }
-  .cell.callbook { cursor: default; padding: 5px 3px; background: rgba(240,82,61,.05); border-style: dashed; border-color: rgba(240,82,61,.35); }
-  .cell.callbook a { display: block; font-family: 'Space Grotesk', sans-serif; font-size: 9.5px; font-weight: 700; line-height: 1.35;
+  .cell.callbook { cursor: default; padding: 5px 3px; background: rgba(154,105,15,.05); border-style: dashed; border-color: rgba(154,105,15,.35); }
+  .cell.callbook a { display: block; font-family: 'Bebas Neue', sans-serif; font-size: 9.5px; font-weight: 700; line-height: 1.35;
     letter-spacing: .01em; color: var(--muted); text-decoration: none; text-transform: uppercase; }
   .cell.callbook a:hover { color: var(--green); }
   .cell.booked { color: #B3261E; background: rgba(229,57,53,.08); cursor: not-allowed; border-style: dashed; border-color: rgba(229,57,53,.45); }
   .cell.booked .price { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
   .cell.booked .per { display: none; }
-  .cell.booked.shut { color: var(--muted); background: repeating-linear-gradient(45deg,#EDEFF3,#EDEFF3 6px,#E2E5EA 6px,#E2E5EA 12px); border-color: var(--border); border-style: solid; }
+  .cell.booked.shut { color: var(--muted); background: repeating-linear-gradient(45deg,#F3E8D8,#F3E8D8 6px,#EADFCD 6px,#EADFCD 12px); border-color: var(--border); border-style: solid; }
   .cell.booked.held { color: #8A6A14; background: rgba(214,180,90,.16); border-color: rgba(180,145,45,.55); }
-  .hold-timer { display:flex; align-items:center; justify-content:center; gap:7px; margin-bottom:14px; padding:9px 12px; border-radius:10px; background:rgba(214,180,90,.16); border:1px solid rgba(180,145,45,.45); color:#8A6A14; font-size:13px; font-weight:600; letter-spacing:.01em; }
+  .hold-timer { display:flex; align-items:center; justify-content:center; gap:7px; margin-bottom:14px; padding:9px 12px; border-radius:3px; background:rgba(214,180,90,.16); border:1px solid rgba(180,145,45,.45); color:#8A6A14; font-size:13px; font-weight:600; letter-spacing:.01em; }
   .hold-timer.warn { background:rgba(229,57,53,.10); border-color:rgba(229,57,53,.45); color:#B3261E; }
-  .toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(12px); background:#14161A; border:1px solid rgba(255,255,255,.14); color:#fff; padding:11px 18px; border-radius:10px; font-size:14px; z-index:200; opacity:0; pointer-events:none; transition:.2s; max-width:90vw; text-align:center; box-shadow:0 8px 30px rgba(16,24,40,.28); }
+  .toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(12px); background:#1A0E00; border:1px solid rgba(255,255,255,.14); color:#fff; padding:11px 18px; border-radius:3px; font-size:14px; z-index:200; opacity:0; pointer-events:none; transition:.2s; max-width:90vw; text-align:center; box-shadow:0 8px 30px rgba(26,14,0,.28); }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   .toast.is-notice { pointer-events:auto; cursor:pointer; top:16px; bottom:auto; }   /* top of the screen: clear of the checkout bar */
   .cell.buffer { color: var(--dim); cursor: not-allowed; border-color: var(--border);
-    background: repeating-linear-gradient(45deg,#F0F2F5,#F0F2F5 6px,#E6E9EE 6px,#E6E9EE 12px); }
+    background: repeating-linear-gradient(45deg,#F7EFE3,#F7EFE3 6px,#EADFCD 6px,#EADFCD 12px); }
   .cell.buffer .price { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
   .cell.buffer .per { display: none; }
   .cell.sel { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
   .cell.sel .price, .cell.sel .per { color: #fff; }
   .closed-note { color: var(--dim); padding: 30px 0; text-align: center; font-size: 14px; }
   /* "Christmas — open 5:00 AM to 11:00 PM today": why the usual hours are not on offer. */
-  .short-day { margin: 0 0 12px; padding: 10px 12px; border-radius: 9px; font-size: 13.5px;
-    background: rgba(240,82,61,.08); border: 1px solid rgba(240,82,61,.25); color: var(--white); }
+  .short-day { margin: 0 0 12px; padding: 10px 12px; border-radius:3px; font-size: 13.5px;
+    background: rgba(154,105,15,.08); border: 1px solid rgba(154,105,15,.25); color: var(--white); }
 
   /* Sticky checkout bar */
   .checkbar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
     background: rgba(255,255,255,.96); backdrop-filter: blur(12px); border-top: 1px solid var(--border);
-    box-shadow: 0 -6px 24px rgba(16,24,40,.08);
+    box-shadow: 0 -6px 24px rgba(26,14,0,.08);
     transform: translateY(115%); transition: transform .25s ease; }
   .checkbar.show { transform: translateY(0); }
   .checkbar .inner { max-width: 1180px; margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
   .cb-info { display: flex; gap: 22px; flex-wrap: wrap; align-items: center; flex: 1; min-width: 240px; }
   .cb-item .k { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 5px; }
-  .cb-item .v { font-family: 'Space Grotesk'; font-weight: 700; font-size: 15px; }
-  .cb-item .v small { font-family: 'Raleway'; font-weight: 500; font-size: 12px; color: var(--muted); }
+  .cb-item .v { font-family: 'Bebas Neue'; font-weight: 700; font-size: 15px; }
+  .cb-item .v small { font-family: 'Basic'; font-weight: 500; font-size: 12px; color: var(--muted); }
   .cb-total .v { font-size: 22px; }
   /* Themed dropdown (custom, replaces native select) */
   .cbsel { position: relative; }
   .cbsel-btn { display: inline-flex; align-items: center; gap: 8px; background: var(--near-black); border: 1px solid var(--border);
-    border-radius: 9px; color: var(--white); font-family: inherit; font-size: 14px; font-weight: 600; padding: 9px 12px;
+    border-radius:3px; color: var(--white); font-family: inherit; font-size: 14px; font-weight: 600; padding: 9px 12px;
     cursor: pointer; white-space: nowrap; transition: .15s; }
   .cbsel-btn:hover { border-color: var(--dim); }
   .cbsel.open .cbsel-btn { border-color: var(--green); }
@@ -237,20 +237,20 @@
     stroke-linejoin: round; opacity: .75; transition: transform .15s; }
   .cbsel.open .cbsel-arrow { transform: rotate(180deg); }
   .cbsel-menu { display: none; position: absolute; left: 0; bottom: calc(100% + 8px); min-width: 100%; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 12px; padding: 6px; z-index: 40; box-shadow: 0 14px 34px rgba(16,24,40,.16);
+    border: 1px solid var(--border); border-radius:3px; padding: 6px; z-index: 40; box-shadow: 0 14px 34px rgba(26,14,0,.16);
     max-height: 240px; overflow-y: auto; scrollbar-width: none; }
   .cbsel-menu::-webkit-scrollbar { display: none; }
   .cbsel.open .cbsel-menu { display: block; }
-  .cbsel-opt { padding: 9px 12px; border-radius: 7px; font-size: 14px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .cbsel-opt { padding: 9px 12px; border-radius:3px; font-size: 14px; color: var(--muted); cursor: pointer; white-space: nowrap; }
   .cbsel-opt:hover { background: var(--surface-2); color: var(--white); }
   .cbsel-opt.sel { color: var(--green); font-weight: 700; }
   .cb-actions { display: flex; gap: 10px; align-items: center; }
 
-  .btn { border: none; border-radius: 11px; padding: 14px 22px; font-weight: 700; font-size: 15px;
-    font-family: 'Space Grotesk'; cursor: pointer; transition: .15s; }
+  .btn { border: none; border-radius:3px; padding: 14px 22px; font-weight: 700; font-size: 15px;
+    font-family: 'Bebas Neue'; cursor: pointer; transition: .15s; }
   .btn-primary { background: var(--green); color: #fff; }
-  .btn-primary:hover { background: #d8452f; }
-  .btn-primary:disabled { background: #E4E7EC; color: #98A2B3; cursor: not-allowed; }
+  .btn-primary:hover { background: #7A520B; }
+  .btn-primary:disabled { background: #EDE3D3; color: #A89880; cursor: not-allowed; }
   .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
   .btn-ghost:hover { color: var(--white); border-color: var(--dim); }
   .btn-block { width: 100%; }
@@ -258,18 +258,18 @@
   /* Developer hint under the Stripe step. Only ever filled in when the server says Stripe is
      running on test keys — see openPayment(). */
   #pay-note { font-size: 13.5px; color: var(--muted); background: var(--near-black); border: 1px solid var(--border);
-    border-radius: 10px; padding: 11px 14px; margin-top: 16px; line-height: 1.55; }
+    border-radius:3px; padding: 11px 14px; margin-top: 16px; line-height: 1.55; }
   #pay-note b { color: var(--green); font-weight: 700; letter-spacing: .02em; }
 
   /* Modal */
-  .overlay { position: fixed; inset: 0; background: rgba(16,24,40,.48); backdrop-filter: blur(4px);
+  .overlay { position: fixed; inset: 0; background: rgba(26,14,0,.48); backdrop-filter: blur(4px);
     display: none; place-items: center; z-index: 50; padding: 20px; }
   .overlay.show { display: grid; }
   .modal { width: 100%; max-width: 430px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 18px; padding: 26px; max-height: 92vh; overflow-y: auto; position: relative;
+    border-radius:3px; padding: 26px; max-height: 92vh; overflow-y: auto; position: relative;
     scrollbar-width: none; }
   .modal::-webkit-scrollbar { width: 0; height: 0; display: none; }
-  .modal-close { position: absolute; top: 18px; right: 18px; width: 34px; height: 34px; border-radius: 9px;
+  .modal-close { position: absolute; top: 18px; right: 18px; width: 34px; height: 34px; border-radius:3px;
     border: 1px solid var(--border); background: var(--near-black); color: var(--muted); font-size: 15px;
     cursor: pointer; display: grid; place-items: center; transition: .15s; z-index: 3; }
   .modal-close:hover { color: var(--white); border-color: var(--dim); }
@@ -280,20 +280,20 @@
   @media (max-width: 760px){ .pay-cols { grid-template-columns: 1fr; gap: 0; } }
   .modal h3 { font-size: 20px; margin-bottom: 4px; }
   .modal .sub { color: var(--dim); font-size: 13px; margin-bottom: 18px; }
-  .mini-recap { background: var(--near-black); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
+  .mini-recap { background: var(--near-black); border: 1px solid var(--border); border-radius:3px; padding: 12px 14px; margin-bottom: 18px; }
   .mini-recap .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
   .mini-recap .row .k { color: var(--muted); }
   .mini-recap .row .v { font-weight: 600; }
   .mini-recap .row.tot { border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 9px; }
-  .mini-recap .row.tot .v { color: var(--green); font-family: 'Space Grotesk'; font-size: 16px; }
+  .mini-recap .row.tot .v { color: var(--green); font-family: 'Bebas Neue'; font-size: 16px; }
   .input { width: 100%; padding: 13px 14px; background: var(--near-black); border: 1px solid var(--border);
-    border-radius: 10px; color: var(--white); font-family: inherit; font-size: 14px; margin-bottom: 12px; }
+    border-radius:3px; color: var(--white); font-family: inherit; font-size: 14px; margin-bottom: 12px; }
   .input:focus { outline: none; border-color: var(--green); }
   textarea.input { resize: vertical; min-height: 64px; line-height: 1.45; }
   /* Shown instead of the payment form when checkout cannot start. Nothing is booked here. */
-  .pay-down { background: var(--near-black); border: 1px solid var(--border); border-radius: 12px;
+  .pay-down { background: var(--near-black); border: 1px solid var(--border); border-radius:3px;
     padding: 18px; text-align: center; }
-  .pay-down .pd-t { font-family: 'Space Grotesk'; font-size: 16px; font-weight: 700; color: var(--white); margin-bottom: 8px; }
+  .pay-down .pd-t { font-family: 'Bebas Neue'; font-size: 16px; font-weight: 700; color: var(--white); margin-bottom: 8px; }
   .pay-down .pd-d { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin-bottom: 16px; }
   .pay-down .pd-call { display: block; width: 100%; text-align: center; text-decoration: none; }
   #payment-element { min-height: 200px; margin-top: 4px; }
@@ -301,84 +301,84 @@
   /* The one line that says which of the two things is about to happen to the card — a hold, or a
      charge taken now. It has no resting state on purpose: invisible until the server has actually
      said which, so it can never be the thing that guesses. See renderPayMode(). */
-  .pay-mode { display: none; margin-top: 14px; padding: 11px 13px; border-radius: 10px;
+  .pay-mode { display: none; margin-top: 14px; padding: 11px 13px; border-radius:3px;
     font-size: 13px; line-height: 1.55; background: var(--near-black); border: 1px solid var(--border);
     color: var(--muted); }
   .pay-mode.is-shown { display: block; }
-  .pay-mode.is-hold, .pay-mode.is-save { background: rgba(240,82,61,.06); border-color: rgba(240,82,61,.35); }
+  .pay-mode.is-hold, .pay-mode.is-save { background: rgba(154,105,15,.06); border-color: rgba(154,105,15,.35); }
   .pay-mode b { color: var(--white); font-weight: 700; }
   .loading { color: var(--dim); font-size: 14px; text-align: center; padding: 40px 0; }
 
   /* Confirmation */
-  .check { width: 64px; height: 64px; border-radius: 50%; background: rgba(240,82,61,.12);
+  .check { width: 64px; height: 64px; border-radius: 50%; background: rgba(154,105,15,.12);
     border: 1px solid var(--green); display: grid; place-items: center; margin: 0 auto 18px; }
   .check svg { width: 30px; height: 30px; stroke: var(--green); }
   .conf { text-align: center; }
   .conf h3 { font-size: 22px; }
-  .conf .code { font-family: 'Space Grotesk'; font-weight: 700; color: var(--green); letter-spacing: .05em; font-size: 18px; margin-top: 4px; }
+  .conf .code { font-family: 'Bebas Neue'; font-weight: 700; color: var(--green); letter-spacing: .05em; font-size: 18px; margin-top: 4px; }
   .conf-msg { color: var(--muted); font-size: 14.5px; line-height: 1.55; margin: 14px auto 0; max-width: 340px; }
-  .wv-cta { margin: 4px 0 14px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: rgba(240,82,61,.06); text-align: left; }
-  .wv-cta .wv-t { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .wv-cta { margin: 4px 0 14px; padding: 14px 16px; border: 1px solid var(--border); border-radius:3px; background: rgba(154,105,15,.06); text-align: left; }
+  .wv-cta .wv-t { font-family: 'Bebas Neue', sans-serif; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
   .wv-cta .wv-s { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin-bottom: 12px; }
   .wv-cta .btn { display: block; text-align: center; text-decoration: none; }
   .btn.btn-line { background: transparent; border: 1px solid var(--orange); color: var(--orange); }
-  .btn.btn-line:hover { background: rgba(240,82,61,.12); }
+  .btn.btn-line:hover { background: rgba(154,105,15,.12); }
   /* SMS-notifications toggle on checkout */
   /* Country hint that appears while typing a phone number */
   .ph-hint { font-size: 12px; color: var(--dim); margin: 4px 0 0 2px; min-height: 15px; letter-spacing: .01em; }
   .ph-hint.on { color: #067647; }
   .sms-toggle { display: flex; align-items: center; gap: 11px; margin-top: 14px; cursor: pointer; font-size: 13px; color: var(--muted); line-height: 1.3; }
   .sms-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-  .sms-track { flex: none; width: 54px; height: 26px; border-radius: 999px; background: #E4E7EC; border: 1px solid #CFD4DC; position: relative; transition: .18s; }
-  .sms-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(16,24,40,.28); transition: .18s; }
+  .sms-track { flex: none; width: 54px; height: 26px; border-radius:999px; background: #EDE3D3; border: 1px solid #CFD4DC; position: relative; transition: .18s; }
+  .sms-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(26,14,0,.28); transition: .18s; }
   /* The state is written on the track so on/off is unmistakable */
-  .sms-track:after { content: 'OFF'; position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-family: 'Space Grotesk'; font-size: 9px; font-weight: 700; letter-spacing: .05em; color: #667085; }
+  .sms-track:after { content: 'OFF'; position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-family: 'Bebas Neue'; font-size: 9px; font-weight: 700; letter-spacing: .05em; color: #667085; }
   .sms-toggle input:checked + .sms-track { background: var(--orange); border-color: var(--orange); }
   .sms-toggle input:checked + .sms-track .sms-thumb { transform: translateX(28px); background: #fff; }
   .sms-toggle input:checked + .sms-track:after { content: 'ON'; right: auto; left: 9px; color: #fff; }
   .sms-toggle input:focus-visible + .sms-track { outline: 2px solid var(--orange); outline-offset: 2px; }
   .sms-txt small { display: block; color: var(--dim); font-size: 11px; margin-top: 1px; }
   /* Fills the left checkout column so it balances the taller payment side */
-  .good-to-know { margin-top: 18px; background: var(--near-black); border: 1px solid var(--border); border-radius: 12px; padding: 15px 17px; }
-  .good-to-know .gtk-title { font-family: 'Space Grotesk'; font-weight: 700; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  .good-to-know { margin-top: 18px; background: var(--near-black); border: 1px solid var(--border); border-radius:3px; padding: 15px 17px; }
+  .good-to-know .gtk-title { font-family: 'Bebas Neue'; font-weight: 700; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
   .good-to-know ul { list-style: none; margin: 0; padding: 0; }
   .good-to-know li { position: relative; padding-left: 16px; color: var(--muted); font-size: 12.5px; line-height: 1.55; margin-bottom: 9px; }
   .good-to-know li:last-child { margin-bottom: 0; }
-  .good-to-know li:before { content: ''; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; border-radius: 2px; background: var(--orange); }
+  .good-to-know li:before { content: ''; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; border-radius:2px; background: var(--orange); }
   /* "Pay with hours" option in checkout */
-  .hours-opt { margin-top: 14px; background: rgba(74,163,255,.08); border: 1px solid rgba(74,163,255,.4); border-radius: 12px; padding: 13px 14px; }
+  .hours-opt { margin-top: 14px; background: rgba(74,163,255,.08); border: 1px solid rgba(74,163,255,.4); border-radius:3px; padding: 13px 14px; }
   .hours-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
   .hours-opt .ho-txt b { color: var(--white); }
   .hours-opt .btn { width: 100%; }
   /* "This gift card covers the whole session" option in checkout (green accent to read as credit) */
-  .gift-opt { margin-top: 14px; background: rgba(78,192,106,.08); border: 1px solid rgba(78,192,106,.4); border-radius: 12px; padding: 13px 14px; }
+  .gift-opt { margin-top: 14px; background: rgba(78,192,106,.08); border: 1px solid rgba(78,192,106,.4); border-radius:3px; padding: 13px 14px; }
   .gift-opt .ho-txt { font-size: 13px; color: var(--muted); line-height: 1.4; margin-bottom: 10px; }
   .gift-opt .ho-txt b { color: var(--white); }
   .gift-opt .btn { width: 100%; }
 
   /* League round (migration 0031): a team's one round a week, booked and paid for from this page.
      The banner sits under the hero; the panel is the first thing inside checkout. */
-  .lg-bar { display: none; margin: 20px 0 0; background: rgba(240,82,61,.08); border: 1px solid rgba(240,82,61,.4);
+  .lg-bar { display: none; margin: 20px 0 0; background: rgba(154,105,15,.08); border: 1px solid rgba(154,105,15,.4);
     border-left: 4px solid var(--orange); border-radius: var(--radius); padding: 16px 18px; }
   .lg-bar.is-booked { background: rgba(6,118,71,.07); border-color: rgba(6,118,71,.35); border-left-color: #067647; }
-  .lg-bar .lg-k { font-family: 'Space Grotesk'; font-weight: 700; font-size: 11px; letter-spacing: .14em;
+  .lg-bar .lg-k { font-family: 'Bebas Neue'; font-weight: 700; font-size: 11px; letter-spacing: .14em;
     text-transform: uppercase; color: var(--orange); margin-bottom: 7px; }
   .lg-bar.is-booked .lg-k { color: #067647; }
   .lg-bar .lg-line { font-size: 14.5px; line-height: 1.55; color: var(--muted); margin-bottom: 4px; }
   .lg-bar .lg-line:last-of-type { margin-bottom: 0; }
   .lg-bar .lg-line b { color: var(--white); }
   .lg-bar .btn { margin-top: 12px; padding: 11px 18px; font-size: 14px; }
-  .lg-panel { border-radius: 12px; padding: 15px 16px; margin-bottom: 18px; font-size: 13.5px; line-height: 1.55; }
-  .lg-panel.is-offer { background: rgba(240,82,61,.08); border: 1px solid rgba(240,82,61,.4); }
+  .lg-panel { border-radius:3px; padding: 15px 16px; margin-bottom: 18px; font-size: 13.5px; line-height: 1.55; }
+  .lg-panel.is-offer { background: rgba(154,105,15,.08); border: 1px solid rgba(154,105,15,.4); }
   .lg-panel.is-armed { background: rgba(6,118,71,.09); border: 1px solid rgba(6,118,71,.4); }
   .lg-panel.is-note { background: var(--near-black); border: 1px solid var(--border); color: var(--muted); }
-  .lg-panel .lg-t { font-family: 'Space Grotesk'; font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+  .lg-panel .lg-t { font-family: 'Bebas Neue'; font-weight: 700; font-size: 16px; margin-bottom: 6px; }
   .lg-panel.is-armed .lg-t { color: #067647; font-size: 18px; }
   .lg-panel .lg-d { color: var(--muted); }
   .lg-panel .lg-d b { color: var(--white); }
   .lg-facts { list-style: none; margin: 11px 0 0; padding: 0; }
   .lg-facts li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 13px;
-    border-bottom: 1px dashed rgba(16,24,40,.12); }
+    border-bottom: 1px dashed rgba(26,14,0,.12); }
   .lg-facts li:last-child { border-bottom: none; }
   .lg-facts .k { color: var(--muted); }
   .lg-facts .v { font-weight: 700; text-align: right; }
@@ -391,20 +391,20 @@
      promo, gift card. Adding a fourth credit is a new entry in the CREDIT_ROWS loop in
      renderCredits(), never another sibling div beside this one. */
   .credits { margin-top: 14px; background: rgba(78,192,106,.08); border: 1px solid rgba(78,192,106,.4);
-    border-radius: 12px; padding: 6px 14px; display: none; }
+    border-radius:3px; padding: 6px 14px; display: none; }
   .credits.on { display: block; }
   .credit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
     font-size: 13px; color: #067647; padding: 8px 0; border-bottom: 1px solid rgba(78,192,106,.22); }
   .credit-row:last-child { border-bottom: none; }
   .credit-row .cr-txt { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
-  .credit-row .cr-amt { font-family: 'Space Grotesk'; font-weight: 700; white-space: nowrap; }
+  .credit-row .cr-amt { font-family: 'Bebas Neue'; font-weight: 700; white-space: nowrap; }
   .credit-row a.cr-x { color: var(--dim); cursor: pointer; text-decoration: underline; font-size: 12px; flex: none; }
   .credit-row a.cr-x:hover { color: var(--danger); }
 
   /* Promo-code + gift-card entry. Same shape for both; only the labels differ. */
   .code-box { margin-top: 14px; }
   .code-row { display: flex; gap: 8px; align-items: stretch; }
-  .code-row .input { margin-bottom: 0; text-transform: uppercase; letter-spacing: .06em; font-family: 'Space Grotesk', monospace; }
+  .code-row .input { margin-bottom: 0; text-transform: uppercase; letter-spacing: .06em; font-family: 'Bebas Neue', monospace; }
   .code-row .btn { flex: none; padding: 13px 15px; }
   .code-lbl { font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
   .code-msg { font-size: 12.5px; margin-top: 7px; line-height: 1.45; min-height: 1px; }
@@ -421,25 +421,25 @@
   /* Waiting list — the "that slot is full" path */
   .cell.booked.waitable { cursor: pointer; }
   .cell.booked.waitable:hover { border-color: #B3261E; box-shadow: 0 0 0 1px rgba(179,38,30,.5) inset; }
-  .cell.booked .wl-hint { display: block; font-family: 'Raleway'; font-weight: 600; font-size: 9px;
+  .cell.booked .wl-hint { display: block; font-family: 'Basic'; font-weight: 600; font-size: 9px;
     letter-spacing: .04em; text-transform: uppercase; color: var(--dim); margin-top: 3px; }
   .cell.booked.shut .shut-why { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; font-family: 'Raleway'; font-weight: 600; font-size: 9px; letter-spacing: .04em;
+    overflow: hidden; font-family: 'Basic'; font-weight: 600; font-size: 9px; letter-spacing: .04em;
     line-height: 1.25; color: var(--dim); margin-top: 3px; overflow-wrap: anywhere; text-transform: none; }
   .wl-row { display: flex; gap: 12px; }
   .wl-row > * { flex: 1; min-width: 0; }
   .wl-lbl { font-size: 12px; color: var(--muted); margin: 2px 0 6px; font-weight: 600; }
   .wl-bays { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
-  .wl-bay { font-size: 12px; padding: 7px 11px; border-radius: 999px; border: 1px solid var(--border);
+  .wl-bay { font-size: 12px; padding: 7px 11px; border-radius:999px; border: 1px solid var(--border);
     background: var(--near-black); color: var(--muted); cursor: pointer; user-select: none; transition: .12s; }
-  .wl-bay.on { border-color: var(--green); color: var(--green); background: rgba(240,82,61,.09); }
+  .wl-bay.on { border-color: var(--green); color: var(--green); background: rgba(154,105,15,.09); }
   .wl-consent { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: var(--muted);
     line-height: 1.45; margin-bottom: 10px; cursor: pointer; }
   .wl-consent input { flex: none; margin-top: 2px; width: 16px; height: 16px; accent-color: var(--green); }
   .wl-note { font-size: 12px; color: var(--dim); line-height: 1.5; margin-top: 4px; }
 
   .conf .recap { text-align: left; background: var(--near-black); border: 1px solid var(--border);
-    border-radius: 12px; padding: 16px; margin: 20px 0; }
+    border-radius:3px; padding: 16px; margin: 20px 0; }
   .conf .recap .row { display:flex; justify-content: space-between; padding: 7px 0; font-size: 14px; }
   .conf .recap .row .k { color: var(--muted); }
 
@@ -497,6 +497,7 @@
     .mini-recap .row { font-size: 12.5px; }
   }
 </style>
+<link rel="stylesheet" href="/assets/brand.css" />
 </head>
 <body>
 
@@ -1318,21 +1319,22 @@ async function loadStripeConfig(){
 }
 
 const STRIPE_APPEARANCE = {
-  theme:'night',
+  // The card form, in the brand: white fields, brown ink, gold accents, square corners.
+  theme:'stripe',
   variables:{
-    colorPrimary:'#FFFFFF', colorBackground:'#0E0E0E', colorText:'#FFFFFF',
-    colorTextSecondary:'#B5B5B5', colorDanger:'#ff5b5b', colorSuccess:'#FFFFFF',
-    fontFamily:"Raleway, system-ui, sans-serif", borderRadius:'10px', spacingUnit:'4px',
+    colorPrimary:'#9A690F', colorBackground:'#FFFFFF', colorText:'#1A0E00',
+    colorTextSecondary:'#5C4A33', colorDanger:'#D92D20', colorSuccess:'#067647',
+    fontFamily:"system-ui, sans-serif", borderRadius:'3px', spacingUnit:'4px',
   },
   rules:{
-    '.Input':{ backgroundColor:'#0E0E0E', border:'1px solid #333333' },
-    '.Input:focus':{ border:'1px solid #F0523D', boxShadow:'0 0 0 1px #F0523D' },
-    '.Tab, .Block':{ backgroundColor:'#0E0E0E', border:'1px solid #333333' },
-    '.Tab:hover':{ borderColor:'#F0523D' },
-    '.Tab--selected':{ backgroundColor:'#0E0E0E', borderColor:'#F0523D', boxShadow:'0 0 0 1px #F0523D' },
-    '.TabLabel--selected':{ color:'#FFFFFF' },
-    '.TabIcon--selected':{ color:'#F0523D' },
-    '.Label':{ color:'#B5B5B5' },
+    '.Input':{ backgroundColor:'#FFFFFF', border:'1px solid #E6D8C3' },
+    '.Input:focus':{ border:'1px solid #9A690F', boxShadow:'0 0 0 1px #9A690F' },
+    '.Tab, .Block':{ backgroundColor:'#FFFFFF', border:'1px solid #E6D8C3' },
+    '.Tab:hover':{ borderColor:'#9A690F' },
+    '.Tab--selected':{ backgroundColor:'#FFF7F0', borderColor:'#9A690F', boxShadow:'0 0 0 1px #9A690F' },
+    '.TabLabel--selected':{ color:'#1A0E00' },
+    '.TabIcon--selected':{ color:'#9A690F' },
+    '.Label':{ color:'#5C4A33' },
   },
 };
 

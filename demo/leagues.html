@@ -6,41 +6,41 @@
 <title>Invictus Golf — Leagues</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Raleway:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Basic&display=swap" rel="stylesheet" />
 <style>
-  :root{ --black:#F6F7F9;--near-black:#F5F7FA;--surface:#FFFFFF;--surface-2:#EDEFF3;--border:#D7DCE3;
-    --white:#14161A;--muted:#555C68;--dim:#858C99;--orange:#F0523D;--orange-ink:#C7402E;--danger:#D92D20;--ok:#067647;--radius:16px; }
+  :root{ --black:#FFFBF6;--near-black:#FFF7F0;--surface:#FFFFFF;--surface-2:#F3E8D8;--border:#E6D8C3;
+    --white:#1A0E00;--muted:#5C4A33;--dim:#8C7A63;--orange:#9A690F;--orange-ink:#7A520B;--danger:#D92D20;--ok:#067647;--radius:4px; }
   *{box-sizing:border-box;margin:0;padding:0}
   *{scrollbar-width:none;-ms-overflow-style:none} *::-webkit-scrollbar{width:0;height:0;display:none}
   body{background:radial-gradient(1200px 600px at 70% -10%,#FFFFFF 0%,var(--black) 55%),var(--black);
-    color:var(--white);font-family:'Raleway',system-ui,sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;padding:24px}
-  h1,h2,h3{font-family:'Space Grotesk',sans-serif;letter-spacing:-.01em}
+    color:var(--white);font-family:'Basic',system-ui,sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased;padding:24px}
+  h1,h2,h3{font-family:'Bebas Neue',sans-serif;letter-spacing:-.01em}
   .wrap{max-width:1080px;margin:0 auto}
   header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 0 26px}
   header img{height:46px;width:auto}
-  .brand-fallback{font-family:'Space Grotesk';font-weight:700;font-size:20px}
+  .brand-fallback{font-family:'Bebas Neue';font-weight:700;font-size:20px}
   .brand-fallback .joy{color:var(--orange);margin-right:6px}
   header a.back{color:var(--muted);text-decoration:none;font-size:13px}
   header a.back:hover{color:var(--white)}
   /* --orange-ink: the brand orange is too light for small text on white (3.5:1); this passes (5:1). */
-  .eyebrow{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange-ink);margin-bottom:10px}
+  .eyebrow{font-family:'Bebas Neue';font-weight:700;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--orange-ink);margin-bottom:10px}
 
   /* ---- The league page ------------------------------------------------------------------
      One league, laid out like its brochure: a title, the story, the rules, a scorecard of the
      season, the honours, the prize. The sign-up panel on the right stays in view while people
-     read. Type: Marcellus for the league's own headings (an engraved, trophy-plate face), Raleway
-     for reading, Space Grotesk for small labels as on the rest of the site.
+     read. Type: Bebas Neue for headings and labels and Basic for reading, as on invictusgolfwpg.ca
+     (/assets/brand.css).
      Radius rule: panels 14px, the scorecard 4px (a printed card), buttons 11px. No shadows. */
   .lp{max-width:1080px;margin:0 auto}
   .lp-back{background:none;border:none;padding:0;margin:0 0 18px;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
   .lp-back:hover{color:var(--white)} .lp-back:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
   .lp-head{padding:18px 0 34px;border-bottom:1px solid var(--border);margin-bottom:38px}
-  .lp-title{font-family:'Marcellus',Georgia,serif;font-weight:400;font-size:clamp(34px,5.4vw,58px);line-height:1.06;letter-spacing:-.005em;color:var(--white);max-width:16ch}
+  .lp-title{font-family:'Bebas Neue',Georgia,serif;font-weight:400;font-size:clamp(34px,5.4vw,58px);line-height:1.06;letter-spacing:-.005em;color:var(--white);max-width:16ch}
   .lp-lede{font-size:clamp(16px,1.5vw,18.5px);line-height:1.62;color:var(--muted);max-width:62ch;margin-top:20px}
   .lp-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:56px;align-items:start}
   .lp-main > section{margin-bottom:54px}
   .lp-main > section:last-child{margin-bottom:0}
-  .lp h2{font-family:'Marcellus',Georgia,serif;font-weight:400;font-size:25px;line-height:1.2;letter-spacing:0;color:var(--white);margin-bottom:16px}
+  .lp h2{font-family:'Bebas Neue',Georgia,serif;font-weight:400;font-size:25px;line-height:1.2;letter-spacing:0;color:var(--white);margin-bottom:16px}
   .lp-about p{font-size:16px;line-height:1.72;color:var(--white);max-width:66ch;white-space:pre-line}
   .lp-about p + p{margin-top:14px}
   .lp-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 44px}
@@ -52,7 +52,7 @@
   .lp-rule summary{display:flex;align-items:baseline;gap:14px;padding:14px 0;cursor:pointer;list-style:none}
   .lp-rule summary::-webkit-details-marker{display:none}
   .lp-rule summary:focus-visible{outline:2px solid var(--orange);outline-offset:2px;border-radius:4px}
-  .lp-rule-n{font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.08em;color:var(--orange-ink);min-width:22px}
+  .lp-rule-n{font-family:'Bebas Neue';font-weight:700;font-size:12px;letter-spacing:.08em;color:var(--orange-ink);min-width:22px}
   .lp-rule-t{flex:1;font-size:15.5px;font-weight:600;color:var(--white);line-height:1.35}
   .lp-rule-x{width:9px;height:9px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg);align-self:center;transition:transform .15s}
   .lp-rule[open] .lp-rule-x{transform:rotate(-135deg)}
@@ -65,18 +65,18 @@
   /* The scorecard: the season, week by week. The page's one bold element. */
   .sc{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--white);border-radius:4px;overflow:hidden;font-variant-numeric:tabular-nums lining-nums}
   .sc th,.sc td{text-align:left;vertical-align:top;padding:13px 14px;font-size:14.5px;line-height:1.4}
-  .sc thead th{background:var(--white);color:#fff;font-family:'Space Grotesk';font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;padding:10px 14px}
+  .sc thead th{background:var(--white);color:#fff;font-family:'Bebas Neue';font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;padding:10px 14px}
   .sc tbody tr + tr td{border-top:1px solid var(--border)}
-  .sc .sc-phase th{background:var(--surface-2);font-family:'Space Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:9px 14px;border-top:1px solid var(--white)}
+  .sc .sc-phase th{background:var(--surface-2);font-family:'Bebas Neue';font-weight:700;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:9px 14px;border-top:1px solid var(--white)}
   .sc tbody:first-of-type .sc-phase th{border-top:none}
-  .sc .sc-n{width:52px;font-family:'Marcellus',Georgia,serif;font-size:19px;line-height:1.15;color:var(--white)}
+  .sc .sc-n{width:52px;font-family:'Bebas Neue',Georgia,serif;font-size:19px;line-height:1.15;color:var(--white)}
   .sc .sc-d{width:132px;white-space:nowrap;color:var(--muted);font-weight:600}
   .sc .sc-c b{display:block;font-weight:700;color:var(--white)}
   .sc .sc-c span{display:block;color:var(--muted);font-size:13.5px;margin-top:2px}
   .sc .sc-n{white-space:nowrap}
   .sc tr.is-break td{background:var(--near-black)}   /* a break in the schedule: quieter than a playing week */
   .sc .sc-e{width:236px}
-  .sc .sc-e b{display:block;font-family:'Space Grotesk';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--orange-ink);padding-top:2px}
+  .sc .sc-e b{display:block;font-family:'Bebas Neue';font-weight:700;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--orange-ink);padding-top:2px}
   .sc .sc-e span{display:block;color:var(--muted);font-size:13px;line-height:1.45;margin-top:3px}
   .lp-notice{font-size:13px;line-height:1.55;color:var(--muted);margin-top:14px;max-width:70ch}
   /* The settings table: label and value, ruled like the lists. */
@@ -92,22 +92,22 @@
   .lp-prize p{font-size:17px;line-height:1.66;color:var(--white);max-width:60ch;white-space:pre-line}
   .lp-how{list-style:none;counter-reset:how;border-top:1px solid var(--border)}
   .lp-how li{counter-increment:how;display:grid;grid-template-columns:44px 1fr;gap:6px;padding:16px 0;border-bottom:1px solid var(--border);font-size:15px;line-height:1.55;color:var(--muted)}
-  .lp-how li:before{content:counter(how);font-family:'Marcellus',Georgia,serif;font-size:24px;line-height:1;color:var(--white)}
+  .lp-how li:before{content:counter(how);font-family:'Bebas Neue',Georgia,serif;font-size:24px;line-height:1;color:var(--white)}
   .lp-how b{display:block;color:var(--white);font-weight:700;margin-bottom:2px}
 
   /* The sign-up panel */
-  .lp-panel{position:sticky;top:24px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:26px 24px 22px}
-  .lp-price{font-family:'Marcellus',Georgia,serif;font-size:46px;line-height:1;color:var(--white)}
+  .lp-panel{position:sticky;top:24px;background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:26px 24px 22px}
+  .lp-price{font-family:'Bebas Neue',Georgia,serif;font-size:46px;line-height:1;color:var(--white)}
   .lp-price-note{font-size:13.5px;color:var(--muted);font-weight:600;margin-top:8px}
   .lp-facts{margin:22px 0 4px;border-top:1px solid var(--border)}
   .lp-facts div{display:grid;grid-template-columns:86px 1fr;gap:10px;padding:11px 0;border-bottom:1px solid var(--border);font-size:13.5px;line-height:1.45}
-  .lp-facts dt{font-family:'Space Grotesk';font-weight:700;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-top:2px}
+  .lp-facts dt{font-family:'Bebas Neue';font-weight:700;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-top:2px}
   .lp-facts dd{color:var(--white);font-weight:600}
   .lp-facts dd span{display:block;color:var(--muted);font-weight:500}
   .lp-panel .fine{text-align:left;margin-top:12px;color:var(--muted)}
   /* "No team?" — the solo sign-up, set apart under the main button. */
   .lp-solo{margin-top:18px;padding-top:16px;border-top:1px solid var(--border)}
-  .lp-solo-k{font-family:'Space Grotesk';font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange-ink)}
+  .lp-solo-k{font-family:'Bebas Neue';font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--orange-ink)}
   .lp-solo p{font-size:13.5px;line-height:1.55;color:var(--muted);margin:6px 0 12px}
   /* On a phone the panel sits first in the page, and this bar keeps the button within reach. */
   .lp-bar{display:none}
@@ -117,7 +117,7 @@
   .lg-index-head{padding:18px 0 30px}
   .lg-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px 28px;align-items:center;padding:26px 0;border-top:1px solid var(--border)}
   .lg-row:last-child{border-bottom:1px solid var(--border)}
-  .lg-row h2{font-family:'Marcellus',Georgia,serif;font-weight:400;font-size:27px;line-height:1.15;letter-spacing:0}
+  .lg-row h2{font-family:'Bebas Neue',Georgia,serif;font-weight:400;font-size:27px;line-height:1.15;letter-spacing:0}
   .lg-row .lg-meta{color:var(--muted);font-size:14.5px;line-height:1.6;margin-top:8px}
   .lg-row .btn{margin-top:0;width:auto;padding:13px 22px;white-space:nowrap}
 
@@ -128,8 +128,8 @@
     .lp.has-bar{padding-bottom:86px}
     .lp-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;position:fixed;left:0;right:0;bottom:0;z-index:15;
       background:var(--surface);border-top:1px solid var(--border);padding:12px 18px calc(12px + env(safe-area-inset-bottom))}
-    .lp-bar .lp-bar-p{font-family:'Marcellus',Georgia,serif;font-size:24px;line-height:1;color:var(--white)}
-    .lp-bar .lp-bar-p span{display:block;font-family:'Raleway';font-size:11.5px;font-weight:600;color:var(--muted);margin-top:4px}
+    .lp-bar .lp-bar-p{font-family:'Bebas Neue',Georgia,serif;font-size:24px;line-height:1;color:var(--white)}
+    .lp-bar .lp-bar-p span{display:block;font-family:'Basic';font-size:11.5px;font-weight:600;color:var(--muted);margin-top:4px}
     .lp-bar .btn{margin-top:0;width:auto;padding:13px 20px;white-space:nowrap}
   }
   @media(max-width:640px){
@@ -152,38 +152,38 @@
     .sc .sc-e:empty{display:none}
   }
   .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-  .btn{display:block;width:100%;border:none;border-radius:11px;padding:14px;font-weight:700;font-size:15px;font-family:'Space Grotesk';cursor:pointer;transition:.15s;margin-top:18px;text-align:center;text-decoration:none}
-  .btn-primary{background:var(--orange);color:#fff}.btn-primary:hover{background:#d8452f}
-  .btn-primary:disabled{background:#E4E7EC;color:#98A2B3;cursor:not-allowed}
+  .btn{display:block;width:100%;border:none;border-radius:3px;padding:14px;font-weight:700;font-size:15px;font-family:'Bebas Neue';cursor:pointer;transition:.15s;margin-top:18px;text-align:center;text-decoration:none}
+  .btn-primary{background:var(--orange);color:#fff}.btn-primary:hover{background:#7A520B}
+  .btn-primary:disabled{background:#EDE3D3;color:#A89880;cursor:not-allowed}
   .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:var(--white);border-color:var(--dim)}
   /* After .btn, so its border is not cancelled by .btn's border:none. */
   .btn-line{background:transparent;border:1px solid var(--orange);color:var(--orange)}
-  .btn-line:hover{background:rgba(240,82,61,.12)}
+  .btn-line:hover{background:rgba(154,105,15,.12)}
   .btn-line:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;background:transparent}
   .card{max-width:460px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:30px}
   .card h2{font-size:22px;margin-bottom:4px}
   .card .sub{color:var(--dim);font-size:13.5px;margin-bottom:20px;line-height:1.5}
-  .fld{display:block;font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin:16px 0 7px}
+  .fld{display:block;font-family:'Bebas Neue';font-weight:700;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);margin:16px 0 7px}
   .fld:first-of-type{margin-top:0}
   .opt{text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500}
-  .input{width:100%;background:var(--near-black);border:1px solid var(--border);border-radius:11px;padding:13px 14px;color:var(--white);font-family:'Raleway';font-size:15px;outline:none;transition:.15s}
+  .input{width:100%;background:var(--near-black);border:1px solid var(--border);border-radius:3px;padding:13px 14px;color:var(--white);font-family:'Basic';font-size:15px;outline:none;transition:.15s}
   .input:focus{border-color:var(--orange)} .input.invalid{border-color:var(--danger)}
-  .summary{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;gap:12px}
-  .summary .s-name{font-family:'Space Grotesk';font-weight:700}
-  .summary .s-price{font-family:'Space Grotesk';font-weight:700;color:var(--orange);white-space:nowrap}
+  .summary{background:var(--near-black);border:1px solid var(--border);border-radius:3px;padding:14px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .summary .s-name{font-family:'Bebas Neue';font-weight:700}
+  .summary .s-price{font-family:'Bebas Neue';font-weight:700;color:var(--orange);white-space:nowrap}
   .err{color:var(--danger);font-size:13px;margin-top:12px;min-height:18px;line-height:1.5}
   .err a{color:var(--orange)}
   .fine{color:var(--dim);font-size:11.5px;line-height:1.5;margin-top:14px;text-align:center}
   .center{text-align:center;max-width:460px;margin:0 auto}
   .big{font-size:56px;line-height:1;margin:6px 0 14px} .big.ok{color:var(--ok)}
-  .note{border-radius:12px;padding:14px 16px;font-size:13.5px;line-height:1.5;margin-top:8px;background:rgba(240,82,61,.10);border:1px solid rgba(240,82,61,.4);color:#A8321F}
+  .note{border-radius:3px;padding:14px 16px;font-size:13.5px;line-height:1.5;margin-top:8px;background:rgba(154,105,15,.10);border:1px solid rgba(154,105,15,.4);color:#7A520B}
   .note.is-ok{background:rgba(6,118,71,.09);border-color:rgba(6,118,71,.35);color:#0a5c38}
   .note.is-plain{background:var(--near-black);border-color:var(--border);color:var(--muted)}
   .note a{color:var(--orange)}
   .spin{color:var(--dim);text-align:center;padding:50px 0}
   /* The invite screen: who asked you, and what you are being asked to join. */
-  .invited{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:18px;text-align:center}
-  .invited .who{font-family:'Space Grotesk';font-weight:700;font-size:17px;line-height:1.35}
+  .invited{background:var(--near-black);border:1px solid var(--border);border-radius:3px;padding:16px;margin-bottom:18px;text-align:center}
+  .invited .who{font-family:'Bebas Neue';font-weight:700;font-size:17px;line-height:1.35}
   .invited .what{color:var(--muted);font-size:13.5px;margin-top:6px;line-height:1.5}
   .ck{list-style:none;color:var(--muted);font-size:13.5px;line-height:1.6;display:grid;gap:7px;margin:4px 0 18px}
   .ck li{position:relative;padding-left:20px}
@@ -197,14 +197,15 @@
   .dd-btn[aria-expanded="true"]{border-color:var(--orange)}
   .dd-btn[aria-expanded="true"] .dd-caret{transform:rotate(180deg)}
   .dd-list{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 6px);list-style:none;background:var(--surface);border:1px solid var(--border);
-    border-radius:12px;padding:6px;box-shadow:0 12px 32px rgba(20,22,26,.14);outline:none;max-height:260px;overflow:auto}
+    border-radius:3px;padding:6px;box-shadow:0 12px 32px rgba(20,22,26,.14);outline:none;max-height:260px;overflow:auto}
   .dd-list[hidden]{display:none}
-  .dd-list li{display:flex;justify-content:space-between;gap:12px;padding:11px 12px;border-radius:9px;cursor:pointer;font-size:14.5px;color:var(--white)}
+  .dd-list li{display:flex;justify-content:space-between;gap:12px;padding:11px 12px;border-radius:3px;cursor:pointer;font-size:14.5px;color:var(--white)}
   .dd-list li .dd-sub{color:var(--dim);font-size:13px}
   .dd-list li.is-active{background:var(--surface-2)}
   .dd-list li[aria-selected="true"]{color:var(--orange);font-weight:700}
   .dd-list li[aria-selected="true"] .dd-sub{color:var(--orange)}
 </style>
+<link rel="stylesheet" href="/assets/brand.css" />
 </head>
 <body>
   <div class="wrap">
