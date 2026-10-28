@@ -146,6 +146,44 @@
   .sc-state{font-size:12px;color:var(--muted)}
   .sc-state a{color:var(--orange);font-weight:600}
   .sc-state.is-err{color:var(--danger)}
+  /* The account screen (wide): a header, tabs, and one tab's panel at a time. */
+  .wrap.is-wide{max-width:1180px}
+  .acct-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px 28px;padding:22px 26px}
+  .acct-head h1{font-size:24px;margin:0}
+  .acct-head .sub{margin:4px 0 0}
+  .ah-stats{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+  .ah-stat{background:var(--near-black);border:1px solid var(--border);border-radius:12px;padding:9px 14px;min-width:120px}
+  .ah-stat .t-k{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-family:'Space Grotesk'}
+  .ah-stat b{display:block;font-family:'Space Grotesk';font-size:17px;margin-top:2px}
+  .ah-stat a{color:var(--orange);font-weight:700;font-size:12.5px}
+  .ah-book{width:auto;margin:0;padding:13px 22px}
+  .tabs{display:flex;gap:6px;margin:0 0 16px;border-bottom:1px solid var(--border);overflow-x:auto}
+  .tabs button{font:inherit;font-family:'Space Grotesk';font-weight:700;font-size:15px;color:var(--muted);background:none;border:none;
+    border-bottom:3px solid transparent;padding:10px 16px 11px;cursor:pointer;white-space:nowrap}
+  .tabs button:hover{color:var(--white)}
+  .tabs button[aria-selected="true"]{color:var(--white);border-bottom-color:var(--orange)}
+  .tabs button:focus-visible{outline:2px solid var(--orange);outline-offset:-2px;border-radius:6px}
+  .tab-panel[hidden]{display:none}
+  /* A team: the week and the season on the left, the team and its money on the right. */
+  .team-top{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px 20px;margin-bottom:16px}
+  .team-top .lg-name{font-size:24px;margin:0}
+  .team-top .sub{margin:4px 0 0}
+  .team-top .rules-link{color:var(--orange);font-weight:700;font-size:13.5px;text-decoration:none;white-space:nowrap;padding-top:6px}
+  .lg-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:22px;align-items:start}
+  .lg-side{display:flex;flex-direction:column;gap:14px}
+  .side-box{border:1px solid var(--border);border-radius:14px;padding:16px 18px;background:var(--near-black)}
+  .side-box .sec-title:first-child{margin-top:0}
+  .side-box .input{background:var(--surface)}
+  .lg-main > .sec-title:first-child{margin-top:0}
+  /* Standings can run to dozens of teams: a box of their own that opens on your team's row. */
+  .stand-box{max-height:440px;overflow-y:auto;border:1px solid var(--border);border-radius:12px;padding:0 10px 4px;scrollbar-width:thin}
+  .stand-box::-webkit-scrollbar{width:8px;display:block} .stand-box::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .stand-box .tbl-wrap{overflow:visible}
+  .stand-box .lg-table th{position:sticky;top:0;z-index:1;background:var(--surface)}
+  .lg-main .sched{max-height:440px}
+  .bk-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
+  .bk-cols .sec-title{margin-top:0}
+  @media(max-width:880px){ .lg-grid,.bk-cols{grid-template-columns:minmax(0,1fr)} .acct-head{padding:20px} .ah-book{flex:1} }
   @media(max-width:420px){ .sched-row{grid-template-columns:26px 88px 1fr;gap:6px;padding:9px 8px;font-size:12.5px} }
   /* Captain's invite control */
   .inv-link{display:flex;gap:8px;margin-top:10px;align-items:stretch}
@@ -230,7 +268,7 @@ function nextUrl(){
 }
 const fmtHrs = min => (Math.round((min||0)/6)/10)+' hrs';
 const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
-function render(html){ $('#content').innerHTML = html; }
+function render(html){ $('#content').innerHTML = html; document.querySelector('.wrap').classList.remove('is-wide'); }
 /* ============================================================================
    Sign-in is: prove the phone, then use a password.
 
@@ -683,6 +721,13 @@ function drawProfile(c, bks, justInherited, opts){
       <div>${b.amount_cents ? '$'+(b.amount_cents/100).toFixed(2) : ''}</div>
     </div>`;
 
+  // Tabs. A league player opens on their league; anyone else on their bookings. Someone sent from the
+  // contest to finish their details opens on Profile. The tab is kept in the address (#bookings…).
+  const hasLeague = !!(teams.length || MY_SOLOS.length || (opts && opts.teamsError));
+  const TABS = [hasLeague && ['league','League'], ['bookings','Bookings'], ['profile','Profile'], ['rewards','Rewards']].filter(Boolean);
+  const want = location.hash.slice(1);
+  const first = TABS.some(([k]) => k === want) ? want : fromContest() ? 'profile' : hasLeague ? 'league' : 'bookings';
+
   render(`
     ${ask ? `<div class="card" id="fb-card">
       <div class="sec-title" style="margin-top:0">How was your session?</div>
@@ -697,44 +742,88 @@ function drawProfile(c, bks, justInherited, opts){
         <button class="btn btn-ghost" id="fb-skip">Skip this one</button>
       </div>
     </div>` : ''}
-    ${justInherited && justInherited.hoursMin ? `<div class="card" style="padding:18px 22px"><div class="inherit" style="margin:0">Welcome back — we've attached <b>${fmtHrs(justInherited.hoursMin)}</b> of prepaid time from your previous visits.</div></div>` : ''}
-    <div class="card">
-      <h1>${esc(c.name || 'My account')}</h1>
-      <div class="sub">${[c.email, c.phone].filter(Boolean).map(esc).join(' · ')}</div>
-      <div class="tiles">
-        <div class="tile"><div class="t-k">Prepaid hours</div><div class="t-v">${fmtHrs(c.hours_balance_min)}</div><div class="t-s">Use on any bay</div></div>
-        <div class="tile"><div class="t-k">League team</div><div class="t-v" style="font-size:16px">${teams.length ? esc((teams[0].team||{}).name || (teams[0].league||{}).name || 'Your team') + (teams.length>1 ? ` <span style="color:var(--dim)">+${teams.length-1}</span>` : '') : '—'}</div><div class="t-s">${teams.length ? esc((teams[0].league||{}).name || 'One league round a week') : '<a href="/leagues" style="color:var(--orange)">Start a team</a>'}</div></div>
-        <div class="tile"><div class="t-k">Waiver</div><div class="t-v" style="font-size:16px">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span>'}</div><div class="t-s">${c.waiver_signed_at ? '' : 'Required before you play'}</div></div>
-      </div>
-      <div class="details" id="details"></div>
-      <div class="row2">
-        <a class="btn btn-primary" href="/">Book a bay</a>
-        ${c.waiver_signed_at ? '' : '<a class="btn btn-ghost" href="/waiver">Sign the waiver</a>'}
+    ${justInherited && justInherited.hoursMin ? `<div class="inherit">Welcome back — we've attached <b>${fmtHrs(justInherited.hoursMin)}</b> of prepaid time from your previous visits.</div>` : ''}
+    <div class="card acct-head">
+      <div><h1>${esc(c.name || 'My account')}</h1>
+        <div class="sub">${[c.email, c.phone].filter(Boolean).map(esc).join(' · ')}</div></div>
+      <div class="ah-stats">
+        <div class="ah-stat"><div class="t-k">Prepaid hours</div><b>${fmtHrs(c.hours_balance_min)}</b></div>
+        <div class="ah-stat"><div class="t-k">Waiver</div>${c.waiver_signed_at ? '<b style="color:var(--ok)">Signed</b>' : '<b style="color:var(--danger)">Not signed</b><a href="/waiver">Sign it now</a>'}</div>
+        <a class="btn btn-primary ah-book" href="/">Book a bay</a>
       </div>
     </div>
 
-    <div id="rewards"></div>
-    ${teams.map((t,i) => teamCard(t, i, opts)).join('')}
-    ${MY_SOLOS.map(x => `<div class="card">
-      <div class="sec-title" style="margin-top:0">My league</div>
-      <h2 class="lg-name">${esc((x.league||{}).name || 'League')} <span class="pill warn">Waiting to be placed</span></h2>
-      <div class="lg-note" style="margin-top:10px">You signed up as a solo player. We are pairing you with a team and will text you when it is done. Your team will then show here.</div>
-      ${(x.league||{}).id ? `<a class="btn btn-ghost" href="/leagues?info=${encodeURIComponent(x.league.id)}" style="margin-top:12px">Rules, schedule &amp; prizes</a>` : ''}
-    </div>`).join('')}
-    ${(opts && opts.teamsError) ? `<div class="card"><div class="sec-title" style="margin-top:0">My team</div><div class="lg-note">${esc(opts.teamsError)} Reload the page, and if it keeps happening call the shop at 204-488-6177 — your team and your booked rounds are safe either way.</div></div>` : ''}
-    <div class="card">
-      <div class="sec-title" style="margin-top:0">Upcoming</div>
-      ${upcoming.length ? upcoming.map(bkRow).join('') : '<div class="empty">Nothing booked yet.</div>'}
-      <div class="sec-title">Past visits</div>
-      ${past.length ? past.slice(0,10).map(bkRow).join('') : '<div class="empty">No visits yet.</div>'}
-      ${dev ? '' : '<button class="btn btn-ghost" id="o-out" style="margin-top:18px">Sign out</button>'}
-    </div>`);
+    <nav class="tabs" role="tablist" aria-label="My account">${TABS.map(([k, label]) =>
+      `<button type="button" role="tab" id="tab-${k}" data-tab="${k}" aria-controls="panel-${k}" aria-selected="${k===first}" tabindex="${k===first?0:-1}" ${k==='rewards'?'hidden':''}>${label}</button>`).join('')}</nav>
+
+    ${hasLeague ? `<section class="tab-panel" id="panel-league" role="tabpanel" aria-labelledby="tab-league" ${first==='league'?'':'hidden'}>
+      ${teams.map((t,i) => teamCard(t, i, opts)).join('')}
+      ${MY_SOLOS.map(x => `<div class="card">
+        <h2 class="lg-name">${esc((x.league||{}).name || 'League')} <span class="pill warn">Waiting to be placed</span></h2>
+        <div class="lg-note" style="margin-top:10px">You signed up as a solo player. We are pairing you with a team and will text you when it is done. Your team will then show here.</div>
+        ${(x.league||{}).id ? `<a class="btn btn-ghost" href="/leagues?info=${encodeURIComponent(x.league.id)}" style="margin-top:12px">Rules, schedule &amp; prizes</a>` : ''}
+      </div>`).join('')}
+      ${(opts && opts.teamsError) ? `<div class="card"><div class="sec-title" style="margin-top:0">My team</div><div class="lg-note">${esc(opts.teamsError)} Reload the page, and if it keeps happening call the shop at 204-488-6177 — your team and your booked rounds are safe either way.</div></div>` : ''}
+    </section>` : ''}
+
+    <section class="tab-panel" id="panel-bookings" role="tabpanel" aria-labelledby="tab-bookings" ${first==='bookings'?'':'hidden'}>
+      <div class="card"><div class="bk-cols">
+        <div><div class="sec-title">Upcoming</div>
+          ${upcoming.length ? upcoming.map(bkRow).join('') : '<div class="empty">Nothing booked yet. <a href="/" style="color:var(--orange);font-weight:700">Book a bay</a></div>'}</div>
+        <div><div class="sec-title">Past visits</div>
+          ${past.length ? past.slice(0,10).map(bkRow).join('') : '<div class="empty">No visits yet.</div>'}</div>
+      </div>
+      ${!hasLeague ? '<div class="muted-note">Want to play in a league? <a href="/leagues" style="color:var(--orange);font-weight:700">Start a team</a></div>' : ''}</div>
+    </section>
+
+    <section class="tab-panel" id="panel-profile" role="tabpanel" aria-labelledby="tab-profile" ${first==='profile'?'':'hidden'}>
+      <div class="card" style="max-width:720px">
+        <div class="sec-title" style="margin-top:0">Your details</div>
+        <div id="details"></div>
+        <div class="sec-title">Waiver</div>
+        <div class="kv"><span class="k">Status</span><span class="v">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span>'}</span></div>
+        ${c.waiver_signed_at ? '' : '<div class="sub" style="margin:4px 0 0">You need to sign it before you play. <a href="/waiver" style="color:var(--orange);font-weight:700">Sign the waiver</a></div>'}
+        ${dev ? '' : '<button class="btn btn-ghost" id="o-out" style="margin-top:22px">Sign out</button>'}
+      </div>
+    </section>
+
+    <section class="tab-panel" id="panel-rewards" role="tabpanel" aria-labelledby="tab-rewards" ${first==='rewards'?'':'hidden'}>
+      <div id="rewards"></div>
+    </section>`);
+  document.querySelector('.wrap').classList.add('is-wide');
+  // Switching tabs: click, or the arrow keys along the row.
+  const tabBtns = [...document.querySelectorAll('.tabs [role="tab"]')];
+  const show = k => {
+    tabBtns.forEach(b => { const on = b.dataset.tab === k; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
+    document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.id !== 'panel-' + k; });
+    history.replaceState(null, '', '#' + k);
+    if(k === 'league') showMyRow();
+  };
+  tabBtns.forEach((b, i) => {
+    b.onclick = () => show(b.dataset.tab);
+    b.onkeydown = e => {
+      if(e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const vis = tabBtns.filter(x => !x.hidden), j = vis.indexOf(b);
+      const nx = vis[(j + (e.key === 'ArrowRight' ? 1 : vis.length - 1)) % vis.length];
+      show(nx.dataset.tab); nx.focus();
+    };
+  });
+  if(first === 'rewards') show(hasLeague ? 'league' : 'bookings');
+  showMyRow();   // until rewards load, if they ever do
   if(!dev) $('#o-out').onclick = signOut;
   drawDetails(c, dev, fromContest() && contestMissing(c).length > 0);
-  if(fromContest()) $('#details').scrollIntoView({ block:'center' });
+
   if(!dev) loadRewards();
   if(ask) wireFeedback(ask, dev);
   wireTeams(teams);
+}
+
+// Each standings box opens scrolled to the reader's own team, near the middle.
+function showMyRow(){
+  document.querySelectorAll('.stand-box').forEach(box => {
+    const r = box.querySelector('tr.is-you'); if(!r || !box.clientHeight) return;
+    box.scrollTop = Math.max(0, r.offsetTop - box.clientHeight / 2);
+  });
 }
 
 /* ---------- My team ----------
@@ -1018,26 +1107,37 @@ function teamCard(t, idx, opts){
       : 'Free'],
   ];
 
+  const inviteHTML = iAmSub ? '' : (locked && iAmCaptain !== false ? '' : invite);
+  // Money owed sits in the side column, which on a phone is far down: say so at the top too.
+  const owedNote = !st ? '' : st.myShareCents
+    ? `<div class="lg-note is-owed" style="margin-top:10px"><b>Your share of ${money(st.myShareCents)} isn’t paid yet.</b> <a href="#seats-${idx}" style="color:var(--orange);font-weight:700">Pay it now →</a></div>`
+    : (iAmCaptain && st.unpaidSeats) ? `<div class="lg-note is-owed" style="margin-top:10px"><b>${money(st.owedCents)} unpaid</b> for ${st.unpaidSeats} seat${st.unpaidSeats===1?'':'s'}. <a href="#seats-${idx}" style="color:var(--orange);font-weight:700">See seats &amp; payments →</a></div>` : '';
   return `<div class="card" data-team-card="${idx}" data-team-id="${esc(team.id || '')}">
-    <div class="sec-title" style="margin-top:0">My team</div>
-    <h2 class="lg-name">${esc(team.name || 'Your team')} ${paidPill}</h2>
-    <div class="sub" style="margin-bottom:12px">${esc(lg.name || 'League')}${lg.description ? ' · ' + esc(lg.description) : ''}${
-      (lg.id && L.hasDetails(lg.details)) ? ` · <a href="/leagues?info=${encodeURIComponent(lg.id)}" style="color:var(--orange);font-weight:600">Rules, schedule &amp; prizes</a>` : ''}</div>
-    ${iAmSub ? '<div class="lg-note" style="margin-bottom:12px">You are a <b>substitute</b> for this team: you fill in when a teammate is away. The team’s players book the weekly round.</div>' : now}
-    ${ruleNotes}
-    <div class="sec-title">On the team</div>
-    ${chips}
-    ${seatsBlock}
-    ${iAmSub ? '' : (locked && iAmCaptain !== false ? '' : invite)}
-    ${subsBlock}
-    <div class="sec-title">Week by week</div>
-    ${weeks.length ? `<div class="sched">${weekRows}</div>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`
-      : '<div class="empty" style="padding:8px 0">The shop has not set this season\'s dates yet.</div>'}
-    <div class="sec-title">Standings</div>
-    ${table}
-    ${holesBlock}
-    <div class="sec-title">League details</div>
-    ${details.map(([k,v]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}
+    <div class="team-top">
+      <div><h2 class="lg-name">${esc(team.name || 'Your team')} ${paidPill}</h2>
+        <div class="sub">${esc(lg.name || 'League')}${lg.description ? ' · ' + esc(lg.description) : ''}</div></div>
+      ${(lg.id && L.hasDetails(lg.details)) ? `<a class="rules-link" href="/leagues?info=${encodeURIComponent(lg.id)}">Rules, schedule &amp; prizes →</a>` : ''}
+    </div>
+    <div class="lg-grid">
+      <div class="lg-main">
+        ${iAmSub ? '<div class="lg-note">You are a <b>substitute</b> for this team: you fill in when a teammate is away. The team’s players book the weekly round.</div>' : now}
+        ${owedNote}
+        ${ruleNotes}
+        <div class="sec-title">Standings</div>
+        <div class="stand-box">${table}</div>
+        <div class="sec-title">Week by week</div>
+        ${weeks.length ? `<div class="sched">${weekRows}</div>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`
+          : '<div class="empty" style="padding:8px 0">The shop has not set this season\'s dates yet.</div>'}
+        ${holesBlock}
+      </div>
+      <aside class="lg-side">
+        <div class="side-box"><div class="sec-title">On the team</div>${chips}${subsBlock}</div>
+        ${seatsBlock ? `<div class="side-box" id="seats-${idx}">${seatsBlock}</div>` : ''}
+        ${inviteHTML ? `<div class="side-box">${inviteHTML}</div>` : ''}
+        <div class="side-box"><div class="sec-title">League details</div>
+          ${details.map(([k,v]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>
+      </aside>
+    </div>
   </div>`;
 }
 
@@ -1371,6 +1471,7 @@ async function loadRewards(){
       <div><span class="pill ${cls}">${esc(label)}</span></div>
     </div>`;
   };
+  const tb = document.querySelector('[data-tab="rewards"]'); if(tb) tb.hidden = false;
   host.innerHTML = `<div class="card">
     <div class="sec-title" style="margin-top:0">Rewards</div>
     ${list.length ? `<div class="sub" style="margin-bottom:6px">To redeem a prize, see our staff at the venue — they will find it on your account.</div>${list.map(item).join('')}`
