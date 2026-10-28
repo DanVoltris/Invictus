@@ -76,7 +76,7 @@
   .note.info{background:var(--near-black);border:1px solid var(--border);color:var(--muted)}
 
   /* ===================== Phones only (≤640px) ===================== */
-  @media (max-width:640px){
+  @media (max-width:1023px){
     :root{--dim:#5F6672;--muted:#4A515C}
     body{padding-left:16px;padding-right:16px;padding-bottom:calc(env(safe-area-inset-bottom) + 96px)}
     .title{font-size:22px;font-weight:600}
@@ -90,6 +90,13 @@
     .btn{min-height:48px;border-radius:12px;font-size:16px;font-weight:600}
     header a{display:inline-flex;align-items:center;min-height:44px;font-size:14px}
     header img{height:56px}
+  }
+  /* Desktop (≥1024px): with no draw running, one line above a 340px wheel, a 44px Spin button, the rules link below. */
+  @media (min-width:1024px){
+    .is-closed .status.is-off{background:none;border:0;padding:0;font-size:15px;font-weight:500;color:#4A515C;margin:4px auto 16px}
+    .is-closed .wheel-box{width:min(340px,56svh)}
+    .is-closed #spin{min-height:44px;height:44px;padding:0;max-width:340px;margin-left:auto;margin-right:auto;border-radius:10px}
+    .is-closed #spin:disabled{background:none;border:1px solid rgba(16,24,40,.08);color:#5F6672}
   }
 </style>
 <link rel="stylesheet" href="/assets/brand.css" />

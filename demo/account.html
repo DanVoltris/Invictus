@@ -274,10 +274,11 @@
      Everything below changes the page on a phone and nothing wider. The phone-only pieces in the
      markup (.m-only, the section headers .m-acc-head) are hidden on wider screens by the line below. */
   .m-only,.m-acc-head{display:none}
+  .dk-only{display:none}
   .m-group,.m-group > .m-list,.m-list-wrap{display:contents}
   /* The side column in its usual order on a wider screen (the phone groups Seats and Invite with the team). */
   .lg-side .m-g-team{order:1} .lg-side .m-g-past{order:2} .lg-side .m-g-seats{order:3} .lg-side .m-g-invite{order:4} .lg-side .m-g-details{order:5}
-  @media (max-width:640px){
+  @media (max-width:1023px){
     /* ---- Scale: type 22/18/16/15/13/12 · weights 400/500/600 · space 4/8/12/16/24 ·
        radius 12 containers, 10 controls, 999 small pills · hairlines, not shadows. ---- */
     :root{--dim:#5F6672;--muted:#4A515C;--hair:rgba(16,24,40,.08);--orange:#946B27}
@@ -534,6 +535,265 @@
   @media (max-width:360px){
     .m-stats{grid-template-columns:auto auto auto;justify-content:space-between}
     .m-stats > div{padding:0 8px}
+  }
+
+  /* ===================== Tablets (641–1023px): the phone layout, in a centred column ===================== */
+  @media (min-width:641px) and (max-width:1023px){
+    .wrap,.wrap.is-wide{max-width:640px}
+  }
+
+  /* ===================== Desktop (≥1024px): the same dashboard, laid out wide =====================
+     Top bar · sidebar (232px) | content (≤880px). Type 28/20/17/15/13/12 · weights 400/500/600 ·
+     space 4/8/12/16/24/32/40 · radius 12 containers, 10 controls · hairlines, gold only for actions. */
+  @media (min-width:1024px){
+    :root{--dim:#5F6672;--muted:#4A515C;--hair:rgba(16,24,40,.08);--orange:#946B27}
+    html,body{overflow-x:clip}
+    body{padding:0 0 40px;font-size:15px;background:#F6F7F9}
+    .wrap,.wrap.is-wide{max-width:1200px;padding:0 32px}
+    .wrap > header,.acct-head,.tabs,.m-switch,.m-sheet-wrap,.d-only,.d-only-block{display:none!important}
+    .m-only{display:revert}
+    .dk-only{display:revert}
+    b,strong,h1,h2,h3,.sec-title,.btn{font-weight:600}
+    .t-k,.fld,.lgt-k,.week-now .t-k,.course-card .t-k,.lg-table th,.sched-stage,.pill,.tile .t-k,.hs-n,.side-box .sec-title{text-transform:none!important;letter-spacing:0!important}
+    .pill{font-size:12px;font-weight:500;padding:2px 8px}
+    .sub,.lg-note,.wn-sub,.kv,.bk,.empty,.muted-note,.inv-ok,p{font-size:15px}
+    .sub,.lg-note,.wn-sub,.hs-photo,.m-contact{max-width:70ch}
+    .input{font-size:15px;min-height:40px;border-radius:10px;padding:8px 12px}
+    .fld{font-size:13px;font-weight:500;color:var(--muted);margin-bottom:4px}
+    .btn{min-height:44px;border-radius:10px;font-size:15px;box-shadow:none}
+    body .card{box-shadow:none;border:1px solid var(--hair);border-radius:12px}
+    a,button,[role="button"]{cursor:pointer}
+
+    /* 1. Shell: the grid, the top bar, the sidebar. */
+    #content{display:grid;grid-template-columns:232px minmax(0,880px);column-gap:40px;row-gap:0;align-items:start}
+    #content > *{grid-column:2;min-width:0}
+    .m-top{display:contents}
+    .m-hello,.m-book,.m-stats,.m-att,.inherit{grid-column:2}
+    .m-bar{grid-column:1/-1;grid-row:1;position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:16px;height:64px;
+      margin:0 calc(50% - 50vw) 32px;padding:0 max(32px,calc(50vw - 568px));background:#fff;border-bottom:1px solid var(--hair)}
+    .m-logo{height:32px;width:auto}
+    .m-back{margin-left:auto;display:inline-flex;align-items:center;gap:4px;min-height:44px;font-size:14px;color:var(--muted);text-decoration:none}
+    .m-back svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
+    .m-back:hover{color:var(--white)}
+    .d-avatar{display:grid;place-items:center;width:32px;height:32px;border-radius:999px;background:#EEE6D8;color:#6B4C17;
+      font-family:'Space Grotesk';font-size:13px;font-weight:600;text-decoration:none}
+    .d-avatar:hover{background:#E6DAC4}
+    .d-nav{grid-column:1;grid-row:2 / span 40;position:sticky;top:88px;align-self:start;display:flex;flex-direction:column;gap:4px}
+    .d-nav-item{display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 12px;border-radius:10px;color:var(--white);text-decoration:none}
+    .d-nav-item[hidden]{display:none}
+    .d-nav-item svg{flex:none;width:20px;height:20px;fill:none;stroke:var(--muted);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .d-nav-item span{display:flex;flex-direction:column;min-width:0}
+    .d-nav-item b{font-size:15px;font-weight:500}
+    .d-nav-item small{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .d-nav-item small.is-alert{color:var(--danger)}
+    .d-nav-item small.is-alert::before{content:'';display:inline-block;width:6px;height:6px;border-radius:999px;background:var(--danger);margin-right:6px;vertical-align:1px}
+    .d-nav-item:hover{background:#EEF0F3}
+    .d-nav-item:active{background:#E6E9EE}
+    .d-nav-item[aria-current="page"]{background:rgba(148,107,39,.1)}
+    .d-nav-item[aria-current="page"] svg{stroke:var(--orange)}
+    .d-nav-item[aria-current="page"] b{color:#6B4C17}
+    .d-nav-item:focus-visible,.m-row:focus-visible,.m-acc-head:focus-visible,.m-back:focus-visible,.d-avatar:focus-visible,.m-book:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+
+    /* 2. Dashboard top. */
+    .m-hello{grid-row:2;margin:0;padding-right:200px}
+    .m-hello h1{font-size:28px;font-weight:600;margin:0;line-height:1.2}
+    .m-contact{font-size:14px;color:var(--dim);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .m-book{grid-row:2;justify-self:end;align-self:center;display:inline-flex;align-items:center;height:44px;padding:0 20px;border-radius:10px;
+      background:var(--orange);color:#fff;font-family:'Space Grotesk';font-size:15px;font-weight:600;text-decoration:none}
+    .m-book:hover{background:#7E5A1F} .m-book:active{background:#6B4C17}
+    .m-stats{grid-row:3;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:24px 0 0}
+    .m-stats > div{padding:0 24px}
+    .m-stats > div:first-child{padding-left:0}
+    .m-stats > div + div{border-left:1px solid var(--hair)}
+    .m-stats b{display:block;font-size:20px;font-weight:600;line-height:1.3}
+    .m-stats b.is-ok{color:var(--ok)} .m-stats b.is-bad{color:var(--danger)}
+    .m-stats small{display:block;font-size:13px;color:var(--dim);margin-top:2px}
+    .m-att{grid-row:4}
+    .m-att[hidden]{display:none}
+    .m-label{font-size:13px;font-weight:500;color:var(--dim);margin:32px 0 8px}
+    .m-list{background:#fff;border:1px solid var(--hair);border-radius:12px;overflow:hidden}
+    .m-list > * + *{border-top:1px solid var(--hair)}
+    .m-row{display:flex;align-items:center;gap:12px;width:100%;min-height:56px;padding:8px 16px;background:none;border:0;font:inherit;font-size:15px;
+      color:var(--white);text-align:left;text-decoration:none}
+    .m-att-row:hover{background:#F8F9FB} .m-att-row:active{background:#F1F3F6}
+    .m-ic-wrap{flex:none;width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:#F0F1F4;color:var(--muted)}
+    .m-ic-wrap.is-red{background:rgba(217,45,32,.1);color:var(--danger)}
+    .m-ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .m-row-txt{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+    .m-row-txt b{font-size:15px;font-weight:500}
+    .m-row-txt small{font-size:13px;color:var(--dim)}
+    .m-chev{flex:none;width:8px;height:8px;border-right:2px solid #A0A6B1;border-bottom:2px solid #A0A6B1;transform:rotate(-45deg);margin-right:4px}
+    #m-fb-row[aria-expanded="true"] .m-chev{transform:rotate(45deg)}
+    #m-fb-slot[hidden]{display:none}
+    #m-fb-slot{padding:0 16px 16px 60px}
+    #m-fb-slot #fb-card{border:0;padding:0;margin:0;background:none;box-shadow:none}
+    #m-fb-slot #fb-card > .sec-title,#m-fb-slot #fb-card > .sec-title + .sub{display:none}
+    #m-fb-slot .stars{gap:4px;margin:0 0 8px}
+    #m-fb-slot .star{width:40px;height:40px;border:0;background:none;font-size:28px;color:#C9CED6;border-radius:10px}
+    #m-fb-slot .star.is-on{color:#E8A317;background:none}
+    #m-fb-slot .stars:hover .star{color:#E8A317}                               /* hover preview */
+    #m-fb-slot .stars .star:hover ~ .star{color:#C9CED6}
+    #m-fb-slot #fb-card:not(:has(.star.is-on)) :is(.fld,#fb-comment,.err,.row2){display:none}
+    #m-fb-slot #fb-comment{max-width:560px}
+    #m-fb-slot .row2{display:flex;flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:16px;margin-top:8px}
+    #m-fb-slot #fb-send{flex:none;width:auto;padding:0 20px;margin:0}
+    #m-fb-slot #fb-skip{flex:none;width:auto;min-width:0;margin:0;border:0;background:none;color:var(--muted);text-decoration:underline;font-weight:500}
+    #m-fb-slot .err{min-height:0}
+    .inherit{grid-row:5;margin:24px 0 0;font-size:13px}
+    .tab-panel{margin-top:32px}
+
+    /* 3. League. */
+    body .card[data-team-card]{background:none;border:0;padding:0;margin:0}
+    .team-top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 0 16px}
+    .team-top .lg-name{font-size:20px;font-weight:600;margin:0}
+    .team-top .sub{font-size:13px;color:var(--dim);margin-top:4px}
+    .team-top .rules-link{font-size:15px;font-weight:500;color:var(--orange);padding:0}
+    .lg-grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);column-gap:24px;row-gap:0;align-items:start}
+    .lg-main,.lg-side{display:contents}
+    .m-g-top{grid-column:1;grid-row:1;display:flex;flex-direction:column;gap:12px}
+    .m-g-myteam{grid-column:2;grid-row:1;display:block}
+    .m-g-myteam .m-label{margin-top:0}
+    .m-group > .m-list{display:block}
+    .m-g-stand{grid-column:1/-1;grid-row:2}
+    .m-g-weeks{grid-column:1/-1;grid-row:3} .m-g-cards{grid-column:1/-1;grid-row:4} .lg-side .m-g-past{grid-column:1/-1;grid-row:5}
+    .m-g-holes{grid-column:1/-1;grid-row:6} .lg-side .m-g-details{grid-column:1/-1;grid-row:7}
+    .course-card{padding:20px;margin:0;border-radius:12px}
+    .course-card .t-k{font-size:12px;font-weight:500}
+    .cc-name{font-size:20px;font-weight:600;margin-top:4px}
+    .cc-loc{font-size:13px}
+    .course-card .chip{font-size:12px;height:28px;display:inline-flex;align-items:center;padding:0 12px;border-radius:999px}
+    .course-card .cc-more{font-size:15px;font-weight:500}
+    .week-now,.lg-note{border:1px solid var(--hair)!important;border-left-width:1px!important;border-radius:12px;background:#fff!important;padding:12px 16px;margin:0}
+    .week-now .t-k{font-size:12px;font-weight:500;color:var(--dim)}
+    .wn-main{font-size:17px;font-weight:600;margin-top:4px}
+    .lg-note.is-owed{background:#FDF3F2!important;border-color:rgba(217,45,32,.25)!important;color:#8A2A1F}
+    /* My team: rows; Seats opens in place, Invite as a modal. */
+    body .m-g-myteam .side-box{background:none;border:0;border-radius:0;padding:0 16px}
+    .m-g-myteam .side-box + .side-box{border-top:1px solid var(--hair)}
+    .m-acc-head{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;background:none;border:0;padding:0;font:inherit;color:var(--white);text-align:left}
+    .m-acc-head:hover{background:#F8F9FB;box-shadow:-16px 0 0 #F8F9FB,16px 0 0 #F8F9FB}
+    .m-acc-t{font-size:15px;font-weight:500;flex:none}
+    .m-acc-s{font-size:12px;color:var(--dim);text-align:right;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .m-acc-chev{flex:none;width:8px;height:8px;border-right:2px solid #A0A6B1;border-bottom:2px solid #A0A6B1;transform:rotate(-45deg);margin-right:4px;transition:transform .15s}
+    .m-acc.is-open .m-acc-chev{transform:rotate(45deg)}
+    .m-acc:not(.is-open) > .m-acc-body{display:none}
+    .m-acc > .m-acc-body{padding:0 0 16px}
+    .m-acc-body > .sec-title:first-child{display:none}
+    .seat-bar{margin:4px 0 8px}
+    .chips .chip{font-size:13px;border-radius:999px}
+    .m-count{display:block;margin-top:4px;font-weight:500;color:var(--white);font-size:13px}
+    /* The invite modal. */
+    .inv-dlg{width:440px;max-width:calc(100vw - 48px);border:1px solid var(--hair);border-radius:12px;padding:0;color:var(--white);margin:auto}
+    .inv-dlg::backdrop{background:rgba(16,24,40,.35)}
+    .inv-dlg-in{padding:24px}
+    .inv-dlg-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+    .inv-dlg-head h2{font-size:17px;font-weight:600;margin:0}
+    .inv-dlg-x{width:32px;height:32px;border-radius:10px;border:1px solid var(--hair);background:#fff;color:var(--muted)}
+    .inv-dlg-x:hover{background:#F6F7F9}
+    .inv-dlg-body > .sec-title:first-child{display:none}
+    .inv-dlg .inv-role{display:grid;grid-template-columns:1fr 1fr;gap:0;padding:2px;margin:0 0 12px;background:#EEF0F3;border-radius:10px}
+    .inv-dlg .inv-role button{height:36px;border:0;background:none;border-radius:8px;font-size:13px;font-weight:500;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .inv-dlg .inv-role button.is-on{background:#fff;color:var(--white);box-shadow:0 1px 2px rgba(16,24,40,.12)}
+    .inv-dlg .inv-role button:disabled{color:#9AA1AC;opacity:1;cursor:not-allowed}
+    .inv-dlg .inv-help-sub,.inv-dlg .inv-help-player{font-size:13px!important;color:var(--dim)}
+    .inv-dlg .input{min-height:40px;height:40px}
+    .inv-dlg .btn{margin-top:16px}
+    /* Standings */
+    .m-g-stand .sec-title{font-size:13px;font-weight:500;color:var(--dim);margin:32px 0 8px;font-family:inherit}
+    .m-g-stand .sec-hint{font-size:13px}
+    body .stand-box{background:#fff;border:1px solid var(--hair);border-radius:12px;padding:8px 16px;max-height:none;overflow:visible}
+    .stand-box .team-h{font-size:13px;font-weight:600;margin:8px 0 4px}
+    .stand-box .sub{font-size:13px;color:var(--dim)}
+    .stand-box .chip{font-size:12px}
+    .stand-box .lg-table{table-layout:fixed;font-size:15px}
+    .stand-box .lg-table th{font-size:12px;font-weight:500;color:var(--dim);padding:8px;background:none;position:static}
+    .stand-box .lg-table td{height:44px;padding:0 8px;border-bottom:1px solid var(--hair)}
+    .stand-box .lg-table tr:last-child td{border-bottom:0}
+    .stand-box .lg-table th:first-child,.stand-box .lg-table td:first-child{width:40px;text-align:center}
+    .stand-box .lg-table td:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .stand-box .lg-table th.num,.stand-box .lg-table td.num{width:96px;font-variant-numeric:tabular-nums;font-weight:500}
+    .stand-box tr[data-team]:hover td{background:#F8F9FB}
+    .stand-box tr.is-you td,.stand-box tr.is-pin td{background:rgba(148,107,39,.08)}
+    .stand-box tr.is-pin td{border-bottom:1px solid var(--hair)}
+    .stand-box tr.is-you td:first-child{box-shadow:none}
+    .d-you-top tr.is-pin{display:none}
+    .tbl-wrap:not(.show-all) .d-far{display:none}
+    .m-weeks-all{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin:0;background:none;border:0;
+      font:inherit;font-size:15px;font-weight:500;color:var(--orange)}
+    .m-weeks-all:hover{text-decoration:underline}
+    /* The rest of the season: one list of rows. */
+    .m-g-weeks,.m-g-cards,.m-g-past,.m-g-holes,.m-g-details{background:#fff;border:1px solid var(--hair);border-radius:0;padding:0 16px;margin:0}
+    .m-g-cards,.m-g-past,.m-g-holes,.m-g-details{border-top:0;box-shadow:inset 0 1px 0 var(--hair)}
+    .m-g-weeks{border-radius:12px 12px 0 0;margin-top:32px}
+    .lg-side .m-g-details{border-radius:0 0 12px 12px}
+    body .m-g-past.side-box,body .m-g-details.side-box{background:#fff}
+    /* Week by week: every week, two columns. */
+    body .sched,.lg-main .sched{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:24px;max-height:none;overflow:visible;border:0;background:none}
+    .sched .sched-stage{grid-column:1/-1;padding:12px 0 4px;background:none;border-bottom:1px solid var(--hair);font-size:12px;font-weight:600;color:var(--orange)}
+    .sched .m-near,.m-g-weeks .m-weeks-all,.sched-more{display:none}
+    .sched-row{grid-template-columns:28px auto minmax(0,1fr);gap:8px;min-height:44px;padding:8px 0;border-bottom:1px solid var(--hair);font-size:15px}
+    .sched-row:hover{background:#F8F9FB}
+    .sched-row .sd-date{white-space:nowrap;font-variant-numeric:tabular-nums}
+    .sched-row .sd-what{text-align:right}
+    .sd-pill{display:inline-block;font-size:12px;line-height:1.3;padding:3px 8px;border-radius:999px;background:#F0F1F4;color:var(--muted);text-align:left}
+    .sched-row.is-current{background:none}
+    .sched-row.is-current .sd-pill{background:rgba(148,107,39,.12);color:var(--orange)}
+    .sched-row.is-missed .sd-pill{background:rgba(217,45,32,.08);color:var(--danger)}
+    .sched-row.is-catchup .sd-pill{background:none;border:1px dashed #C9CED6;color:var(--dim)}
+    .sched-row.has-round .sd-what{grid-column:2/-1;text-align:left}
+    .sched-row.has-round .sd-pill{border-radius:10px;padding:6px 8px;display:block}
+    .hs-week{border:1px solid var(--hair);border-radius:12px;padding:16px;background:#fff}
+    .hs-head{font-size:15px}
+    .sc-btn{min-height:36px;border-radius:10px;font-weight:500}
+    /* Hole stats: five compact columns. */
+    .hs-lead{grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+    .hs-lead .tile{border:1px solid var(--hair);border-radius:12px;padding:12px;background:#fff}
+    .hs-lead .tile .t-k{font-size:12px;font-weight:500;color:var(--dim)}
+    .hs-lead .tile .t-s{font-size:13px}
+    .sch-row{min-height:52px;border-radius:10px;font-size:15px}
+    .sch-row:hover{border-color:var(--orange)}
+    /* League details: label | value. */
+    .m-g-details .kv{display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px;padding:12px 0;border-bottom:1px solid var(--hair)}
+    .m-g-details .kv:last-child{border-bottom:0}
+    .m-g-details .kv .k{font-size:13px;color:var(--dim)}
+    .m-g-details .kv .v{text-align:left;font-size:15px}
+
+    /* 4. Bookings, Profile, Rewards. */
+    #panel-bookings > .card,#panel-profile > .card,#panel-rewards .card{background:none;border:0;padding:0;margin:0;max-width:none!important;box-shadow:none}
+    #panel-bookings .sec-title,#panel-profile .sec-title,#panel-rewards .sec-title{font-family:inherit;font-size:13px;font-weight:500;color:var(--dim);margin:32px 0 8px}
+    #panel-bookings .bk-cols{grid-template-columns:minmax(0,1fr);gap:0}
+    #panel-bookings .bk-cols > div:first-child .sec-title,#panel-profile .sec-title:first-child,#panel-rewards .sec-title:first-child{margin-top:0}
+    .m-list-wrap{display:block;background:#fff;border:1px solid var(--hair);border-radius:12px;padding:0 16px}
+    .bk{min-height:56px;padding:8px 0;border-bottom:1px solid var(--hair)}
+    .bk b{font-weight:500}
+    .bk .b-sub{font-size:13px;color:var(--dim)}
+    .bk .pill.m-only{display:none}
+    .bk-right{display:flex;align-items:center;gap:12px;font-variant-numeric:tabular-nums}
+    .m-list-wrap .empty{padding:16px 0}
+    .muted-note{margin:16px 0 0;font-size:13px}
+    #panel-profile .card{position:relative}
+    #details{background:#fff;border:1px solid var(--hair);border-radius:12px;padding:0 16px}
+    #details .kv{display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px;align-items:baseline;padding:12px 0;border-bottom:1px solid var(--hair)}
+    #details .kv .k{font-size:13px;color:var(--dim)}
+    #details .kv .v{text-align:left;font-size:15px}
+    #details .kv:has(+ .ph-hint){border-bottom:0;padding-bottom:2px}
+    #details .ph-hint{text-align:left!important;margin:0!important;padding:0 0 12px 216px;font-size:12px;border-bottom:1px solid var(--hair)}
+    #panel-profile .card > .sec-title:first-child{min-height:36px;display:flex;align-items:flex-end;margin-bottom:8px}
+    #d-edit{position:absolute;top:0;right:0;width:auto;min-height:36px;height:36px;margin:0!important;padding:0 16px!important;
+      background:#fff;border:1px solid var(--hair);border-radius:10px;color:var(--white);font-size:13px;font-weight:600}
+    #d-edit:hover{background:#F6F7F9}
+    .prof-waiver{display:grid!important;grid-template-columns:200px minmax(0,1fr);gap:16px;align-items:center;background:#fff;border:1px solid var(--hair)!important;border-radius:12px;padding:12px 16px!important}
+    .prof-waiver .k{font-size:13px;color:var(--dim)}
+    .prof-waiver .v{display:flex;align-items:center;gap:12px;text-align:left}
+    .prof-sign{color:var(--orange);font-weight:500;font-size:15px}
+    #o-out{display:flex;align-items:center;justify-content:flex-start;width:100%;min-height:52px;margin-top:32px!important;padding:0 16px;background:#fff;
+      border:1px solid var(--hair);border-radius:12px;color:var(--danger);font-weight:500;font-size:15px;text-decoration:none}
+    #o-out:hover{background:#FDF3F2}
+    #rewards .card{background:#fff!important;border:1px solid var(--hair)!important;padding:16px!important}
+
+    /* Pop-ups. */
+    .lg-dlg{border-radius:12px}
+    .dlg-in h2{font-size:20px}
   }
 </style>
 <link rel="stylesheet" href="/assets/brand.css" />
@@ -1073,7 +1333,7 @@ function drawProfile(c, bks, justInherited, opts){
   const hhmm = m => { if(m===1440) return 'Midnight'; m%=1440; const h=Math.floor(m/60), x=m%60, ap=h<12?'AM':'PM', hh=((h+11)%12)+1; return `${hh}:${String(x).padStart(2,'0')} ${ap}`; };
   const bkRow = b => `<div class="bk">
       <div class="b-main"><b>${esc(fmtDate(b.booking_date))}</b>${b.status==='cancelled'?' <span class="pill off m-only">Cancelled</span>':''}<div class="b-sub">${hhmm(b.start_min)}–${hhmm(b.end_min)} · ${esc(bayName(b.bay_id))}${b.status==='cancelled'?'<span class="d-only"> · cancelled</span>':''}</div></div>
-      <div>${b.amount_cents ? '$'+(b.amount_cents/100).toFixed(2) : ''}</div>
+      <div class="bk-right">${b.amount_cents ? '$'+(b.amount_cents/100).toFixed(2) : ''}<span class="pill dk-only ${b.status==='cancelled' ? 'off' : b.booking_date >= today ? 'ok' : 'off'}">${b.status==='cancelled' ? 'Cancelled' : b.booking_date >= today ? 'Booked' : 'Visited'}</span></div>
     </div>`;
 
   // Tabs. A league player opens on their league; anyone else on their bookings. Someone sent from the
@@ -1127,7 +1387,12 @@ function drawProfile(c, bks, justInherited, opts){
       <img class="m-logo" src="/assets/invictus-logo.png" alt="Invictus Golf" />
       <button type="button" class="m-switch" id="m-switch" aria-haspopup="menu" aria-expanded="false" aria-controls="m-menu"><span id="m-switch-label">${esc((TABS.find(x => x[0] === first) || TABS[0])[1])}</span><span class="m-caret" aria-hidden="true"></span></button>
       <a class="m-back" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Back to booking</a>
+      <a class="d-avatar dk-only" href="#profile" aria-label="Your profile">${esc(String(c.first_name || c.name || '?').trim().charAt(0).toUpperCase() + String(c.last_name || String(c.name || '').split(' ').slice(1).join(' ') || '').trim().charAt(0).toUpperCase())}</a>
     </div>
+    <nav class="d-nav dk-only" aria-label="Sections">
+      ${TABS.map(([k, label]) => `<a class="d-nav-item" href="#${k}" data-m-tab="${k}" ${k===first?'aria-current="page"':''} ${k==='rewards'?'hidden':''}>
+        ${svg(k)}<span><b>${label}</b><small class="${k==='profile' && !c.waiver_signed_at ? 'is-alert' : ''}">${esc(HINT[k] || '')}</small></span></a>`).join('')}
+    </nav>
     <div class="m-sheet-wrap" id="m-sheet" hidden>
       <div class="m-sheet-back" data-m-close></div>
       <div class="m-sheet" role="menu" id="m-menu" aria-label="Sections">
@@ -1205,7 +1470,7 @@ function drawProfile(c, bks, justInherited, opts){
         <div class="sec-title" style="margin-top:0">Your details</div>
         <div id="details"></div>
         <div class="sec-title">Waiver</div>
-        <div class="kv prof-waiver"><span class="k">Status</span><span class="v">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span>'}</span></div>
+        <div class="kv prof-waiver"><span class="k">Status</span><span class="v">${c.waiver_signed_at ? '<span class="pill ok">Signed</span>' : '<span class="pill warn">Not signed</span><a class="dk-only prof-sign" href="/waiver">Sign the waiver</a>'}</span></div>
         ${c.waiver_signed_at ? '' : '<div class="sub d-only-block" style="margin:4px 0 0">You need to sign it before you play. <a href="/waiver" style="color:var(--orange);font-weight:700">Sign the waiver</a></div>'}
         ${dev ? '' : '<button class="btn btn-ghost" id="o-out" style="margin-top:22px">Sign out</button>'}
       </div>
@@ -1634,23 +1899,28 @@ function pinMyRows(card){
   });
   // On a phone each table shows its first ten teams and a button opens the rest (no box that
   // scrolls inside the page). Wider screens show every row, as before.
+  card.querySelectorAll('.stand-box td:nth-child(2)').forEach(td => { if(!td.title) td.title = td.textContent.trim(); });
   card.querySelectorAll('.stand-box .tbl-wrap').forEach(wrap => {
     const rows = [...wrap.querySelectorAll('tbody tr')].filter(tr => !tr.classList.contains('is-pin'));
     if(rows.length <= 5 || wrap.nextElementSibling && wrap.nextElementSibling.classList.contains('m-weeks-all')) return;
     rows.slice(5).forEach(tr => tr.classList.add('m-far'));
-    if(rows.findIndex(tr => tr.classList.contains('is-you')) < 5) wrap.classList.add('m-you-top');
+    rows.slice(10).forEach(tr => tr.classList.add('d-far'));
+    const youAt = rows.findIndex(tr => tr.classList.contains('is-you'));
+    if(youAt < 5) wrap.classList.add('m-you-top');
+    if(youAt < 10) wrap.classList.add('d-you-top');
     wrap.insertAdjacentHTML('afterend', `<button type="button" class="m-only m-weeks-all" aria-expanded="false" data-label="Show all ${rows.length} teams">Show all ${rows.length} teams</button>`);
   });
 }
 
 // ---------- Mobile only (max-width 640px) ----------
 const LGS = () => window.InvictusLeagues;
-const MQ_PHONE = window.matchMedia('(max-width: 640px)');
+const MQ_DESK = window.matchMedia('(min-width: 1024px)');
 // The switcher's label, menu ticks and the page title follow the section on screen.
 function mSyncSection(k){
   const row = document.querySelector(`.m-menu-row[data-m-tab="${k}"]`);
   if(row) $('#m-switch-label').textContent = row.querySelector('b').textContent;
   document.querySelectorAll('.m-menu-row').forEach(r => r.setAttribute('aria-checked', String(r.dataset.mTab === k)));
+  document.querySelectorAll('.d-nav-item').forEach(a => { if(a.dataset.mTab === k) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
 }
 // Top bar, section menu, the "needs your attention" rows, and the feedback form's place on a phone.
 function wireMobileTop(show, dev){
@@ -1689,10 +1959,8 @@ function wireMobileTop(show, dev){
   // header on a wider screen. One form either way.
   const fbRow = $('#m-fb-row');
   if(fbRow) fbRow.onclick = () => { const slot = $('#m-fb-slot'), on = slot.hidden; slot.hidden = !on; fbRow.setAttribute('aria-expanded', String(on)); };
-  const placeFb = () => { const fb = $('#fb-card'), slot = $('#m-fb-slot'), home = $('#fb-home'); if(!fb || !slot || !home) return;
-    if(MQ_PHONE.matches){ if(fb.parentElement !== slot) slot.appendChild(fb); } else if(fb.parentElement === slot) home.after(fb); };
-  MQ_PHONE.removeEventListener('change', window._mPlaceFb || (() => {})); window._mPlaceFb = placeFb;
-  MQ_PHONE.addEventListener('change', placeFb); placeFb();
+  // The feedback form lives inside its "Rate your session" row at every width.
+  const fb = $('#fb-card'), slot = $('#m-fb-slot'); if(fb && slot && fb.parentElement !== slot) slot.appendChild(fb);
 }
 // A collapsible section: on a phone a header button (title, a one-line summary, a chevron) opens and
 // closes it; on a wider screen the header is hidden and the body shows as it always has.
@@ -1701,11 +1969,30 @@ const mAcc = (key, title, summary, inner, cls = '') => `<div class="m-acc ${cls}
   <div class="m-acc-body">${inner}</div></div>`;
 document.addEventListener('click', e => {
   const h = e.target.closest && e.target.closest('.m-acc-head');
+  if(h && MQ_DESK.matches && h.parentElement.dataset.acc === 'invite'){ openInviteModal(h.parentElement); return; }
   if(h){ const a = h.parentElement; a.classList.toggle('is-open'); h.setAttribute('aria-expanded', a.classList.contains('is-open')); return; }
   const all = e.target.closest && e.target.closest('.m-weeks-all');
   if(all){ const box = all.previousElementSibling; const on = box.classList.toggle('show-all');
     all.textContent = on ? 'Show fewer weeks' : all.dataset.label; all.setAttribute('aria-expanded', on); }
 });
+// On a desktop "Invite a substitute" opens as a centred modal: the form's own elements move into a
+// <dialog> (so everything already wired keeps working) and back when it closes. A modal <dialog>
+// keeps focus inside it; Esc, the X and a click on the backdrop close it.
+function openInviteModal(acc){
+  const body = acc.querySelector('.m-acc-body'); if(!body) return;
+  const d = document.createElement('dialog'); d.className = 'inv-dlg';
+  d.innerHTML = `<div class="inv-dlg-in"><div class="inv-dlg-head"><h2>${esc(acc.querySelector('.m-acc-t').textContent)}</h2><button type="button" class="inv-dlg-x" aria-label="Close">✕</button></div><div class="inv-dlg-body"></div></div>`;
+  const into = d.querySelector('.inv-dlg-body');
+  while(body.firstChild) into.appendChild(body.firstChild);
+  document.body.appendChild(d);
+  const close = () => d.close();
+  d.querySelector('.inv-dlg-x').onclick = close;
+  d.addEventListener('click', e => { if(e.target === d) close(); });
+  d.addEventListener('close', () => { while(into.firstChild) body.appendChild(into.firstChild); d.remove(); acc.querySelector('.m-acc-head').focus(); });
+  d.showModal();
+  const first = d.querySelector('.inv-role button:not(:disabled), input'); if(first) first.focus();
+}
+
 // (204) 990-6530 for a North American number; anything else as it was typed.
 const fmtPhone = p => { const d = String(p || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
   return d.length === 10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : String(p || ''); };
@@ -2208,6 +2495,7 @@ async function loadRewards(){
   };
   const tb = document.querySelector('[data-tab="rewards"]'); if(tb) tb.hidden = false;
   const mr = document.querySelector('.m-menu-row[data-m-tab="rewards"]'); if(mr) mr.hidden = false;
+  const dr = document.querySelector('.d-nav-item[data-m-tab="rewards"]'); if(dr) dr.hidden = false;
   host.innerHTML = `<div class="card">
     <div class="sec-title" style="margin-top:0">Rewards</div>
     ${list.length ? `<div class="sub" style="margin-bottom:6px">To redeem a prize, see our staff at the venue — they will find it on your account.</div>${list.map(item).join('')}`
