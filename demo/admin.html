@@ -574,7 +574,28 @@
   .tb-player{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
   .tb-player:first-child{border-top:none}
   /* A player's buttons wrap under their name when the column is narrow, rather than run out of the card. */
+  /* Dashboard: the two columns share the width, and a chart scales down rather than widening its
+     column (a long axis label had made one card 606px wide and the page scroll sideways). */
+  #tab-dashboard .grid2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #tab-dashboard .card{min-width:0}
+  #tab-dashboard svg{max-width:100%;min-width:min(560px,100%)!important;height:auto}
+  @media (max-width:900px){ #tab-dashboard .grid2{grid-template-columns:minmax(0,1fr)} }
   .li-week [hidden]{display:none!important}
+  /* League overview tiles and their insights */
+  .lov-tile{cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .lov-tile:hover,.lov-tile:focus-visible{border-color:var(--orange);box-shadow:0 6px 18px rgba(16,24,40,.08);outline:none}
+  .lov-more{float:right;font-weight:600;color:var(--orange);text-transform:none;letter-spacing:0;font-size:12px;opacity:0;transition:opacity .15s}
+  .lov-tile:hover .lov-more,.lov-tile:focus-visible .lov-more{opacity:1}
+  .ins-bar{display:flex;height:12px;border-radius:999px;overflow:hidden;gap:2px;margin:8px 0}
+  .ins-bar i{display:block;min-width:4px}
+  .ins-legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--muted)}
+  .ins-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .ins-list{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:10px}
+  .ins-list > div{display:flex;justify-content:space-between;gap:12px;padding:8px 12px;border-top:1px solid var(--border);font-size:13.5px}
+  .ins-list > div:first-child{border-top:none}
+  .ins-weeks > div{display:grid;grid-template-columns:70px 1fr 90px;align-items:center;gap:10px;font-size:13px;padding:3px 0}
+  .ins-weeks i{display:block;height:10px;border-radius:999px;background:#4EC06A}
+  .ins-weeks b{text-align:right}
   .li-pars{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:6px}
   .li-par-cell{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--dim);font-weight:600}
   .li-par-cell .input{width:100%;padding:7px 0;text-align:center;font-size:15px}
@@ -3821,6 +3842,89 @@ async function openLeaguePage(id){
   show(LEAGUE_VIEW);
 }
 
+// The overview tiles' insights: a sheet of plain numbers and short lists for one tile — teams, players,
+// money or the season — worked out from what the league page already loaded.
+function leagueInsight(kind, ctx){
+  const { league, teams, members, results, rounds, invites, payments, today } = ctx;
+  const active=members.filter(x=>x.status==='active'), players=active.filter(x=>x.role!=='sub'), subs=active.filter(x=>x.role==='sub');
+  const fee=league.fee_cents||0, size=league.team_size||0;
+  const owedOf=t=>Math.max(0, fee-(t.paid_cents||0));
+  const pct=(a,b)=>b?Math.round(a/b*100):0;
+  const bar=(parts)=>`<div class="ins-bar">${parts.filter(p=>p.n>0).map(p=>`<i style="flex:${p.n};background:${p.c}" title="${esc(p.l)}: ${p.n}"></i>`).join('')}</div>
+    <div class="ins-legend">${parts.map(p=>`<span><i style="background:${p.c}"></i>${esc(p.l)} <b>${p.n}</b></span>`).join('')}</div>`;
+  const kv=(k,v,sub)=>`<div class="kv"><span class="k">${k}${sub?`<div class="dim" style="font-size:12px">${sub}</div>`:''}</span><span><b>${v}</b></span></div>`;
+  const list=(rows)=>rows.length?`<div class="ins-list">${rows.join('')}</div>`:'<div class="dim" style="font-size:13px">None.</div>';
+  const onTeam=t=>players.filter(x=>x.team_id===t.id).length;
+  let title='', body='';
+  if(kind==='teams'){
+    const full=teams.filter(t=>fee && owedOf(t)===0), part=teams.filter(t=>fee && (t.paid_cents||0)>0 && owedOf(t)>0), none=teams.filter(t=>fee && !(t.paid_cents>0));
+    const bySize={}; teams.forEach(t=>{ const n=onTeam(t); bySize[n]=(bySize[n]||0)+1; });
+    const online=teams.filter(t=>t.stripe_session_id).length, divs=[1,2].map(d=>teams.filter(t=>t.division===d).length);
+    title='Teams';
+    body=`${fee?`<div class="sec-h">Paid</div>${bar([{l:'Paid in full',n:full.length,c:'#4EC06A'},{l:'Part paid',n:part.length,c:'#E8A317'},{l:'Nothing paid',n:none.length,c:'#D7DCE3'}])}`:''}
+      <div class="sec-h">Rosters${size?` · ${size} a team`:''}</div>
+      ${Object.keys(bySize).map(Number).sort((a,b)=>b-a).map(n=>kv(size?`${n} of ${size} players`:`${n} players`, `${bySize[n]} team${bySize[n]===1?'':'s'}`)).join('')}
+      <div class="sec-h">How they joined</div>
+      ${kv('Bought online by a captain', online)}${kv('Made by staff', teams.length-online)}
+      ${divs[0]||divs[1]?`<div class="sec-h">Divisions</div>${kv('Division 1', divs[0])}${kv('Division 2', divs[1])}${kv('Not placed yet', teams.length-divs[0]-divs[1])}`:''}
+      ${fee?`<div class="sec-h">Still to pay</div>${list([...part,...none].sort((a,b)=>owedOf(b)-owedOf(a)).map(t=>`<div><b>${esc(t.name)}</b><span>${money(owedOf(t))}</span></div>`))}`:''}`;
+  } else if(kind==='players'){
+    const withLogin=players.filter(x=>{ const c=CUSTOMERS.find(k=>k.id===x.customer_id); return c&&c.user_id; }).length;
+    const paidOwn=players.filter(x=>(payments||[]).some(p=>p.for_customer_id===x.customer_id && p.team_id===x.team_id) || (x.paid_cents||0)>0).length;
+    const viaOnline=players.filter(x=>x.source==='online').length;
+    const waiting=(invites||[]).filter(i=>!i.claimed_at && !i.revoked_at && teams.some(t=>t.id===i.team_id)).length;
+    // Same rule as the Teams board: accepted, but the person it names is not on that team (or none is named).
+    const stuck=(invites||[]).filter(i=>i.claimed_at && !i.revoked_at && teams.some(t=>t.id===i.team_id)
+      && !(i.claimed_customer_id && active.some(m=>m.customer_id===i.claimed_customer_id && m.team_id===i.team_id))).length;
+    const short=size?teams.filter(t=>onTeam(t)<size):[];
+    title='Players';
+    body=`${kv('Players', players.length)}${kv('Substitutes', subs.length)}
+      <div class="sec-h">My Account</div>${bar([{l:'Has a login',n:withLogin,c:'#4AA3FF'},{l:'No login yet',n:players.length-withLogin,c:'#D7DCE3'}])}
+      <div class="dim" style="font-size:12.5px;margin-top:6px">A login is what lets a player pay their share and enter scores online.</div>
+      <div class="sec-h">Joined</div>${kv('Online (invite or sign-up)', viaOnline)}${kv('Added by staff', players.length-viaOnline)}${kv('Paid their own seat', paidOwn)}
+      <div class="sec-h">Invites</div>${kv('Waiting to be accepted', waiting)}${kv('Accepted but not on the team', stuck, stuck?'Usually a payment that was never finished':'')}
+      ${size?`<div class="sec-h">Teams short of players</div>${list(short.map(t=>`<div><b>${esc(t.name)}</b><span>${onTeam(t)} of ${size}</span></div>`))}`:''}`;
+  } else if(kind==='money'){
+    const expected=fee*teams.length, collected=teams.reduce((a,t)=>a+(t.paid_cents||0),0), outstanding=teams.reduce((a,t)=>a+owedOf(t),0);
+    const pays=payments||[], online=pays.filter(p=>p.method==='stripe').reduce((a,p)=>a+(p.amount_cents||0),0);
+    const counter=pays.filter(p=>p.method!=='stripe').reduce((a,p)=>a+(p.amount_cents||0),0);
+    const byWeek={}; pays.forEach(p=>{ const w=LG().weekOf(String(p.created_at||'').slice(0,10)||today, 1); byWeek[w]=(byWeek[w]||0)+(p.amount_cents||0); });
+    const weeksIn=Object.keys(byWeek).sort().slice(-8), top=Math.max(1,...weeksIn.map(w=>byWeek[w]));
+    title='Money in';
+    body=`${kv('Collected', money(collected), `${pct(collected,expected)}% of ${money(expected)} — ${teams.length} team${teams.length===1?'':'s'} × ${money(fee)}`)}
+      ${bar([{l:'Collected',n:collected,c:'#4EC06A'},{l:'Outstanding',n:outstanding,c:'#F0523D'}]).replace(/<b>(\d+)<\/b>/g,(m,n)=>`<b>${money(Number(n))}</b>`)}
+      <div class="sec-h">How it was paid</div>${kv('Online (card)', money(online))}${kv('At the counter', money(counter))}
+      ${weeksIn.length?`<div class="sec-h">Money in by week</div><div class="ins-weeks">${weeksIn.map(w=>`<div><span class="dim">${esc(shortDate2(w))}</span><i style="width:${Math.max(2,Math.round(byWeek[w]/top*100))}%"></i><b>${money(byWeek[w])}</b></div>`).join('')}</div>`:''}
+      <div class="sec-h">Biggest balances</div>${list(teams.filter(t=>owedOf(t)>0).sort((a,b)=>owedOf(b)-owedOf(a)).slice(0,10).map(t=>`<div><b>${esc(t.name)}</b><span>${money(owedOf(t))} of ${money(fee)}</span></div>`))}`;
+  } else {
+    const all=LG().weeks(league), pr=LG().progress(league, today), cur=LG().currentWeek(league, today), k=LG().leagueDates(league);
+    const st=LG().normalizeStages(league.details&&league.details.stages);
+    const stage=!cur?'—':cur.catchup?'Catch-up weeks':st?(cur.number<=st.qualifiers[1]?'Qualifiers':cur.number<st.ranking[0]?'Catch-up weeks':cur.number<=st.ranking[1]?'Playoff rankings':'Playoffs'):'Regular season';
+    const days=iso=>Math.round((Date.parse(iso+'T00:00:00Z')-Date.parse(today+'T00:00:00Z'))/864e5);
+    const when=iso=>{ const d=days(iso); return `${esc(shortDate2(iso))} · ${d>0?`in ${d} day${d===1?'':'s'}`:d===0?'today':'passed'}`; };
+    const live=(rounds||[]).filter(r=>r.status!=='cancelled');
+    const thisWeek=cur?live.filter(r=>roundWeek(r,league)===cur.start).length:0;
+    const ahead=live.filter(r=>r.booking_date>today).length;
+    const pending=(results||[]).filter(r=>r.status==='pending').length;
+    title='Season';
+    body=`${kv(cur?`Week ${cur.number} of ${all.length}`:'Not running this week', stage, `${pr.played} played · ${pr.left} to go`)}
+      <div class="ins-bar">${all.map(w=>`<i style="flex:1;background:${w.end<today?'#4EC06A':cur&&w.start===cur.start?'#F0523D':w.catchup?'#EDEFF3':'#D7DCE3'}" title="Week ${w.number}"></i>`).join('')}</div>
+      <div class="sec-h">Key dates</div>
+      ${league.season_start?kv('Season starts', when(league.season_start)):''}
+      ${k.rosterLockOn?kv(`Rosters lock (after week ${k.rosterLockWeek})`, when(k.rosterLockOn)):''}
+      ${k.qualifiersEnd?kv('Qualifiers close', when(k.qualifiersEnd)):''}
+      ${k.playoffsStart?kv('Playoffs start', when(k.playoffsStart)):''}
+      ${league.season_end?kv('Season ends', when(league.season_end)):''}
+      <div class="sec-h">Rounds</div>
+      ${kv('League rounds booked', live.length)}${kv('Booked ahead (not played yet)', ahead)}
+      ${cur&&!cur.off?kv(`Teams with a round this week`, `${thisWeek} of ${teams.length}`):''}
+      ${league.details&&league.details.holeScoring?kv('Scorecards waiting to be confirmed', pending, pending?'On the Results tab':''):''}`;
+  }
+  sheet.innerHTML=`<button class="sheet-close" id="x">✕</button><h3>${esc(title)} <span class="dim" style="font-weight:500;font-size:14px">· ${esc(league.name)}</span></h3>${body}`;
+  overlay.classList.add('show');
+  $('#x').onclick=closeSheet;
+}
+
 function leagueOverview(ctx){
   const { league, teams, members, results, rounds, mig31, edit, today } = ctx;
   const active=members.filter(x=>x.status==='active');
@@ -3833,18 +3937,19 @@ function leagueOverview(ctx){
     ? sgd.divisions.map(d=>{ const top=d.standings.find(r=>r.final!=null); return top?`Div ${d.division}: ${esc(top.name)} · ${top.final}`:''; }).filter(Boolean).join(' · ')
     : (sgd.qualifiers.rows[0] && sgd.qualifiers.rows[0].total ? `${esc(sgd.qualifiers.rows[0].name)} · ${sgd.qualifiers.rows[0].total} qualifier points` : ''));
   const late = mig31.rounds && league.team_mode ? LG().teamsWithoutRound({ league, todayISO:today, teams, rounds }) : [];
-  const tile=(k,v,sub)=>`<div class="card"><div class="stat-k">${k}</div><div class="stat-v">${v}</div><div class="stat-s">${sub}</div></div>`;
+  // Each tile opens its insights (leagueInsight).
+  const tile=(k,v,sub,kind)=>`<div class="card lov-tile" data-insight="${kind}" role="button" tabindex="0" aria-label="${esc(k)} — details"><div class="stat-k">${k} <span class="lov-more">Details →</span></div><div class="stat-v">${v}</div><div class="stat-s">${sub}</div></div>`;
   // Booking a round is free bay time, so it needs the same permission a price does.
   const roundBooking = edit && mig31.rounds && LG31.rounds && canLeagueRound() && !!cur;
   const chaseRow=t=>{ const c=teamCaptain(t,members);
     return `<div style="margin-top:4px"><b>${esc(t.name)}</b> — ${c?`${esc(c.name)}${c.phone?' · '+esc(fmtPhone(c.phone)):''}${!c.phone&&c.email?' · '+esc(c.email):''}${c.assumed?' <span class="dim">(no captain set)</span>':''}`:'<span class="dim">nobody on the team yet</span>'}${roundBooking?` <button type="button" class="link-btn lov-book" data-team="${esc(t.id)}">Book their round</button>`:''}</div>`; };
   $('#lo-body').innerHTML=`
     <div class="stats3">
-      ${league.team_mode ? tile('Teams', teams.length, `${paid.length} paid · ${teams.length-paid.length} still to pay`) : ''}
-      ${tile('Players', active.length, league.team_size ? `up to ${league.team_size} per team` : 'No team size set')}
+      ${league.team_mode ? tile('Teams', teams.length, `${paid.length} paid · ${teams.length-paid.length} still to pay`, 'teams') : ''}
+      ${tile('Players', active.length, league.team_size ? `up to ${league.team_size} per team` : 'No team size set', 'players')}
       ${tile('Money in', league.fee_cents>0?money(collected):'Free',
-        league.fee_cents>0 ? `${money(league.fee_cents)} per ${league.team_mode?'team':'player'} · ${paid.length} of ${teams.length} paid` : 'Nothing to collect')}
-      ${tile('Season', pr.total?`Week ${cur?cur.number:pr.played} of ${pr.total}`:'—', pr.total ? `${pr.left} week${pr.left===1?'':'s'} to go` : 'Set the season dates')}
+        league.fee_cents>0 ? `${money(league.fee_cents)} per ${league.team_mode?'team':'player'} · ${paid.length} of ${teams.length} paid` : 'Nothing to collect', 'money')}
+      ${tile('Season', pr.total?`Week ${cur?cur.number:pr.played} of ${pr.total}`:'—', pr.total ? `${pr.left} week${pr.left===1?'':'s'} to go` : 'Set the season dates', 'season')}
     </div>
     ${!league.team_mode ? '' : !mig31.rounds ? '<div class="kv"><span class="k">This week</span><span class="dim">Who has booked a round is not known until migration 0031 is run.</span></div>'
       : !cur ? '<div class="kv"><span class="k">This week</span><span class="dim">The season isn’t running this week.</span></div>'
@@ -3866,6 +3971,8 @@ function leagueOverview(ctx){
       <button class="btn btn-ghost btn-sm" id="lov-dup">Duplicate for next season</button>
       <button class="btn btn-danger btn-sm" id="lov-del">Delete league</button>
     </div>`:''}`;
+  $('#lo-body').querySelectorAll('.lov-tile').forEach(t=>{ const open=()=>leagueInsight(t.dataset.insight, ctx);
+    t.onclick=open; t.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(); } }; });
   $('#lov-phones').onclick=()=>copyList('phone numbers', active.map(x=>x.phone&&fmtPhone(x.phone)));
   $('#lov-emails').onclick=()=>copyList('emails', active.map(x=>x.email));
   $('#lo-body').querySelectorAll('.lov-book').forEach(b=>b.onclick=()=>goToLeagueRound(b.dataset.team, cur));
