@@ -194,6 +194,20 @@
   .sched-stage{padding:8px 12px 6px;font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;
     color:var(--orange);background:var(--surface-2);border-bottom:1px solid var(--border)}
   .sched-stage span{color:var(--dim);font-weight:500;letter-spacing:0;text-transform:none;margin-left:6px}
+  /* Scorecard colours (every screen): a hole by its result against par. */
+  .hr-ace{background:#EDE4FF!important;border-color:#8B5CF6!important;color:#5B21B6!important}
+  .hr-albatross{background:#D9F3F0!important;border-color:#14B8A6!important;color:#0F766E!important}
+  .hr-eagle{background:#FFF3C4!important;border-color:#E5A800!important;color:#8A6100!important}
+  .hr-birdie{background:#FDE2E1!important;border-color:#E5484D!important;color:#B42318!important}
+  .hr-par{background:#E3F4E8!important;border-color:#4CAF6E!important;color:#1D6B3A!important}
+  .hr-bogey{background:#E3EEFB!important;border-color:#6A9BD8!important;color:#1E4E8C!important}
+  .hr-double{background:#CFDDF2!important;border-color:#2F5E9E!important;color:#173A6B!important}
+  b.hs-val[class*="hr-"]{border:1px solid;border-radius:8px}
+  .hr-key{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:12px;color:var(--muted)}
+  .hr-key span{display:inline-flex;align-items:center;gap:4px}
+  .hr-key i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid}
+  .hr-key em{flex-basis:100%;font-style:normal;color:var(--dim)}
+  .sd-shot b{color:var(--white)}
   /* Past scorecards: the list in the side column, and the card in its pop-up. */
   .sch-list{display:flex;flex-direction:column;gap:6px}
   .sch-row{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;font-size:13.5px;
@@ -206,8 +220,6 @@
   .psc-cell{text-align:center;border:1px solid var(--border);border-radius:8px;padding:5px 0;background:var(--near-black)}
   .psc-cell small{display:block;font-size:10px;color:var(--dim)}
   .psc-cell b{display:block;font-family:'Space Grotesk';font-size:16px}
-  .psc-cell.is-under{background:rgba(6,118,71,.1);border-color:rgba(6,118,71,.35)}
-  .psc-cell.is-over{background:rgba(217,45,32,.07);border-color:rgba(217,45,32,.3)}
   .psc-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
   .psc-photos img{width:100%;height:150px;object-fit:cover;border-radius:10px;border:1px solid var(--border)}
   .sec-hint{font-family:'Raleway';font-weight:500;font-size:12.5px;color:var(--dim)}
@@ -1357,25 +1369,28 @@ function teamCard(t, idx, opts){
   const nearAt = (() => { const i = weeks.findIndex(w => w.current); if(i >= 0) return i;
     const j = weeks.findIndex(w => w.end >= today); return j >= 0 ? j : Math.max(0, weeks.length - 3); })();
   const near = i => i >= nearAt && i < nearAt + 3;
+  // What the team shot each week (its scorecard), shown on the week's row.
+  const shot = new Map(((t.holes && t.holes.weeks) || []).filter(h => h.total != null).map(h => [h.start, h]));
   const weekRows = weeks.map((w, i) => {
     const st = stageOf(w);
     const head = st && st[0] !== lastStage ? `<div class="sched-stage${near(i) ? '' : ' m-far'}">${esc(st[0])}<span>${esc(st[1])}</span></div>`
       : (st && i === nearAt ? `<div class="sched-stage m-only m-near">${esc(st[0])}<span>${esc(st[1])}</span></div>` : '');
     if(st) lastStage = st[0];
     const what = w.round
-      ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${(w.round.booking_date && L.weekIn(lg, w.round.booking_date) !== w.start) ? ' · make-up' : ''}${w.score!=null ? ` · <b>${esc(w.score)}</b>` : ''}`
+      ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${(w.round.booking_date && L.weekIn(lg, w.round.booking_date) !== w.start) ? ' · make-up' : ''}${(() => {
+          const h = shot.get(w.start), total = h ? h.total : w.score, parT = h && h.pars ? h.pars.reduce((a, b) => a + b, 0) : null;
+          if(total == null) return '';
+          const d = parT ? total - parT : null;
+          return ` · <span class="sd-shot">Shot <b>${esc(total)}</b>${d != null ? ` (${d > 0 ? '+' : ''}${d === 0 ? 'E' : d})` : ''}${h && h.status === 'pending' ? ' · waiting for staff' : ''}</span>`; })()}`
       : w.catchup ? 'Catch-up week: only for a missed round'
       : w.off ? 'Break: no round needed'
       : w.missed ? ((kd.regularEnd && today > kd.regularEnd) ? 'Missed, not played' : 'Missed: to make up')
       : w.current ? 'Not booked yet'
       : 'To come';
-    // Once a round has been played (or is today), anyone on the team can add its scoreboard photo.
-    const photo = (w.round && w.round.booking_date && w.round.booking_date <= today && team.id)
-      ? `<span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span>` : '';
     return `${head}<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}${w.catchup ? ' is-catchup' : ''}${w.round ? ' has-round' : ''}${near(i) ? '' : ' m-far'}" data-week="${esc(w.start)}" role="button" tabindex="0" aria-label="Week ${w.number}: details">
       <span class="sd-n">${w.number}</span>
       <span class="sd-date">${esc(shortDate(w.start))} – ${esc(shortDate(w.end))}</span>
-      <span class="sd-what"><span class="sd-pill">${what}</span>${photo}</span></div>`;
+      <span class="sd-what"><span class="sd-pill">${what}</span></span></div>`;
   }).join('');
 
   const by = lg.team_mode === false ? 'Player' : 'Team';
@@ -1417,9 +1432,10 @@ function teamCard(t, idx, opts){
   const holesBlock = !hs ? '' : (() => {
     const card = w => {
       const done = w.status === 'confirmed', editable = hs.canEnter && !done, vals = w.holes || [];
+      const hr = i => { const r = L.holeResult(vals[i], w.pars ? w.pars[i] : null); return r ? ` hr-${r.key}` : ''; };
       const cells = Array.from({ length: 18 }, (_, i) => `<div class="hs-cell"><div class="hs-n">${i + 1}</div>${editable
-        ? `<input class="input hs-in" inputmode="numeric" maxlength="2" value="${vals[i] == null ? '' : vals[i]}" aria-label="Hole ${i + 1}" />`
-        : `<b>${vals[i] == null ? '—' : vals[i]}</b>`}<div class="hs-par">${w.pars ? 'par ' + w.pars[i] : ''}</div></div>`).join('');
+        ? `<input class="input hs-in${hr(i)}" inputmode="numeric" maxlength="2" value="${vals[i] == null ? '' : vals[i]}" data-par="${w.pars ? w.pars[i] : ''}" aria-label="Hole ${i + 1}" />`
+        : `<b class="hs-val${hr(i)}">${vals[i] == null ? '—' : vals[i]}</b>`}<div class="hs-par">${w.pars ? 'par ' + w.pars[i] : ''}</div></div>`).join('');
       const state = done ? '<span class="pill ok">Confirmed</span>' : w.status === 'pending' ? '<span class="pill warn">Waiting for staff</span>' : '<span class="pill off">Not entered</span>';
       return `<div class="hs-week${done ? ' is-done' : ''}" data-week="${esc(w.start)}">
         <div class="hs-head"><b>Week ${w.week}${w.course ? ' · ' + esc(w.course) : ''}</b>${state}</div>
@@ -1427,6 +1443,7 @@ function teamCard(t, idx, opts){
           <span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span></div>` : ''}
         ${editable ? '<div class="hs-photo" style="margin-top:12px">2. Enter the score for each hole:</div>' : ''}
         <div class="hs-grid">${cells}</div>
+        ${holeKey(w.pars)}
         <div class="hs-foot"><span class="hs-total">Total: <span class="hs-sum">${vals.length ? vals.reduce((a, b) => a + Number(b), 0) : '—'}</span>${w.pars ? ` <span style="color:var(--dim);font-weight:500">· par ${w.pars.reduce((a, b) => a + b, 0)}</span>` : ''}</span>
           ${editable ? `<button type="button" class="btn btn-primary hs-go">${w.status === 'pending' ? 'Update scores' : 'Submit scores'}</button>` : ''}</div>
         ${editable ? '<div class="err hs-err"></div>' : ''}
@@ -1729,17 +1746,31 @@ function weekDetails(ctx, start){
     <div class="sec-title">Your team</div><div class="lg-note">${status}</div>
     ${canBook ? '<a class="btn btn-primary" href="/?league-round=1">Book a league round</a>' : ''}`);
 }
+// Scorecard colours: each hole by its result against par (InvictusLeagues.holeResult), and the key
+// under the card. Without the week's pars only a hole in one can be told apart, and the key says so.
+function holeKey(pars){
+  const L = window.InvictusLeagues;
+  return `<div class="hr-key">${L.HOLE_RESULTS.map(([k, label]) => `<span><i class="hr-${k}"></i>${label}</span>`).join('')}${
+    pars ? '' : '<em>Par isn’t set for this week yet, so only a hole in one is coloured.</em>'}</div>`;
+}
+function colourHole(input){
+  input.className = input.className.replace(/\s*hr-[a-z]+/g, '');
+  const r = window.InvictusLeagues.holeResult(input.value, input.dataset.par || null);
+  if(r) input.classList.add('hr-' + r.key);
+}
+
 // A scorecard already sent: every hole against its par, the total, the scoreboard photo.
 function pastScorecard(ctx, card, start){
   const w = ((ctx.holes || {}).weeks || []).find(x => x.start === start); if(!w) return;
   const vals = w.holes || [], pars = w.pars;
-  const cell = (i) => { const v = vals[i], p = pars ? pars[i] : null, d = v != null && p != null ? v - p : null;
-    return `<div class="psc-cell${d == null ? '' : d < 0 ? ' is-under' : d > 0 ? ' is-over' : ' is-par'}"><small>${i + 1}</small><b>${v == null ? '—' : v}</b>${p != null ? `<small>par ${p}</small>` : ''}</div>`; };
+  const cell = (i) => { const v = vals[i], p = pars ? pars[i] : null, r = window.InvictusLeagues.holeResult(v, p);
+    return `<div class="psc-cell${r ? ' hr-' + r.key : ''}"${r ? ` title="${r.label}"` : ''}><small>${i + 1}</small><b>${v == null ? '—' : v}</b>${p != null ? `<small>par ${p}</small>` : ''}</div>`; };
   const parTotal = pars ? pars.reduce((a, b) => a + b, 0) : null;
   const photos = (card._photos || []).filter(c => c.week === start && c.url);
   openDialog(`<h2>Week ${w.week} scorecard</h2>
     <div class="sub" style="margin:0">${w.course ? esc(w.course) + ' · ' : ''}${w.status === 'confirmed' ? '<span class="pill ok">Confirmed</span>' : '<span class="pill warn">Waiting for staff</span>'}</div>
     <div class="psc-grid">${Array.from({ length: 18 }, (_, i) => cell(i)).join('')}</div>
+    ${holeKey(pars)}
     <div class="hs-total" style="margin-top:12px">Total: ${w.total != null ? w.total : '—'}${parTotal ? ` <span style="color:var(--dim);font-weight:500">· par ${parTotal} (${w.total - parTotal > 0 ? '+' : ''}${w.total - parTotal})</span>` : ''}</div>
     ${photos.length ? `<div class="sec-title">Scoreboard photo${photos.length > 1 ? 's' : ''}</div><div class="psc-photos">${photos.map(c =>
       `<a href="${esc(c.url)}" target="_blank" rel="noopener"><img src="${esc(c.url)}" alt="Scoreboard photo for week ${w.week}" loading="lazy" /></a>`).join('')}</div>` : ''}
@@ -1876,7 +1907,7 @@ function wireTeams(teams){
   document.querySelectorAll('[data-team-card] .hs-week').forEach(box => {
     const ins = [...box.querySelectorAll('.hs-in')]; if(!ins.length) return;
     const sum = () => { const v = ins.map(i => i.value.trim()).filter(Boolean).map(Number); box.querySelector('.hs-sum').textContent = v.length ? v.reduce((a, b) => a + b, 0) : '—'; };
-    ins.forEach((i, n) => i.addEventListener('input', () => { i.value = i.value.replace(/\D/g, '').slice(0, 2); sum();
+    ins.forEach((i, n) => i.addEventListener('input', () => { i.value = i.value.replace(/\D/g, '').slice(0, 2); sum(); colourHole(i);
       if(i.value.length === 2 || (i.value.length === 1 && Number(i.value) > 1)) { const nx = ins[n + 1]; if(nx) nx.focus(); } }));
     const go = box.querySelector('.hs-go'), err = box.querySelector('.hs-err');
     go.onclick = async () => {

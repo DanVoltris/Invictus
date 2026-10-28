@@ -656,6 +656,18 @@
   .st-pick .st-tick{visibility:hidden;font-weight:700;color:var(--orange)}
   .st-pick.is-on{border-color:var(--orange);background:rgba(240,82,61,.08)}
   .st-pick.is-on .st-tick{visibility:visible}
+  /* Scorecard colours: a hole by its result against par (same as My Account). */
+  .hr-ace{background:#EDE4FF!important;border-color:#8B5CF6!important;color:#5B21B6!important}
+  .hr-albatross{background:#D9F3F0!important;border-color:#14B8A6!important;color:#0F766E!important}
+  .hr-eagle{background:#FFF3C4!important;border-color:#E5A800!important;color:#8A6100!important}
+  .hr-birdie{background:#FDE2E1!important;border-color:#E5484D!important;color:#B42318!important}
+  .hr-par{background:#E3F4E8!important;border-color:#4CAF6E!important;color:#1D6B3A!important}
+  .hr-bogey{background:#E3EEFB!important;border-color:#6A9BD8!important;color:#1E4E8C!important}
+  .hr-double{background:#CFDDF2!important;border-color:#2F5E9E!important;color:#173A6B!important}
+  .hr-key{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:12px;color:var(--muted)}
+  .hr-key span{display:inline-flex;align-items:center;gap:4px}
+  .hr-key i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid}
+  .hr-key em{flex-basis:100%;font-style:normal;color:var(--dim)}
   .lr-grid th.lr-col,.lr-grid td.lr-col{text-align:center;white-space:nowrap;min-width:48px}
   tr.lo-off td{color:var(--dim)}
   .lo-tdel{border:none;background:none;color:var(--dim);cursor:pointer;font-size:12px;margin-left:4px;padding:0 2px}
@@ -4689,13 +4701,15 @@ function leagueResults(ctx){
   const fill=()=>{
     const w=weekAt($('#lr-week').value);
     if(byHole) return fillHoles(w);
-    $('#lr-table').classList.remove('lr-holes'); $('#lr-table').style.removeProperty('--lr-off');
+    $('#lr-table').classList.remove('lr-holes'); $('#lr-table').style.removeProperty('--lr-off'); if($('#lr-key')) $('#lr-key').remove();
     $('#lr-table').innerHTML=`<thead><tr><th>${league.team_mode?'Team':'Player'}</th><th style="width:170px">Score (${unit})</th></tr></thead><tbody>${
       entrants.map(x=>{ const s=w?scoreFor(w.start,x.key):null; return `<tr><td>${esc(x.name)}</td><td><input class="input lr-score" data-key="${x.key}" type="number" step="0.5" value="${s==null?'':s}" ${edit?'':'disabled'} style="padding:7px 10px" aria-label="Score for ${esc(x.name)}" /></td></tr>`; }).join('')}</tbody>`;
   };
   const fillHoles=w=>{
     const pars=w?LG().parsFor(league,w.start):null, H=LG().HOLES;
-    const box=(x,i,v)=>`<input class="input lr-h" data-key="${x.key}" data-i="${i}" inputmode="numeric" maxlength="2" value="${v==null?'':v}" ${edit?'':'disabled'} aria-label="${esc(x.name)} hole ${i+1}" style="width:40px;padding:6px 4px;text-align:center" />`;
+    // Each hole coloured by its result against par (InvictusLeagues.holeResult), as the player sees it.
+    const hrc=(v,i)=>{ const r=LG().holeResult(v, pars?pars[i]:null); return r?' hr-'+r.key:''; };
+    const box=(x,i,v)=>`<input class="input lr-h${hrc(v,i)}" data-key="${x.key}" data-i="${i}" data-par="${pars?pars[i]:''}" inputmode="numeric" maxlength="2" value="${v==null?'':v}" ${edit?'':'disabled'} aria-label="${esc(x.name)} hole ${i+1}" style="width:40px;padding:6px 4px;text-align:center" />`;
     $('#lr-table').innerHTML=`${pars?'':'<caption class="dim">No pars set for this week (Edit league → schedule): the hole stats skip it.</caption>'}<thead><tr><th>Team</th>${Array.from({length:H},(_,i)=>`<th style="text-align:center">${i+1}</th>`).join('')}<th style="text-align:right">Total</th><th>Status</th></tr>
       <tr><td class="dim">Par</td>${Array.from({length:H},(_,i)=>`<td class="dim" style="text-align:center">${pars?pars[i]:'—'}</td>`).join('')}<td class="dim" style="text-align:right">${pars?pars.reduce((a,b)=>a+b,0):'—'}</td>
         <td></td></tr></thead><tbody>${
@@ -4719,6 +4733,11 @@ function leagueResults(ctx){
       tbl.style.setProperty('--lr-off', off+'px');
     };
     window.addEventListener('scroll', window._lrPin, { passive:true }); window._lrPin();
+    // The colour key under the grid.
+    const key=$('#lr-key') || (()=>{ const d=document.createElement('div'); d.id='lr-key'; d.className='hr-key'; $('#lr-table').parentElement.after(d); return d; })();
+    key.innerHTML=LG().HOLE_RESULTS.map(([k,l])=>`<span><i class="hr-${k}"></i>${esc(l)}</span>`).join('')+(pars?'':'<em>No pars for this week yet, so only a hole in one is coloured.</em>');
+    $('#lr-table').querySelectorAll('.lr-h').forEach(inp=>inp.addEventListener('input',()=>{
+      inp.className=inp.className.replace(/\s*hr-[a-z]+/g,''); const r=LG().holeResult(inp.value, inp.dataset.par||null); if(r) inp.classList.add('hr-'+r.key); }));
     $('#lr-table').querySelectorAll('.lr-h').forEach(inp=>inp.oninput=()=>{
       const tr=inp.closest('tr'), vals=[...tr.querySelectorAll('.lr-h')].map(i=>i.value.trim()).filter(Boolean).map(Number);
       tr.querySelector('.lr-tot').textContent=vals.length?vals.reduce((a,b)=>a+b,0):'—';

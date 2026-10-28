@@ -580,6 +580,19 @@
     return (row && normalizePars(row.pars)) || null;
   }
   const HOLE_KINDS = ['eagles', 'birdies', 'pars', 'bogeys', 'doubles'];
+  // One hole's result against its par, for colouring a scorecard. A 1 is a hole in one whatever the
+  // par; without a par there is nothing else to say. → { key, label } or null.
+  const HOLE_RESULTS = [['ace', 'Hole in one'], ['albatross', 'Albatross'], ['eagle', 'Eagle'], ['birdie', 'Birdie'],
+    ['par', 'Par'], ['bogey', 'Bogey'], ['double', 'Double bogey or worse']];
+  function holeResult(score, par) {
+    const s = Number(score), p = Number(par);
+    if (!Number.isFinite(s) || s < 1) return null;
+    if (s === 1) return { key: 'ace', label: 'Hole in one' };
+    if (!Number.isFinite(p) || p < 2) return null;
+    const d = s - p;
+    const key = d <= -3 ? 'albatross' : d === -2 ? 'eagle' : d === -1 ? 'birdie' : d === 0 ? 'par' : d === 1 ? 'bogey' : 'double';
+    return { key, label: HOLE_RESULTS.find((r) => r[0] === key)[1] };
+  }
   const holeKind = (score, par) => { const d = score - par;
     return d <= -2 ? 'eagles' : d === -1 ? 'birdies' : d === 0 ? 'pars' : d === 1 ? 'bogeys' : 'doubles'; };
   //   → { rows: [{ key, name, rounds, eagles, birdies, pars, bogeys, doubles }], leaders: { eagles: [...], … } }
@@ -605,5 +618,5 @@
     seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
     weekIn, weekStartOf, rulesText, roundWeek, leagueDates, rosterLocked, inPlayoffs, roundTarget,
     normalizeStages, stagedStandings, QUAL_POINTS,
-    HOLES, normalizePars, normalizeHoles, parsFor, scheduleFor, holeStats, HOLE_KINDS };
+    HOLES, normalizePars, normalizeHoles, parsFor, scheduleFor, holeStats, HOLE_KINDS, holeResult, HOLE_RESULTS };
 })(typeof window !== 'undefined' ? window : globalThis);

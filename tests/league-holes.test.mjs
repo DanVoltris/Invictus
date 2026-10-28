@@ -57,3 +57,18 @@ test('settings survive the manager form round-trip', () => {
   assert.equal(d.holeScoring, true);
   assert.deepEqual(d.schedule[0].pars, PARS);
 });
+
+test('holeResult: a hole against its par — hole in one, albatross, eagle, birdie, par, bogey, double', () => {
+  const r = (s, p) => (L.holeResult(s, p) || {}).key || null;
+  assert.equal(r(1, 3), 'ace');
+  assert.equal(r(1, null), 'ace', 'a 1 is a hole in one even with no par set');
+  assert.equal(r(2, 5), 'albatross');
+  assert.equal(r(3, 5), 'eagle');
+  assert.equal(r(3, 4), 'birdie');
+  assert.equal(r(4, 4), 'par');
+  assert.equal(r(5, 4), 'bogey');
+  assert.equal(r(6, 4), 'double');
+  assert.equal(r(9, 4), 'double');
+  assert.equal(r(4, null), null, 'no par, nothing to say');
+  assert.equal(r('', 4), null);
+});
