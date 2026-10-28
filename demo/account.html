@@ -120,6 +120,23 @@
   .sched-row.is-missed .sd-date{color:var(--dim)}
   .sched-row.is-missed .sd-what{color:var(--danger)}
   /* The scoreboard photo for a week's round (rule 5): a button, and what has been saved. */
+  /* Hole-by-hole scorecard (0047): 18 boxes in two rows of nine, the par under each. */
+  .hs-week{border:1px solid var(--border);border-radius:12px;padding:12px 12px 10px;margin-top:8px}
+  .hs-week.is-done{background:var(--near-black)}
+  .hs-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13.5px}
+  .hs-grid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:5px;margin-top:8px}
+  .hs-cell{text-align:center}
+  .hs-cell .hs-n{font-size:10.5px;color:var(--dim);font-family:'Space Grotesk';font-weight:700}
+  .hs-cell input{width:100%;padding:7px 0;text-align:center;font-size:15px;border-radius:8px}
+  .hs-cell .hs-par{font-size:10.5px;color:var(--dim);margin-top:2px}
+  .hs-cell b{display:block;padding:6px 0;font-family:'Space Grotesk'}
+  .hs-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+  .hs-total{font-family:'Space Grotesk';font-weight:700;font-size:15px}
+  .hs-foot .btn{width:auto;margin:0;padding:9px 16px;font-size:13.5px}
+  .hs-lead{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:6px}
+  .hs-lead .tile{padding:10px 12px}
+  .hs-lead ol{margin:4px 0 0 18px;font-size:12.5px;line-height:1.5}
+  .hs-lead li.is-you{font-weight:700;color:var(--orange)}
   .sc-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:6px;font-weight:500}
   .sc-btn{font:inherit;font-size:12.5px;font-weight:700;color:var(--orange);background:none;border:1px solid rgba(240,82,61,.45);border-radius:8px;padding:5px 10px;cursor:pointer}
   .sc-btn:hover{background:rgba(240,82,61,.08)}
@@ -879,6 +896,34 @@ function teamCard(t, idx, opts){
       <div class="team-h">Playoff seeding · weeks ${ra}–${rb}</div>
       <div class="tbl-wrap"><table class="lg-table"><tbody>${d.seeding.map(r => `<tr class="${r.you?'is-you':''}"><td>${r.rankingAvg == null ? '—' : r.rank}</td><td>${youName(r)}</td><td class="num">${val(r.rankingAvg)}</td></tr>`).join('')}</tbody></table></div>`;
   })();
+  // Hole-by-hole scores (0047): a scorecard per week the team has played, then the league's stat leaders.
+  const hs = t.holes || null;
+  const HOLE_LABEL = { eagles:'Eagles or better', birdies:'Birdies', pars:'Pars', bogeys:'Bogeys', doubles:'Double bogeys or worse' };
+  const holesBlock = !hs ? '' : (() => {
+    const card = w => {
+      const done = w.status === 'confirmed', editable = hs.canEnter && !done, vals = w.holes || [];
+      const cells = Array.from({ length: 18 }, (_, i) => `<div class="hs-cell"><div class="hs-n">${i + 1}</div>${editable
+        ? `<input class="input hs-in" inputmode="numeric" maxlength="2" value="${vals[i] == null ? '' : vals[i]}" aria-label="Hole ${i + 1}" />`
+        : `<b>${vals[i] == null ? '—' : vals[i]}</b>`}<div class="hs-par">${w.pars ? 'par ' + w.pars[i] : ''}</div></div>`).join('');
+      const state = done ? '<span class="pill ok">Confirmed</span>' : w.status === 'pending' ? '<span class="pill warn">Waiting for staff</span>' : '<span class="pill off">Not entered</span>';
+      return `<div class="hs-week${done ? ' is-done' : ''}" data-week="${esc(w.start)}">
+        <div class="hs-head"><b>Week ${w.week}${w.course ? ' · ' + esc(w.course) : ''}</b>${state}</div>
+        <div class="hs-grid">${cells}</div>
+        <div class="hs-foot"><span class="hs-total">Total: <span class="hs-sum">${vals.length ? vals.reduce((a, b) => a + Number(b), 0) : '—'}</span>${w.pars ? ` <span style="color:var(--dim);font-weight:500">· par ${w.pars.reduce((a, b) => a + b, 0)}</span>` : ''}</span>
+          ${editable ? `<button type="button" class="btn btn-primary hs-go">${w.status === 'pending' ? 'Update scores' : 'Submit scores'}</button>` : ''}</div>
+        ${editable ? '<div class="err hs-err"></div>' : ''}
+        ${!hs.canEnter && !done ? '<div class="sub" style="margin:6px 0 0">Substitutes can’t enter scores — one of the team’s players does.</div>' : ''}</div>`;
+    };
+    const lead = Object.entries(hs.stats.leaders).map(([k, list]) => `<div class="tile"><div class="t-k">Most ${HOLE_LABEL[k].toLowerCase()}</div>${list.length
+      ? `<ol>${list.map(r => `<li class="${r.you ? 'is-you' : ''}">${esc(r.name)} · ${r.count}</li>`).join('')}</ol>` : '<div class="t-s">None yet</div>'}</div>`).join('');
+    const me = hs.stats.mine;
+    return `<div class="sec-title">Scorecards</div>
+      <div class="sub" style="margin:0 0 4px">After each round, any player on the team enters the score for every hole. It counts once our staff check it against the scorecard.</div>
+      ${hs.weeks.length ? [...hs.weeks].reverse().map(card).join('') : '<div class="empty" style="padding:8px 0">No rounds played yet.</div>'}
+      <div class="sec-title">Hole stats</div>
+      ${me && me.rounds ? `<div class="sub" style="margin:0 0 6px">Your team: ${me.eagles} eagles or better · ${me.birdies} birdies · ${me.pars} pars · ${me.bogeys} bogeys · ${me.doubles} double bogeys or worse</div>` : ''}
+      <div class="hs-lead">${lead}</div>`;
+  })();
   const table = sg ? stagedTable : standings.some(r => r.played) ? `<div class="tbl-wrap"><table class="lg-table">
       <thead><tr><th>#</th><th>${by}</th><th class="num">Played</th><th class="num">${strokes ? 'Average' : 'Points'}</th><th class="num">Best</th></tr></thead>
       <tbody>${standings.map(r => { const you = r.you || r.key === team.id;
@@ -987,6 +1032,7 @@ function teamCard(t, idx, opts){
       : '<div class="empty" style="padding:8px 0">The shop has not set this season\'s dates yet.</div>'}
     <div class="sec-title">Standings</div>
     ${table}
+    ${holesBlock}
     <div class="sec-title">League details</div>
     ${details.map(([k,v]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}
   </div>`;
@@ -1047,6 +1093,26 @@ function wireScorecards(){
 // The captain's invite control: a phone number in, a single-use link out.
 function wireTeams(teams){
   wireScorecards();
+  // Scorecards: the total adds itself up as holes are typed; submit sends all 18 for staff to confirm.
+  document.querySelectorAll('[data-team-card] .hs-week').forEach(box => {
+    const ins = [...box.querySelectorAll('.hs-in')]; if(!ins.length) return;
+    const sum = () => { const v = ins.map(i => i.value.trim()).filter(Boolean).map(Number); box.querySelector('.hs-sum').textContent = v.length ? v.reduce((a, b) => a + b, 0) : '—'; };
+    ins.forEach((i, n) => i.addEventListener('input', () => { i.value = i.value.replace(/\D/g, '').slice(0, 2); sum();
+      if(i.value.length === 2 || (i.value.length === 1 && Number(i.value) > 1)) { const nx = ins[n + 1]; if(nx) nx.focus(); } }));
+    const go = box.querySelector('.hs-go'), err = box.querySelector('.hs-err');
+    go.onclick = async () => {
+      const holes = ins.map(i => i.value.trim());
+      if(holes.some(v => !v)){ err.textContent = 'Enter a score for all 18 holes.'; return; }
+      err.textContent = ''; go.disabled = true; go.textContent = 'Sending…';
+      const card = box.closest('[data-team-card]');
+      const r = await leaguesPost('submit-holes', { teamId: card.dataset.teamId, week: box.dataset.week, holes: holes.map(Number) });
+      go.disabled = false;
+      if(!r.ok){ go.textContent = 'Submit scores'; err.textContent = r.error || 'Could not send the scores. Try again.'; return; }
+      go.textContent = 'Update scores';
+      const pill = box.querySelector('.hs-head .pill'); pill.className = 'pill warn'; pill.textContent = 'Waiting for staff';
+      err.style.color = 'var(--ok)'; err.textContent = `Sent — ${r.total} for week ${r.week}. Our staff will confirm it against the scorecard.`;
+    };
+  });
   // A staff-added player paying their own share: straight to Checkout.
   document.querySelectorAll('[data-team-card] .share-go').forEach(go => {
     const card = go.closest('[data-team-card]'), err = card.querySelector('.share-err');

@@ -3373,6 +3373,7 @@ function openLeagueEditor(x){
       <div class="field"><label for="li-qualend">Qualifiers close <span class="dim">(after this day, rounds for weeks ending by it can never be played — divisions are split)</span></label><input class="input" id="li-qualend" type="date" value="${esc((info.dates||{}).qualifiersEnd||'')}" /></div>
       <div></div>
     </div>
+    ${switchRow('li-holes','Hole-by-hole scores','Each round is entered as 18 hole scores and the total adds itself up. Players enter their team’s holes in My Account; staff confirm them on the Results tab.',!!info.holeScoring)}
     ${switchRow('li-pomakeups','Catch up into the playoffs','A team may still play a missed round from before the playoffs during them, in order, until the season ends.',!!(info.dates||{}).playoffMakeups)}
     <div class="field"><label for="li-lock">Rosters lock after week <span class="dim">(captains can’t add players or substitutes after it; staff still can)</span></label><input class="input" id="li-lock" type="number" min="1" max="60" step="1" style="max-width:140px" placeholder="e.g. 4" value="${esc((info.dates||{}).rosterLockWeek||'')}" /></div>
     ${switchRow('li-fees','Fees before the first round','A team that still owes any of its league fee can’t book a league round until it is paid in full.',!!(info.dates||{}).feesFirst)}
@@ -3409,7 +3410,7 @@ function openLeagueEditor(x){
   // when a week is added or removed and again at save, so nothing typed is lost to a re-draw.
   let weeks=info.schedule.map(w=>({ ...w }));
   const readWeeks=()=>[...sheet.querySelectorAll('.li-week')].map(r=>({ ...Object.fromEntries(
-    ['from','to','phase','event','course','location','note'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])),
+    ['from','to','phase','event','course','location','note','pars'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])),
     optional: r.querySelector('[data-k="optional"]').checked, catchup: r.querySelector('[data-k="catchup"]').checked }));
   const drawWeeks=()=>{
     const host=$('#li-weeks'); if(!host) return;
@@ -3423,6 +3424,8 @@ function openLeagueEditor(x){
         <div><label>Course</label><input class="input" data-k="course" maxlength="120" value="${esc(w.course||'')}" placeholder="e.g. Deer Ridge Golf Club" /></div>
         <div><label>Location</label><input class="input" data-k="location" maxlength="120" value="${esc(w.location||'')}" placeholder="e.g. Kitchener, Ontario" /></div>
         <div class="li-week-note"><label>Notes <span class="dim">(optional)</span></label><input class="input" data-k="note" maxlength="240" value="${esc(w.note||'')}" placeholder="e.g. Sign-ups for the branded event on Nov 17th" /></div>
+        <div class="li-week-note"><label>Par for each hole <span class="dim">(18 numbers, holes 1–18 — for the birdie, par and bogey counts)</span></label><input class="input" data-k="pars" inputmode="numeric" value="${esc((w.pars||[]).join(' '))}" placeholder="e.g. 4 4 3 5 4 4 3 4 5 4 4 3 5 4 4 3 4 5" />
+          <div class="dim li-par-total" style="font-size:12px;margin-top:4px">${w.pars&&w.pars.length===18?'Par '+w.pars.reduce((a,b)=>a+b,0):''}</div></div>
       </div>
       <label class="row lea-switch li-week-off">
         <span class="switch"><input type="checkbox" data-k="optional" ${w.optional?'checked':''} /><span class="track"></span></span>
@@ -3467,10 +3470,13 @@ function openLeagueEditor(x){
       const sched=readWeeks();
       const bad=sched.findIndex(w=>w.from && w.to && w.to<w.from);
       if(bad>=0) return err(`Week ${bad+1} in the schedule ends before it starts.`);
+      const badPar=sched.findIndex(w=>w.pars && !InvictusLeagues.normalizePars(w.pars));
+      if(badPar>=0) return err(`Week ${badPar+1}’s pars need 18 numbers, one per hole, each from 2 to 7.`);
       details=InvictusLeagues.normalizeDetails({ about:$('#li-about').value, perks:$('#li-perks').value, eligibility:$('#li-elig').value, format:$('#li-format').value, rules:$('#li-rules').value,
         settings:$('#li-settings').value, challenges:$('#li-challenges').value,
         schedule:sched, notice:$('#li-notice').value, awards:$('#li-awards').value, prize:$('#li-prize').value,
         stages:info.stages,   // the season's scoring stages are not on this form: keep them as they are
+        holeScoring:$('#li-holes').checked,
         dates:{ regularEnd:$('#li-regend').value, playoffsStart:$('#li-playoffs').value, rosterLockWeek:$('#li-lock').value, feesFirst:$('#li-fees').checked,
           qualifiersEnd:$('#li-qualend').value, playoffMakeups:$('#li-pomakeups').checked } });
       const kd=details.dates||{};
@@ -4373,7 +4379,10 @@ function leagueResults(ctx){
   if(!all.length){ host.innerHTML='<div class="empty">Set the season dates (Edit league) before entering results.</div>'; return; }
   if(!entrants.length){ host.innerHTML=`<div class="empty">${league.team_mode?'Add teams on the Teams tab before entering results.':'Add players before entering results.'}</div>`; return; }
   const weekFor=d=>LG().weekIn(league,d);
-  const scoreFor=(wStart,key)=>{ const r=results.find(x=>weekFor(x.played_on)===wStart && (league.team_mode?x.team_id:x.customer_id)===key); return r?Number(r.score):null; };
+  const rowFor=(wStart,key)=>results.find(x=>weekFor(x.played_on)===wStart && (league.team_mode?x.team_id:x.customer_id)===key)||null;
+  const scoreFor=(wStart,key)=>{ const r=rowFor(wStart,key); return r?Number(r.score):null; };
+  // Hole-by-hole leagues (0047): 18 boxes a team, the total adds itself up, players' entries confirmed here.
+  const byHole=!!(league.team_mode && league.details && league.details.holeScoring);
   const scored=new Set(results.map(r=>weekFor(r.played_on)));
   // A catch-up week has no round of its own, so it never takes a score. A week a team played early
   // (staff booked it ahead) can be scored as soon as that round exists.
@@ -4395,7 +4404,7 @@ function leagueResults(ctx){
   host.innerHTML=`
     ${cols.length?`<div class="sec-h" style="margin-top:0">Season so far <span class="dim" style="text-transform:none;letter-spacing:0;font-weight:500">— click a week to edit it</span></div>
     <div class="tbl-scroll"><table class="lr-grid"><thead><tr><th>${league.team_mode?'Team':'Player'}</th>${cols.map(w=>`<th class="lr-col"><button type="button" class="link-btn lr-pick" data-week="${w.start}" title="${esc('Week '+w.number+' · '+weekLabel(w))}">W${w.number}</button></th>`).join('')}</tr></thead>
-      <tbody>${entrants.map(x=>`<tr><td><b>${esc(x.name)}</b></td>${cols.map(w=>{ const s=scoreFor(w.start,x.key); return `<td class="lr-col">${s==null?'<span class="dim">—</span>':s}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`
+      <tbody>${entrants.map(x=>`<tr><td><b>${esc(x.name)}</b></td>${cols.map(w=>{ const s=scoreFor(w.start,x.key), r=rowFor(w.start,x.key); return `<td class="lr-col">${s==null?'<span class="dim">—</span>':s}${r&&r.status==='pending'?'<div class="dim" style="font-size:11px">to confirm</div>':''}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`
       :'<div class="dim" style="font-size:13px">No weeks have been played yet.</div>'}
     <div class="sec-h" style="margin-top:18px">Enter or edit a week</div>
     <div class="grid2" style="align-items:end">
@@ -4408,8 +4417,25 @@ function leagueResults(ctx){
   enhanceSelects(host);
   const fill=()=>{
     const w=weekAt($('#lr-week').value);
+    if(byHole) return fillHoles(w);
     $('#lr-table').innerHTML=`<thead><tr><th>${league.team_mode?'Team':'Player'}</th><th style="width:170px">Score (${unit})</th></tr></thead><tbody>${
       entrants.map(x=>{ const s=w?scoreFor(w.start,x.key):null; return `<tr><td>${esc(x.name)}</td><td><input class="input lr-score" data-key="${x.key}" type="number" step="0.5" value="${s==null?'':s}" ${edit?'':'disabled'} style="padding:7px 10px" aria-label="Score for ${esc(x.name)}" /></td></tr>`; }).join('')}</tbody>`;
+  };
+  const fillHoles=w=>{
+    const pars=w?LG().parsFor(league,w.start):null, H=LG().HOLES;
+    const box=(x,i,v)=>`<input class="input lr-h" data-key="${x.key}" data-i="${i}" inputmode="numeric" maxlength="2" value="${v==null?'':v}" ${edit?'':'disabled'} aria-label="${esc(x.name)} hole ${i+1}" style="width:40px;padding:6px 4px;text-align:center" />`;
+    $('#lr-table').innerHTML=`<thead><tr><th>Team</th>${Array.from({length:H},(_,i)=>`<th style="text-align:center">${i+1}</th>`).join('')}<th style="text-align:right">Total</th><th>Status</th></tr>
+      <tr><td class="dim">Par</td>${Array.from({length:H},(_,i)=>`<td class="dim" style="text-align:center">${pars?pars[i]:'—'}</td>`).join('')}<td class="dim" style="text-align:right">${pars?pars.reduce((a,b)=>a+b,0):'—'}</td>
+        <td class="dim" style="font-size:12px">${pars?'':'No pars set for this week (Edit league → schedule): the stats skip it.'}</td></tr></thead><tbody>${
+      entrants.map(x=>{ const r=w?rowFor(w.start,x.key):null, hs=r&&Array.isArray(r.holes)?r.holes:[];
+        const st=!r?'':r.status==='pending'?`<label class="row" style="gap:6px;align-items:center;font-size:12.5px;white-space:nowrap"><input type="checkbox" class="lr-ok" data-key="${x.key}" ${edit?'':'disabled'} /> Confirm</label><div class="dim" style="font-size:11.5px">Entered by a player — check it against the scorecard</div>`
+          :'<span class="pill confirmed">Confirmed</span>';
+        return `<tr data-key="${x.key}"><td><b>${esc(x.name)}</b></td>${Array.from({length:H},(_,i)=>`<td>${box(x,i,hs[i])}</td>`).join('')}
+          <td class="lr-tot" style="text-align:right;font-weight:700">${hs.length?hs.reduce((a,b)=>a+Number(b),0):'—'}</td><td>${st}</td></tr>`; }).join('')}</tbody>`;
+    $('#lr-table').querySelectorAll('.lr-h').forEach(inp=>inp.oninput=()=>{
+      const tr=inp.closest('tr'), vals=[...tr.querySelectorAll('.lr-h')].map(i=>i.value.trim()).filter(Boolean).map(Number);
+      tr.querySelector('.lr-tot').textContent=vals.length?vals.reduce((a,b)=>a+b,0):'—';
+    });
   };
   $('#lr-week').addEventListener('change', fill);
   host.querySelectorAll('.lr-pick').forEach(b=>b.onclick=()=>{ const sel=$('#lr-week'); sel.value=b.dataset.week; if(sel._csSync) sel._csSync(); fill(); sel.closest('.field').scrollIntoView({ block:'center', behavior:'smooth' }); });
@@ -4424,6 +4450,7 @@ function leagueResults(ctx){
   $('#lr-save').onclick=async()=>{
     const w=weekAt($('#lr-week').value);
     if(!w){ toast('Pick the week first.','err'); return; }
+    if(byHole) return saveHoles(w);
     const rows=[]; let bad=false;
     $('#lr-table').querySelectorAll('.lr-score').forEach(i=>{
       if(i.value==='') return;
@@ -4438,6 +4465,33 @@ function leagueResults(ctx){
     if(error){ if(!isAuthError(error)) toast('Results not saved: '+error.message,'err'); return; }
     toast(`Saved ${rows.length} score${rows.length===1?'':'s'} for week ${w.number}`,'ok');
     LEAGUE_VIEW='standings'; reload();
+  };
+  // A team with no boxes filled is left out; a part-filled card is refused. A player's entry stays
+  // waiting unless Confirm is ticked; anything staff typed is confirmed as it is saved.
+  const saveHoles=async w=>{
+    const rows=[];
+    for(const tr of $('#lr-table').querySelectorAll('tbody tr[data-key]')){
+      const key=tr.dataset.key, name=(entrants.find(x=>x.key===key)||{}).name||'A team';
+      const vals=[...tr.querySelectorAll('.lr-h')].map(i=>i.value.trim());
+      if(vals.every(v=>v==='')) continue;
+      const holes=LG().normalizeHoles(vals);
+      if(!holes){ toast(`${name}: enter all 18 holes, whole numbers from 1 to 20.`,'err'); return; }
+      const prev=rowFor(w.start,key), ok=tr.querySelector('.lr-ok');
+      const status=prev && prev.status==='pending' && !(ok && ok.checked) ? 'pending' : 'confirmed';
+      const kept=prev && prev.status==='confirmed';
+      rows.push({ league_id:league.id, played_on:w.start, team_id:key, holes, score:holes.reduce((a,b)=>a+b,0), status,
+        submitted_by:(prev&&prev.submitted_by)||null, submitted_at:(prev&&prev.submitted_at)||null,
+        confirmed_by: status==='confirmed' ? (kept?prev.confirmed_by:(ME.email||'staff')) : null,
+        confirmed_at: status==='confirmed' ? (kept?prev.confirmed_at:new Date().toISOString()) : null });
+    }
+    if(!rows.length){ toast('Enter a team’s 18 holes, or use “Clear this week”.','err'); return; }
+    $('#lr-save').disabled=true;
+    const error=await writeWeek(w,rows);
+    $('#lr-save').disabled=false;
+    if(error){ if(!isAuthError(error)) toast(/holes|status|column/i.test(error.message)?'Run database migration 0047 to save hole-by-hole scores.':'Results not saved: '+error.message,'err'); return; }
+    const waiting=rows.filter(r=>r.status==='pending').length;
+    toast(`Saved week ${w.number}${waiting?` — ${waiting} still waiting to be confirmed`:''}`,'ok');
+    reload();
   };
   $('#lr-clear').onclick=()=>{
     const w=weekAt($('#lr-week').value);
@@ -4507,6 +4561,22 @@ async function leagueHours(ctx){
   $('#lh-checked').onchange=e=>{ HOURS_CHECKED_ONLY=e.target.checked; leagueHours(ctx); };
 }
 
+// Hole stats (0047): every team's eagles-or-better, birdies, pars, bogeys and doubles-or-worse from
+// confirmed rounds in weeks with pars, and who leads each.
+const HOLE_LABEL={ eagles:'Eagles or better', birdies:'Birdies', pars:'Pars', bogeys:'Bogeys', doubles:'Double bogeys or worse' };
+function holeStatsCard(league, teams, results){
+  if(!(league.team_mode && league.details && league.details.holeScoring)) return '';
+  const s=LG().holeStats({ league, teams, results });
+  const K=LG().HOLE_KINDS, any=s.rows.some(r=>r.rounds);
+  const lead=k=>{ const top=s.leaders[k].filter(r=>r.rank===1); return top.length?`${top.map(r=>esc(r.name)).join(', ')} · ${top[0][k]}`:'—'; };
+  return `<div class="card" style="margin-bottom:16px"><h3 class="card-h">Hole stats</h3>
+    <div class="sub">From confirmed rounds, counted against each week’s par (set in Edit league → schedule). A week without pars adds nothing here.</div>
+    ${any?`<div class="grid2" style="gap:8px 16px;margin-bottom:12px">${K.map(k=>`<div class="kv"><span class="k">Most ${HOLE_LABEL[k].toLowerCase()}</span><span><b>${lead(k)}</b></span></div>`).join('')}</div>
+    <div class="tbl-scroll"><table><thead><tr><th>Team</th><th style="text-align:right">Rounds</th>${K.map(k=>`<th style="text-align:right">${HOLE_LABEL[k]}</th>`).join('')}</tr></thead>
+    <tbody>${[...s.rows].sort((a,b)=>b.birdies-a.birdies||b.eagles-a.eagles||String(a.name).localeCompare(String(b.name))).map(r=>`<tr><td><b>${esc(r.name)}</b></td><td style="text-align:right">${r.rounds}</td>${K.map(k=>`<td style="text-align:right">${r[k]}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+    :'<div class="empty">No confirmed hole-by-hole rounds yet.</div>'}</div>`;
+}
+
 function leagueStandingsView(ctx){
   const { league, teams, members, results }=ctx;
   // A staged season (leagues.details.stages — the 2026-27 Winter League) has its own standings.
@@ -4520,7 +4590,7 @@ function leagueStandingsView(ctx){
       <th style="text-align:right">${strokes?'Average':'Points'}</th><th style="text-align:right">${strokes?'Best round':'Best week'}</th></tr></thead>
     <tbody>${rows.map(r=>`<tr><td><b>${r.played?r.rank:'—'}</b></td><td>${esc(r.name)}${league.team_mode?`<div class="dim" style="font-size:12px">${esc(active.filter(x=>x.team_id===r.key).map(x=>x.name).join(', '))}</div>`:''}</td><td style="text-align:right">${r.played}</td>
       <td style="text-align:right;font-weight:700">${r.played?(strokes?r.average:r.total):'—'}</td><td style="text-align:right">${r.best==null?'—':r.best}</td></tr>`).join('')}</tbody></table></div>
-    <div class="foot-note">${strokes?'Lowest average wins, so a missed week doesn’t help anyone.':'Most total points wins.'} Players see this table on My Account.</div>`
+    <div class="foot-note">${strokes?'Lowest average wins, so a missed week doesn’t help anyone.':'Most total points wins.'} Players see this table on My Account.</div>${holeStatsCard(league, teams, results)}`
     : '<div class="empty">No results yet. Enter the first week on the Results tab.</div>';
 }
 
@@ -4569,7 +4639,7 @@ function leagueStagedView(ctx, s){
     <div class="sec-h">Playoff seeding · ${span(st.ranking)} average</div>
     <div class="tbl-scroll"><table><tbody>${d.seeding.map(r=>`<tr><td style="width:44px"><b>${r.rankingAvg==null?'—':r.rank}</b></td><td>${esc(r.name)}</td><td style="text-align:right">${fmt(r.rankingAvg)}</td></tr>`).join('')}</tbody></table></div></div>`;
   $('#lo-body').innerHTML = (s.undivided.length ? `<div class="card" style="margin-bottom:16px;border-color:rgba(178,106,21,.45)"><b>${s.undivided.length} team${s.undivided.length===1?' has':'s have'} no division yet:</b> ${s.undivided.map(t=>esc(t.name)).join(', ')}. Set it in the Qualifiers table below.</div>` : '')
-    + s.divisions.map(divCard).join('') + qual
+    + s.divisions.map(divCard).join('') + qual + holeStatsCard(league, teams, ctx.results)
     + '<div class="foot-note">Players see their own standings on My Account.</div>';
   enhanceSelects($('#lo-body'));
   $('#lo-body').querySelectorAll('.lgs-div').forEach(sel=>sel.onchange=async()=>{

@@ -243,6 +243,7 @@
     else members.filter((m) => m.status !== 'left').forEach((m) => add(m.customer_id, m.name));
 
     for (const r of results) {
+      if (r && r.status === 'pending') continue;          // entered by a player, not yet confirmed by staff
       const key = teamMode ? r.team_id : r.customer_id;
       if (!key) continue;
       if (!rows.has(key)) {   // a team since deleted, or a player who left: their results still count
@@ -387,13 +388,15 @@
       if (from && to && to < from) to = from;
       return { from, to, phase: line(x.phase, 60), event: line(x.event, 80), course: line(x.course, 120), location: line(x.location, 120),
         note: line(x.note, INFO_LIMITS.note), ...(x.optional === true || x.optional === 'true' ? { optional: true } : {}),
-        ...(x.catchup === true || x.catchup === 'true' ? { catchup: true } : {}) };
+        ...(x.catchup === true || x.catchup === 'true' ? { catchup: true } : {}),
+        ...(normalizePars(x.pars) ? { pars: normalizePars(x.pars) } : {}) };
     }).filter((w) => w.from || w.event || w.course || w.note).slice(0, INFO_LIMITS.weeks);
     return { about: para(d.about, INFO_LIMITS.about), perks: list(d.perks), eligibility: list(d.eligibility), format: list(d.format), rules: ruleSections, settings,
       challenges: list(d.challenges), schedule, notice: para(d.notice, INFO_LIMITS.notice),
       awards: list(d.awards), prize: para(d.prize, INFO_LIMITS.prize),
       ...(Object.keys(dates).length ? { dates } : {}),
-      ...(normalizeStages(d.stages) ? { stages: normalizeStages(d.stages) } : {}) };
+      ...(normalizeStages(d.stages) ? { stages: normalizeStages(d.stages) } : {}),
+      ...(d.holeScoring === true || d.holeScoring === 'true' ? { holeScoring: true } : {}) };
   }
   // The rules back as the text the manager edits: "1. Heading", its rules one per line, a blank
   // line between sections. normalizeDetails({ rules: rulesText(x) }) gives x back.
@@ -473,6 +476,7 @@
     // strokes[teamId] → Map(week number → strokes); one score a team a week.
     const strokes = new Map(teams.map((t) => [t.id, new Map()]));
     for (const r of results) {
+      if (r && r.status === 'pending') continue;          // not confirmed by staff yet
       const m = r && strokes.get(r.team_id), n = r && numOf.get(weekIn(league, r.played_on)), s = Number(r && r.score);
       if (m && n && Number.isFinite(s) && !m.has(n)) m.set(n, s);
     }
@@ -544,9 +548,52 @@
     };
   }
 
+  /* ----- Hole-by-hole scores (migration 0047) -----
+     A league with details.holeScoring takes each round as 18 hole scores; par for each hole is on the
+     schedule row of that week (schedule[].pars). The stats count, per team, every confirmed hole
+     against its par: eagles or better (2+ under), birdies, pars, bogeys, double bogeys or worse. */
+  const HOLES = 18;
+  // 18 pars, from an array or text like "4 4 3 5 …" / "4,4,3,5,…"; null unless all 18 are 2–7.
+  function normalizePars(v) {
+    const list = (Array.isArray(v) ? v : String(v == null ? '' : v).split(/[\s,;]+/)).filter((x) => String(x).trim() !== '').map(Number);
+    return list.length === HOLES && list.every((n) => Number.isInteger(n) && n >= 2 && n <= 7) ? list : null;
+  }
+  // 18 hole scores (whole numbers 1–20), or null.
+  function normalizeHoles(v) {
+    const list = Array.isArray(v) ? v.map((x) => (x === '' || x == null ? NaN : Number(x))) : [];
+    return list.length === HOLES && list.every((n) => Number.isInteger(n) && n >= 1 && n <= 20) ? list : null;
+  }
+  // The par for each hole of the week weekStart, from the schedule row that covers it.
+  function parsFor(league, weekStart) {
+    const rows = league && league.details && Array.isArray(league.details.schedule) ? league.details.schedule : [];
+    const row = rows.find((r) => r && r.from && weekIn(league, r.from) <= weekStart && weekIn(league, r.to || r.from) >= weekStart);
+    return (row && normalizePars(row.pars)) || null;
+  }
+  const HOLE_KINDS = ['eagles', 'birdies', 'pars', 'bogeys', 'doubles'];
+  const holeKind = (score, par) => { const d = score - par;
+    return d <= -2 ? 'eagles' : d === -1 ? 'birdies' : d === 0 ? 'pars' : d === 1 ? 'bogeys' : 'doubles'; };
+  //   → { rows: [{ key, name, rounds, eagles, birdies, pars, bogeys, doubles }], leaders: { eagles: [...], … } }
+  // Only confirmed rounds with holes, in weeks that have pars.
+  function holeStats({ league, teams = [], results = [] }) {
+    const rows = new Map(teams.map((t) => [t.id, { key: t.id, name: t.name, rounds: 0, eagles: 0, birdies: 0, pars: 0, bogeys: 0, doubles: 0 }]));
+    for (const r of results) {
+      if (!r || r.status === 'pending' || !rows.has(r.team_id)) continue;
+      const holes = normalizeHoles(r.holes), pars = holes && parsFor(league, weekIn(league, r.played_on));
+      if (!holes || !pars) continue;
+      const row = rows.get(r.team_id);
+      row.rounds += 1;
+      holes.forEach((h, i) => { row[holeKind(h, pars[i])] += 1; });
+    }
+    const list = [...rows.values()];
+    const leaders = Object.fromEntries(HOLE_KINDS.map((k) => [k, placeRows(list.filter((x) => x[k] > 0)
+      .sort((a, b) => b[k] - a[k] || String(a.name).localeCompare(String(b.name))), (a, b) => a[k] === b[k])]));
+    return { rows: list.sort((a, b) => String(a.name).localeCompare(String(b.name))), leaders };
+  }
+
   root.InvictusLeagues = { DAY_NAMES, timeLabel, scheduleLabel, weekOf, weeks, currentWeek, progress,
     teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName,
     seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
     weekIn, weekStartOf, rulesText, roundWeek, leagueDates, rosterLocked, inPlayoffs, roundTarget,
-    normalizeStages, stagedStandings, QUAL_POINTS };
+    normalizeStages, stagedStandings, QUAL_POINTS,
+    HOLES, normalizePars, normalizeHoles, parsFor, holeStats, HOLE_KINDS };
 })(typeof window !== 'undefined' ? window : globalThis);

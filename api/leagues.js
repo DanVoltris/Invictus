@@ -6,7 +6,7 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor,
          soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos, staffAddInvitee, withdrawTeamInvite,
          teamInviteForResend, notificationOutcome,
-         teamMembershipFor, saveScorecard, listScorecards, removeScorecard, memberShareNotice, ownShareFor } from '../lib/db.js';
+         teamMembershipFor, saveScorecard, listScorecards, removeScorecard, memberShareNotice, ownShareFor, submitHoleScores } from '../lib/db.js';
 import { notifyTeamInvite, notifyLeaguePlaced, notifyLeagueAdded } from '../lib/notify.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
 const L = globalThis.InvictusLeagues;
@@ -95,6 +95,7 @@ export default async function handler(req, res) {
     if (action === 'pay-seats') return await paySeats(req, res);
     if (action === 'pay-share') return await payShare(req, res);
     if (action === 'member-added') return await memberAdded(req, res);
+    if (action === 'submit-holes') return await submitHoles(req, res);
     if (action === 'my-teams') return await myTeams(req, res);
     if (action === 'join') return await join(req, res);
     if (action === 'confirm') return await confirm(req, res);
@@ -602,6 +603,17 @@ async function payShare(req, res) {
     cancel_url: `${origin}/account`,
   });
   return res.status(200).json({ ok: true, url: session.url, amountCents: r.owedCents });
+}
+
+// A team member enters the team's 18 hole scores for a week (pending until staff confirm).
+//   POST ?action=submit-holes   { teamId, week, holes: [18 numbers] }   (signed in)
+async function submitHoles(req, res) {
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to enter your scores.' });
+  const b = req.body || {};
+  const r = await submitHoleScores({ customerId: me.id, teamId: b.teamId, week: b.week, holes: b.holes });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  return res.status(200).json(r);
 }
 
 // Staff only: text a player they have just put on a team — which team, and their share to pay.
