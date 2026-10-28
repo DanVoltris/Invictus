@@ -137,6 +137,7 @@
   .hs-lead .tile{padding:10px 12px}
   .hs-lead ol{margin:4px 0 0 18px;font-size:12.5px;line-height:1.5}
   .hs-lead li.is-you{font-weight:700;color:var(--orange)}
+  .hs-photo{margin-top:10px;font-size:13px;color:var(--dim)}
   .sc-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:6px;font-weight:500}
   .sc-btn{font:inherit;font-size:12.5px;font-weight:700;color:var(--orange);background:none;border:1px solid rgba(240,82,61,.45);border-radius:8px;padding:5px 10px;cursor:pointer}
   .sc-btn:hover{background:rgba(240,82,61,.08)}
@@ -911,6 +912,8 @@ function teamCard(t, idx, opts){
         <div class="hs-grid">${cells}</div>
         <div class="hs-foot"><span class="hs-total">Total: <span class="hs-sum">${vals.length ? vals.reduce((a, b) => a + Number(b), 0) : '—'}</span>${w.pars ? ` <span style="color:var(--dim);font-weight:500">· par ${w.pars.reduce((a, b) => a + b, 0)}</span>` : ''}</span>
           ${editable ? `<button type="button" class="btn btn-primary hs-go">${w.status === 'pending' ? 'Update scores' : 'Submit scores'}</button>` : ''}</div>
+        ${editable ? `<div class="hs-photo">Scoreboard photo — needed before you send the scores:
+          <span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span></div>` : ''}
         ${editable ? '<div class="err hs-err"></div>' : ''}
         ${!hs.canEnter && !done ? '<div class="sub" style="margin:6px 0 0">Substitutes can’t enter scores — one of the team’s players does.</div>' : ''}</div>`;
     };
@@ -918,7 +921,7 @@ function teamCard(t, idx, opts){
       ? `<ol>${list.map(r => `<li class="${r.you ? 'is-you' : ''}">${esc(r.name)} · ${r.count}</li>`).join('')}</ol>` : '<div class="t-s">None yet</div>'}</div>`).join('');
     const me = hs.stats.mine;
     return `<div class="sec-title">Scorecards</div>
-      <div class="sub" style="margin:0 0 4px">After each round, any player on the team enters the score for every hole. It counts once our staff check it against the scorecard.</div>
+      <div class="sub" style="margin:0 0 4px">After each round, add a photo of the scoreboard, then any player on the team enters the score for every hole. It counts once our staff check it against the photo.</div>
       ${hs.weeks.length ? [...hs.weeks].reverse().map(card).join('') : '<div class="empty" style="padding:8px 0">No rounds played yet.</div>'}
       <div class="sec-title">Hole stats</div>
       ${me && me.rounds ? `<div class="sub" style="margin:0 0 6px">Your team: ${me.eagles} eagles or better · ${me.birdies} birdies · ${me.pars} pars · ${me.bogeys} bogeys · ${me.doubles} double bogeys or worse</div>` : ''}
@@ -1059,12 +1062,13 @@ function wireScorecards(){
     const ctls = [...card.querySelectorAll('.sc-ctl')];
     const teamId = card.dataset.teamId;
     if(!ctls.length || !teamId) return;
-    const show = cards => ctls.forEach(ctl => {
+    // Which weeks have a photo: the scorecard's Submit button waits for one.
+    const show = cards => { card._photoWeeks = new Set(cards.map(c => c.week)); ctls.forEach(ctl => {
       const mine = cards.filter(c => c.week === ctl.dataset.week), st = ctl.querySelector('.sc-state');
       st.classList.remove('is-err');
       st.innerHTML = mine.length ? `✓ ${mine.length} photo${mine.length===1?'':'s'} saved · ${mine.map((c, i) => c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">View${mine.length>1?' '+(i+1):''}</a>` : '').filter(Boolean).join(' · ')}` : '';
       ctl.querySelector('.sc-btn').textContent = mine.length ? 'Add another photo' : 'Add scoreboard photo';
-    });
+    }); };
     const load = async () => { const r = await leaguesPost('scorecards', { teamId }); if(r.ok && Array.isArray(r.cards)) show(r.cards); return r; };
     ctls.forEach(ctl => {
       const btn = ctl.querySelector('.sc-btn'), file = ctl.querySelector('.sc-file'), st = ctl.querySelector('.sc-state');
@@ -1103,8 +1107,9 @@ function wireTeams(teams){
     go.onclick = async () => {
       const holes = ins.map(i => i.value.trim());
       if(holes.some(v => !v)){ err.textContent = 'Enter a score for all 18 holes.'; return; }
-      err.textContent = ''; go.disabled = true; go.textContent = 'Sending…';
       const card = box.closest('[data-team-card]');
+      if(card._photoWeeks && !card._photoWeeks.has(box.dataset.week)){ err.textContent = 'Add the scoreboard photo for this week first, then send the scores.'; return; }
+      err.textContent = ''; go.disabled = true; go.textContent = 'Sending…';
       const r = await leaguesPost('submit-holes', { teamId: card.dataset.teamId, week: box.dataset.week, holes: holes.map(Number) });
       go.disabled = false;
       if(!r.ok){ go.textContent = 'Submit scores'; err.textContent = r.error || 'Could not send the scores. Try again.'; return; }

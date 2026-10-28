@@ -4478,7 +4478,7 @@ function leagueWeeks(ctx){
             : past?`<span class="pill cancelled">Missed</span> ${names(missed)}`
             : isNow?`<span class="pill warn">Not booked yet</span> ${names(missed)}`
             : '<span class="dim">—</span>'}</td>
-          ${league.team_mode?`<td class="lw-cards" data-week="${w.start}"><span class="dim">—</span></td>`:''}
+          ${league.team_mode?`<td class="lw-cards" data-week="${w.start}" data-played="${esc(played.map(t=>t.id).join(','))}"><span class="dim">—</span></td>`:''}
         </tr>`; }).join('')}</tbody></table></div>`;
   if(league.team_mode) loadWeekScorecards(ctx);
 }
@@ -4495,9 +4495,53 @@ async function loadWeekScorecards(ctx){
     const mine=r.cards.filter(c=>c.week===td.dataset.week);
     const byTeam={}; mine.forEach(c=>{ (byTeam[c.teamId]=byTeam[c.teamId]||[]).push(c); });
     const ids=Object.keys(byTeam).sort((a,b)=>nameOf(a).localeCompare(nameOf(b)));
-    td.innerHTML=ids.length ? ids.map(id=>`<button type="button" class="btn btn-ghost btn-sm lw-open" data-team="${esc(id)}" style="margin:2px 4px 2px 0">${esc(nameOf(id))} · ${byTeam[id].length}</button>`).join('') : '<span class="dim">—</span>';
+    // Staff add a photo for a team that played this week and handed in a paper card instead.
+    const played=(td.dataset.played||'').split(',').filter(Boolean);
+    td.innerHTML=(ids.length ? ids.map(id=>`<button type="button" class="btn btn-ghost btn-sm lw-open" data-team="${esc(id)}" style="margin:2px 4px 2px 0">${esc(nameOf(id))} · ${byTeam[id].length}</button>`).join('') : '<span class="dim">—</span>')
+      + (edit && played.length ? ' <button type="button" class="link-btn lw-add" style="margin-left:4px">+ Add photo</button>' : '');
     td.querySelectorAll('.lw-open').forEach(b=>b.onclick=()=>openScorecards({ title:`${nameOf(b.dataset.team)} · week of ${shortDate2(td.dataset.week)}`, cards:byTeam[b.dataset.team], edit, done:()=>leagueWeeks(ctx) }));
+    const add=td.querySelector('.lw-add');
+    if(add) add.onclick=()=>addScorecardPhoto({ week:td.dataset.week, teams:played.map(id=>({ id, name:nameOf(id), has:!!byTeam[id] })), done:()=>leagueWeeks(ctx) });
   });
+}
+// A phone photo is several megabytes; the scoreboard is readable at a fraction of that (the same
+// shrinking My Account does): 1600px on its long side, saved as a JPEG.
+async function shrinkPhoto(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=new Image();
+    await new Promise((ok,no)=>{ img.onload=ok; img.onerror=no; img.src=url; });
+    const k=Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement('canvas');
+    c.width=Math.max(1,Math.round(img.naturalWidth*k)); c.height=Math.max(1,Math.round(img.naturalHeight*k));
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    return c.toDataURL('image/jpeg',0.82);
+  } finally { URL.revokeObjectURL(url); }
+}
+// Staff upload a team's scorecard photo for a week — the teams that played it, ones still without
+// a photo first.
+function addScorecardPhoto({ week, teams, done }){
+  const list=[...teams].sort((a,b)=>(a.has-b.has)||a.name.localeCompare(b.name));
+  sheet.innerHTML=`<button class="sheet-close" id="x">✕</button>
+    <h3>Add a scorecard photo</h3><div class="sub">Week of ${esc(shortDate2(week))}</div>
+    <div class="field" style="margin-top:14px"><label for="sp-team">Team</label>
+      <select class="input" id="sp-team">${list.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}${t.has?' (has a photo)':''}</option>`).join('')}</select></div>
+    <div class="field"><label for="sp-file">Photo</label><input class="input" id="sp-file" type="file" accept="image/*" capture="environment" /></div>
+    <div class="err" id="sp-err"></div>
+    <button class="btn btn-primary" id="sp-go" style="width:100%;margin-top:10px">Upload photo</button>`;
+  overlay.classList.add('show'); $('#x').onclick=closeSheet;
+  enhanceSelects(sheet);
+  $('#sp-go').onclick=async()=>{
+    const f=$('#sp-file').files&&$('#sp-file').files[0], err=$('#sp-err'), go=$('#sp-go');
+    if(!f){ err.textContent='Choose the photo first.'; return; }
+    err.textContent=''; go.disabled=true; go.textContent='Uploading…';
+    let image;
+    try{ image=await shrinkPhoto(f); }catch(e){ go.disabled=false; go.textContent='Upload photo'; err.textContent='That file could not be read. Choose a photo (JPEG or PNG).'; return; }
+    const r=await apiPost('/api/leagues?action=scorecard', { teamId:$('#sp-team').value, week, image, asStaff:true });
+    go.disabled=false; go.textContent='Upload photo';
+    if(!r.ok){ err.textContent=r.error||'Could not upload that photo.'; return; }
+    closeSheet(); toast('Photo added','ok'); done();
+  };
 }
 function openScorecards({ title, cards, edit, done }){
   sheet.classList.add('res-wide');

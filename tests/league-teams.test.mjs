@@ -1739,3 +1739,27 @@ test('scorecard photos: someone on the team adds the photo for a week they playe
   assert.equal(S.buckets['league-scorecards'].files[row.path], undefined);
   assert.equal(S.db.league_scorecards.some((c) => c.id === row.id), false);
 });
+
+test('hole scores wait for the scoreboard photo; staff can add the photo themselves', async () => {
+  const w = ruleWorld();
+  S.db.leagues[0].details.holeScoring = true;
+  const teamId = await ownTeam();
+  roundOn(teamId, addDays(1, w(1)));                               // week 1 played
+  const holes = Array(18).fill(4);
+  const send = () => run(leaguesApi, { query: { action: 'submit-holes' }, body: { teamId, week: w(1), holes }, ...cap });
+
+  const early = await send();
+  assert.equal(early.code, 409);
+  assert.match(early.out.error, /scoreboard photo for week 1 first/);
+  assert.equal((S.db.league_results || []).length, 0, 'nothing saved without the photo');
+
+  // A player can't pass themselves off as staff; staff with Bookings can add it for the team.
+  assert.equal((await card({ teamId, week: w(1), image: JPEG, asStaff: true })).code, 403);
+  const byStaff = await card({ teamId, week: w(1), image: JPEG, asStaff: true }, { headers: { authorization: 'Bearer tok-admin' } });
+  assert.equal(byStaff.code, 200, JSON.stringify(byStaff.out));
+  assert.equal(S.db.league_scorecards[0].uploaded_by, null, 'not filed as any customer’s');
+
+  const ok = await send();
+  assert.equal(ok.code, 200, JSON.stringify(ok.out));
+  assert.equal(ok.out.total, 72);
+});

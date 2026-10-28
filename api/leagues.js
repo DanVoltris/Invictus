@@ -32,6 +32,7 @@ const L = globalThis.InvictusLeagues;
 //   POST ?action=place-solo     (staff)         { memberId, teamId } → that player is on that team
 //   POST ?action=team-from-solos (staff)        { leagueId, memberIds, name } → a new team of them
 //   POST ?action=scorecard      (on the team)   { teamId, week, image } → the scoreboard photo for that week's round, saved
+//                               (staff)         { teamId, week, image, asStaff: true } → the same, added from the portal
 //   POST ?action=scorecards     (staff | team)  { leagueId } | { teamId } → the photos, each with a link good for an hour
 //   POST ?action=scorecard-remove (staff)       { id } → that photo is deleted
 //   POST ?action=invite         (captain/staff) { teamId, phone, name?, role? } → the link to send a friend (role 'sub' = substitute)
@@ -367,8 +368,19 @@ function photoFrom(dataUrl) {
   return { bytes, type };
 }
 
-// Anybody on the team's roster — a player or a substitute who filled in — may add the photo.
+// Anybody on the team's roster — a player or a substitute who filled in — may add the photo. So may
+// staff with the Bookings permission, from the portal, for a team that handed in a paper card.
 async function scorecardUpload(req, res) {
+  if ((req.body || {}).asStaff) {
+    const ctx = await staffContext(req.headers && req.headers.authorization, 'booking.write');
+    if (ctx.error) return res.status(403).json({ ok: false, error: 'Only staff with the Bookings permission can add a scorecard photo.' });
+    const { teamId, week, image } = req.body;
+    const photo = photoFrom(image);
+    if (photo.error) return res.status(400).json({ ok: false, error: photo.error });
+    const r = await saveScorecard({ teamId: String(teamId || ''), weekISO: week, bytes: photo.bytes, contentType: photo.type });
+    if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+    return res.status(200).json({ ok: true, id: r.id, week: r.week });
+  }
   const me = await accountCustomerForRequest(req);
   if (!me) return res.status(401).json({ ok: false, error: 'Sign in to add your scoreboard photo.' });
   const { teamId, week, image } = req.body || {};
