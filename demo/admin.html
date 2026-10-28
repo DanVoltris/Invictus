@@ -424,6 +424,23 @@
      and shoves the whole page sideways instead. Pinning it to 0 makes the card obey its 1fr
      track and lets the table scroll inside its own box. */
   .day-layout > .card{min-width:0}
+  /* League rounds on the day (renderLeagueToday) */
+  .lg-today{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:var(--radius);padding:16px 18px;margin-bottom:18px}
+  .lg-today.is-soon{border-left-color:var(--orange);background:rgba(240,82,61,.05)}
+  .lgt-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 20px}
+  .lgt-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-family:'Space Grotesk'}
+  .lgt-main{font-family:'Space Grotesk';font-size:18px;margin-top:2px}
+  .lgt-next{background:var(--orange);color:#fff;border-radius:10px;padding:8px 14px;font-size:14px;animation:lgt-pulse 1.6s ease-in-out infinite}
+  .lgt-next.is-calm{background:var(--near-black);color:var(--white);border:1px solid var(--border);animation:none}
+  @keyframes lgt-pulse{0%,100%{box-shadow:0 0 0 0 rgba(240,82,61,.35)}50%{box-shadow:0 0 0 6px rgba(240,82,61,0)}}
+  @media (prefers-reduced-motion: reduce){ .lgt-next{animation:none} }
+  .lgt-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .lgt-row{display:flex;gap:8px;align-items:baseline;font:inherit;font-size:13.5px;text-align:left;background:var(--near-black);border:1px solid var(--border);border-radius:10px;padding:8px 12px;cursor:pointer;color:var(--white)}
+  .lgt-row:hover{border-color:var(--orange)}
+  .lgt-row.is-now{border-color:var(--ok);background:rgba(6,118,71,.06)}
+  .lgt-row.is-done{opacity:.5}
+  .lgt-time{font-family:'Space Grotesk';font-weight:700}
+  .lgt-team{font-weight:600}
   /* At a glance — horizontal strip below the stats */
   .glance{display:flex;gap:12px;overflow-x:auto;padding-bottom:4px}
   .glance .empty{padding:6px 0}
@@ -953,6 +970,7 @@
         </div>
 
         <div id="ovr-banner-host"></div>
+        <div id="lg-today"></div>
 
         <div class="stats">
           <div class="stat"><div class="stat-n" id="stat-booked">0</div><div class="stat-l">Bookings</div></div>
@@ -3269,6 +3287,10 @@ async function loadLeagueIndex(){
   const byId=Object.fromEntries(currentLeagues.filter(x=>x.team_mode).map(x=>[x.id,x]));
   LG_TEAMS=(t.data||[]).filter(x=>byId[x.league_id]).map(x=>({ id:x.id, name:x.name, league:byId[x.league_id] }));
   LG_TEAMS.forEach(x=>{ LG_TEAM_BY_ID[x.id]=x; });
+  // How many players each team has (substitutes not counted): the Tee Sheet's "expecting" figure.
+  let sz=await sb.from('league_members').select('team_id,role').eq('status','active').not('team_id','is',null);
+  if(sz.error) sz=await sb.from('league_members').select('team_id').eq('status','active').not('team_id','is',null);   // before 0041
+  (sz.data||[]).filter(r=>r.role!=='sub').forEach(r=>{ const t=LG_TEAM_BY_ID[r.team_id]; if(t) t.players=(t.players||0)+1; });
 }
 const leaguePills = id => (LEAGUE_INDEX[id]||[]).map(n=>`<span class="pill manager">${esc(n)}</span>`).join(' ');
 const seasonText = x => (x.season_start||x.season_end) ? `${x.season_start?shortDate2(x.season_start):'—'} – ${x.season_end?shortDate2(x.season_end):'—'}` : 'No season dates';
@@ -5251,7 +5273,7 @@ async function loadSchedule(){
     await loadOverridesFor([addDaysISO(date,-1), addDaysISO(date,1)]);
     const { data, error } = await sheetBookings(date);
     if(error){ if(!isAuthError(error)) toast('Load failed: '+error.message,'err'); return; }
-    BK=liveBookings(data); await loadGroupsFor(BK); renderOverrideBanner(date); updateStats();
+    BK=liveBookings(data); await loadGroupsFor(BK); renderOverrideBanner(date); renderLeagueToday(); updateStats();
     $('#day-list-card').style.display='none';   // the list supersedes the "At a glance" strip
     renderPalette(); renderBookingList();
     return;
@@ -5263,8 +5285,48 @@ async function loadSchedule(){
     fetchLeagueOwed(),   // captains who owe league money are flagged on At a glance
   ]);
   if(error){ if(!isAuthError(error)) toast('Load failed: '+error.message,'err'); return; }
-  BK=liveBookings(data); await loadGroupsFor(BK); renderOverrideBanner(date); updateStats(); $('#day-list-card').style.display=''; buildDayPaint(); renderPalette(); renderGrid(); renderDayList();
+  BK=liveBookings(data); await loadGroupsFor(BK); renderOverrideBanner(date); renderLeagueToday(); updateStats(); $('#day-list-card').style.display=''; buildDayPaint(); renderPalette(); renderGrid(); renderDayList();
 }
+
+// League rounds on the day shown: how many teams and players to expect, each round's time and bay,
+// and — on today's sheet — the round up next. A round starting within 15 minutes turns the card
+// orange and raises a notice once; the card re-checks every minute while the Tee Sheet is open.
+const LG_SOON_MIN = 15, LG_NOTIFIED = new Set();
+function renderLeagueToday(){
+  const host=$('#lg-today'); if(!host) return;
+  const date=$('#bk-date').value, today=todayISO(), isToday=date===today, now=isToday?nowMinWpg():null;
+  const rounds=BK.filter(b=>isLeagueRound(b) && b.booking_date===date && !['cancelled','held','blocked'].includes(b.status))
+    .sort((a,b)=>a.start_min-b.start_min);
+  if(!rounds.length){ host.innerHTML=''; return; }
+  const teamOf=b=>LG_TEAM_BY_ID[b.league_team_id]||null;
+  const teams=[...new Set(rounds.map(b=>b.league_team_id))];
+  const players=teams.reduce((n,id)=>n+((LG_TEAM_BY_ID[id]||{}).players||0),0);
+  const done=b=>isToday && b.end_min<=now, playing=b=>isToday && b.start_min<=now && now<b.end_min;
+  const next=isToday ? rounds.find(b=>b.start_min>now) : null;
+  const soon=next && next.start_min-now<=LG_SOON_MIN ? next : null;
+  const inMin=m=>m<60?`${m} min`:`${Math.floor(m/60)} h${m%60?' '+(m%60)+' min':''}`;
+  const name=b=>esc((teamOf(b)||{}).name||'League team');
+  const head = isToday ? 'League today' : `League on ${esc(dateLabel(date))}`;
+  const ahead = isToday ? rounds.filter(b=>!done(b)).length : rounds.length;
+  host.innerHTML=`<div class="lg-today${soon?' is-soon':''}">
+    <div class="lgt-top">
+      <div><div class="lgt-k">${head}</div>
+        <div class="lgt-main">${rounds.length} round${rounds.length===1?'':'s'}${players?` · expecting about <b>${players}</b> player${players===1?'':'s'}`:''}${isToday&&ahead!==rounds.length?` <span class="dim">· ${ahead} still to come</span>`:''}</div></div>
+      ${soon ? `<div class="lgt-next"><b>${name(soon)}</b> starts in ${inMin(soon.start_min-now)} · ${fmtMin(soon.start_min)} · ${esc(bayName(soon.bay_id))}</div>`
+        : next ? `<div class="lgt-next is-calm">Up next: <b>${name(next)}</b> at ${fmtMin(next.start_min)} · in ${inMin(next.start_min-now)}</div>`
+        : isToday && rounds.some(playing) ? '<div class="lgt-next is-calm">League rounds in play</div>' : ''}
+    </div>
+    <div class="lgt-list">${rounds.map(b=>{ const t=teamOf(b);
+      return `<button type="button" class="lgt-row${done(b)?' is-done':''}${playing(b)?' is-now':''}" data-id="${b.id}">
+        <span class="lgt-time">${fmtMin(b.start_min)}</span><span class="lgt-team">${name(b)}${t&&t.players?` <span class="dim">· ${t.players} player${t.players===1?'':'s'}</span>`:''}</span>
+        <span class="dim">${esc(bayName(b.bay_id))}${playing(b)?' · playing now':done(b)?' · done':''}</span></button>`; }).join('')}</div>
+    <div class="dim" style="font-size:12px;margin-top:8px">Staff set up every official league round — be ready when each team arrives.</div>
+  </div>`;
+  host.querySelectorAll('.lgt-row').forEach(r=>r.onclick=()=>openManage(r.dataset.id));
+  if(soon && !LG_NOTIFIED.has(soon.id)){ LG_NOTIFIED.add(soon.id);
+    toast(`League round soon: ${(teamOf(soon)||{}).name||'a team'} at ${fmtMin(soon.start_min)} on ${bayName(soon.bay_id)}`,'ok'); }
+}
+setInterval(()=>{ if($('#bk-date') && $('#bk-date').value===todayISO()) renderLeagueToday(); }, 60000);
 
 function renderOverrideBanner(date){
   const host=$('#ovr-banner-host'); const o=date?venueOverride(date):null;
