@@ -1024,11 +1024,12 @@ function teamCard(t, idx, opts){
       const state = done ? '<span class="pill ok">Confirmed</span>' : w.status === 'pending' ? '<span class="pill warn">Waiting for staff</span>' : '<span class="pill off">Not entered</span>';
       return `<div class="hs-week${done ? ' is-done' : ''}" data-week="${esc(w.start)}">
         <div class="hs-head"><b>Week ${w.week}${w.course ? ' · ' + esc(w.course) : ''}</b>${state}</div>
+        ${editable ? `<div class="hs-photo">1. Add a photo of the scoreboard — needed before you send the scores:
+          <span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span></div>` : ''}
+        ${editable ? '<div class="hs-photo" style="margin-top:12px">2. Enter the score for each hole:</div>' : ''}
         <div class="hs-grid">${cells}</div>
         <div class="hs-foot"><span class="hs-total">Total: <span class="hs-sum">${vals.length ? vals.reduce((a, b) => a + Number(b), 0) : '—'}</span>${w.pars ? ` <span style="color:var(--dim);font-weight:500">· par ${w.pars.reduce((a, b) => a + b, 0)}</span>` : ''}</span>
           ${editable ? `<button type="button" class="btn btn-primary hs-go">${w.status === 'pending' ? 'Update scores' : 'Submit scores'}</button>` : ''}</div>
-        ${editable ? `<div class="hs-photo">Scoreboard photo — needed before you send the scores:
-          <span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span></div>` : ''}
         ${editable ? '<div class="err hs-err"></div>' : ''}
         ${!hs.canEnter && !done ? '<div class="sub" style="margin:6px 0 0">Substitutes can’t enter scores — one of the team’s players does.</div>' : ''}</div>`;
     };
@@ -1135,7 +1136,7 @@ function teamCard(t, idx, opts){
 
   const inviteHTML = iAmSub ? '' : (locked && iAmCaptain !== false ? '' : invite);
   // What the week details and team stats need once the card is on screen (wireTeams).
-  TEAM_CTX[idx] = { lg, team, weeks, today, bayName, hhmm, shortDate, dayName, nextRound, kd };
+  TEAM_CTX[idx] = { lg, team, weeks, today, bayName, hhmm, shortDate, dayName, nextRound, kd, holes: hs };
   // This week's course, up top: the week the team's next round counts for (a make-up plays the
   // missed week's course), this week's otherwise, and week 1 before the season starts.
   const target = (nextRound.ok && nextRound.week) || cur || (weeks.length && today < weeks[0].start ? weeks[0] : null);
@@ -1250,6 +1251,41 @@ async function teamStats(ctx, otherId){
     ${hs && hs.rounds ? `<div class="sec-title">Hole stats</div><div class="tiles">${tile('Eagles+', hs.eagles)}${tile('Birdies', hs.birdies)}${tile('Pars', hs.pars)}${tile('Bogeys', hs.bogeys)}${tile('Doubles+', hs.doubles)}</div>` : ''}`);
 }
 
+// ---------- "Fill in your scorecard" ----------
+// Once a team's league round has started, every visit to My Account opens its scorecard in a pop-up
+// until the scores are sent (substitutes can't enter them, so they never see it). A page left open
+// checks once a minute, so a round at 8:00 PM brings it up by 8:01. "Later" hides it until next time.
+const SC_DONE = new Set();
+function dueScorecard(){
+  const now = venueNow();
+  for(const card of document.querySelectorAll('[data-team-card]')){
+    const ctx = TEAM_CTX[card.dataset.teamCard], hs = ctx && ctx.holes;
+    if(!hs || !hs.canEnter) continue;
+    for(const h of hs.weeks){
+      if(h.status || SC_DONE.has(card.dataset.teamId + '|' + h.start)) continue;
+      const w = ctx.weeks.find(x => x.start === h.start), r = w && w.round;
+      const started = !r || r.booking_date < now.date || (r.booking_date === now.date && (r.start_min || 0) <= now.min);
+      const box = card.querySelector(`.hs-week[data-week="${h.start}"]`);
+      if(started && box) return { card, h, box };
+    }
+  }
+  return null;
+}
+function promptScorecard(){
+  const d0 = document.getElementById('lg-dlg'); if(d0 && d0.open) return;
+  const due = dueScorecard(); if(!due) return;
+  const { card, h, box } = due;
+  const spot = document.createComment('scorecard'); box.before(spot); box._card = card;
+  const d = openDialog(`<h2>Week ${h.week} scorecard</h2>
+    <div class="sub" style="margin:0 0 6px">${h.course ? esc(h.course) + ' · ' : ''}Your round has started. When you finish, add a photo of the scoreboard, then the score for each hole — the total adds itself up. Our staff confirm it against the photo.</div>
+    <div class="dlg-slot"></div>
+    <button type="button" class="btn btn-ghost dlg-later" style="margin-top:12px">Later</button>`);
+  d.querySelector('.dlg-slot').appendChild(box);                // the same card, already wired
+  d.addEventListener('close', () => spot.replaceWith(box), { once:true });
+  d.querySelector('.dlg-later').onclick = () => { SC_DONE.add(card.dataset.teamId + '|' + h.start); d.close(); };
+}
+let SC_TIMER = null;
+
 // A phone photo is several megabytes; the scoreboard is readable at a fraction of that. Shrunk
 // here to 1600px on its long side and re-saved as a JPEG, so it uploads quickly on mobile data.
 async function shrinkPhoto(file){
@@ -1313,6 +1349,8 @@ function wireTeams(teams){
     card.querySelectorAll('.sched-row[data-week], .cc-more').forEach(el => act(el, () => weekDetails(ctx, el.dataset.week)));
     card.querySelectorAll('.stand-box tr[data-team]').forEach(tr => { if(tr.dataset.team) act(tr, () => teamStats(ctx, tr.dataset.team)); });
   });
+  promptScorecard();
+  if(!SC_TIMER) SC_TIMER = setInterval(promptScorecard, 60000);
   // Scorecards: the total adds itself up as holes are typed; submit sends all 18 for staff to confirm.
   document.querySelectorAll('[data-team-card] .hs-week').forEach(box => {
     const ins = [...box.querySelectorAll('.hs-in')]; if(!ins.length) return;
@@ -1323,7 +1361,7 @@ function wireTeams(teams){
     go.onclick = async () => {
       const holes = ins.map(i => i.value.trim());
       if(holes.some(v => !v)){ err.textContent = 'Enter a score for all 18 holes.'; return; }
-      const card = box.closest('[data-team-card]');
+      const card = box._card || box.closest('[data-team-card]');   // _card: while it sits in the pop-up
       if(card._photoWeeks && !card._photoWeeks.has(box.dataset.week)){ err.textContent = 'Add the scoreboard photo for this week first, then send the scores.'; return; }
       err.textContent = ''; go.disabled = true; go.textContent = 'Sending…';
       const r = await leaguesPost('submit-holes', { teamId: card.dataset.teamId, week: box.dataset.week, holes: holes.map(Number) });
@@ -1332,6 +1370,9 @@ function wireTeams(teams){
       go.textContent = 'Update scores';
       const pill = box.querySelector('.hs-head .pill'); pill.className = 'pill warn'; pill.textContent = 'Waiting for staff';
       err.style.color = 'var(--ok)'; err.textContent = `Sent — ${r.total} for week ${r.week}. Our staff will confirm it against the scorecard.`;
+      // Sent from the pop-up: close it, and offer the next round still waiting, if any.
+      SC_DONE.add(card.dataset.teamId + '|' + box.dataset.week);
+      if(box.closest('#lg-dlg')) setTimeout(() => { const d = document.getElementById('lg-dlg'); if(d && d.open) d.close(); promptScorecard(); }, 1600);
     };
   });
   // A staff-added player paying their own share: straight to Checkout.
