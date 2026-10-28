@@ -189,6 +189,11 @@
   .stand-box .tbl-wrap{overflow:visible}
   .stand-box .lg-table th{position:sticky;top:0;z-index:1;background:var(--surface)}
   .lg-main .sched{max-height:440px}
+  .stand-box tr.is-pin td{position:sticky;z-index:1;background:#FBF4EA;border-bottom:2px solid var(--orange)}
+  /* Week by week: a heading where each part of the season begins. */
+  .sched-stage{padding:8px 12px 6px;font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--orange);background:var(--surface-2);border-bottom:1px solid var(--border)}
+  .sched-stage span{color:var(--dim);font-weight:500;letter-spacing:0;text-transform:none;margin-left:6px}
   .sec-hint{font-family:'Raleway';font-weight:500;font-size:12.5px;color:var(--dim)}
   .stand-box tr[data-team]:not([data-team=""]){cursor:pointer}
   .stand-box tr[data-team]:not([data-team=""]):hover td{background:rgba(154,105,15,.05)}
@@ -854,7 +859,6 @@ function drawProfile(c, bks, justInherited, opts){
     tabBtns.forEach(b => { const on = b.dataset.tab === k; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
     document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.id !== 'panel-' + k; });
     history.replaceState(null, '', '#' + k);
-    if(k === 'league') showMyRow();
   };
   tabBtns.forEach((b, i) => {
     b.onclick = () => show(b.dataset.tab);
@@ -866,7 +870,7 @@ function drawProfile(c, bks, justInherited, opts){
     };
   });
   if(first === 'rewards') show(hasLeague ? 'league' : 'bookings');
-  showMyRow();   // until rewards load, if they ever do
+
   if(!dev) $('#o-out').onclick = signOut;
   drawDetails(c, dev, fromContest() && contestMissing(c).length > 0);
 
@@ -875,13 +879,6 @@ function drawProfile(c, bks, justInherited, opts){
   wireTeams(teams);
 }
 
-// Each standings box opens scrolled to the reader's own team, near the middle.
-function showMyRow(){
-  document.querySelectorAll('.stand-box').forEach(box => {
-    const r = box.querySelector('tr.is-you'); if(!r || !box.clientHeight) return;
-    box.scrollTop = Math.max(0, r.offsetTop - box.clientHeight / 2);
-  });
-}
 
 /* ---------- My team ----------
    A league is sold by the team and has no fixed night (migration 0031): the team plays one round a
@@ -993,7 +990,17 @@ function teamCard(t, idx, opts){
   }
   const ruleNotes = notes.map(([cls, html]) => `<div class="lg-note ${cls}" style="margin-top:10px">${html}</div>`).join('');
 
+  // Which part of the season a week is in (the league's stages), for a heading where each begins.
+  const stg = L.normalizeStages(lg.details && lg.details.stages);
+  const inSpan = (n, sp) => sp && n >= sp[0] && n <= sp[1];
+  const stageOf = w => !stg ? null : w.catchup ? ['Catch-up weeks', 'only for a missed round']
+    : inSpan(w.number, stg.qualifiers) ? ['Qualifiers', `weeks ${stg.qualifiers[0]}–${stg.qualifiers[1]}`]
+    : inSpan(w.number, stg.ranking) ? ['Division rounds', `weeks ${stg.ranking[0]}–${stg.ranking[1]}`]
+    : inSpan(w.number, stg.playoffs) ? ['Playoffs', `weeks ${stg.playoffs[0]}–${stg.playoffs[1]}`] : null;
+  let lastStage = null;
   const weekRows = weeks.map(w => {
+    const st = stageOf(w), head = st && st[0] !== lastStage ? `<div class="sched-stage">${esc(st[0])}<span>${esc(st[1])}</span></div>` : '';
+    if(st) lastStage = st[0];
     const what = w.round
       ? `${esc(shortDay(w.round.booking_date))}${w.round.start_min!=null ? ' · ' + esc(hhmm(w.round.start_min)) : ''} · ${esc(bayName(w.round.bay_id))}${(w.round.booking_date && L.weekIn(lg, w.round.booking_date) !== w.start) ? ' · make-up' : ''}${w.score!=null ? ` · <b>${esc(w.score)}</b>` : ''}`
       : w.catchup ? 'Catch-up week: only for a missed round'
@@ -1004,7 +1011,7 @@ function teamCard(t, idx, opts){
     // Once a round has been played (or is today), anyone on the team can add its scoreboard photo.
     const photo = (w.round && w.round.booking_date && w.round.booking_date <= today && team.id)
       ? `<span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span>` : '';
-    return `<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}" data-week="${esc(w.start)}" role="button" tabindex="0" aria-label="Week ${w.number}: details">
+    return `${head}<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}" data-week="${esc(w.start)}" role="button" tabindex="0" aria-label="Week ${w.number}: details">
       <span class="sd-n">${w.number}</span>
       <span class="sd-date">${esc(shortDate(w.start))} – ${esc(shortDate(w.end))}</span>
       <span class="sd-what">${what}${photo}</span></div>`;
@@ -1220,6 +1227,19 @@ function teamCard(t, idx, opts){
   </div>`;
 }
 
+// Standings open at the top, with the reader's own team repeated in a row pinned above first place
+// (and still in its own place further down). The pinned row stays in view as the box scrolls.
+function pinMyRows(card){
+  card.querySelectorAll('.stand-box table').forEach(tbl => {
+    const me = tbl.querySelector('tbody tr.is-you'); if(!me || tbl.querySelector('tr.is-pin')) return;
+    const pin = me.cloneNode(true); pin.classList.add('is-pin');
+    pin.setAttribute('aria-label', 'Your team, shown again at the top');
+    tbl.tBodies[0].insertBefore(pin, tbl.tBodies[0].firstChild);
+    const head = tbl.tHead ? tbl.tHead.getBoundingClientRect().height : 0;
+    pin.querySelectorAll('td').forEach(td => { td.style.top = (head || 0) + 'px'; });
+  });
+}
+
 // ---------- The pop-ups: a week of the season, and a team's stats ----------
 const TEAM_CTX = {};
 function openDialog(html){
@@ -1378,6 +1398,7 @@ function wireTeams(teams){
     const ctx = TEAM_CTX[card.dataset.teamCard]; if(!ctx) return;
     const act = (el, fn) => { el.addEventListener('click', fn); el.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); fn(); } }); };
     card.querySelectorAll('.sched-row[data-week], .cc-more').forEach(el => act(el, () => weekDetails(ctx, el.dataset.week)));
+    pinMyRows(card);
     card.querySelectorAll('.stand-box tr[data-team]').forEach(tr => { if(tr.dataset.team) act(tr, () => teamStats(ctx, tr.dataset.team)); });
   });
   // Scorecards: the total adds itself up as holes are typed; submit sends all 18 for staff to confirm.
