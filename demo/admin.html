@@ -4770,8 +4770,8 @@ async function leagueHours(ctx){
         <td>${esc(r.t.name)}<div class="dim" style="font-size:12px">${esc(members.filter(x=>x.status==='active' && x.team_id===r.t.id && x.role!=='sub').map(x=>x.name).join(', '))}</div></td>
         <td style="text-align:right;font-weight:700">${hrs(r.mins)}</td><td style="text-align:right">${r.sessions}</td><td style="text-align:right">${r.rounds}</td>
         ${HOURS_CHECKED_ONLY?`<td style="text-align:right" class="dim">${r.unchecked?hrs(r.unchecked)+' h':'—'}</td>`:''}</tr>`).join('')}</tbody></table></div>`
-      : '<div class="empty">No eligible hours yet this season.</div>'}
-    <div class="foot-note">${esc(shortDate2(from))} to ${esc(shortDate2(to))}. A session counts for a team when it is the team’s league round or was booked by one of its registered players (the phone or email on the booking matches). Substitutes, cancellations and no-shows are left out, and time staff shortened is already off the booking. The rules also need at least two registered members to have been there: check that before awarding the trip.</div>`;
+      : `<div class="empty">${from && today<from ? `The season starts on ${esc(shortDate2(from))}. Hours are counted from then.` : 'No eligible hours yet this season.'}</div>`}
+    <div class="foot-note">${from && today<from ? `Counted from ${esc(shortDate2(from))}, when the season starts, to ${esc(shortDate2(league.season_end||from))}.` : `Counted ${esc(shortDate2(from))} to ${esc(shortDate2(to))}${to===today?' (today)':''}.`} A session counts for a team when it is the team’s league round or was booked by one of its registered players (the phone or email on the booking matches). Substitutes, cancellations and no-shows are left out, and time staff shortened is already off the booking. The rules also need at least two registered members to have been there: check that before awarding the trip.</div>`;
   $('#lh-checked').onchange=e=>{ HOURS_CHECKED_ONLY=e.target.checked; leagueHours(ctx); };
 }
 
