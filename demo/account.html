@@ -189,7 +189,7 @@
   .stand-box .tbl-wrap{overflow:visible}
   .stand-box .lg-table th{position:sticky;top:0;z-index:1;background:var(--surface)}
   .lg-main .sched{max-height:440px}
-  .stand-box tr.is-pin td{position:sticky;z-index:1;background:#FBF4EA;border-bottom:2px solid var(--orange)}
+  .stand-box tr.is-pin td{background:#FBF4EA;border-bottom:2px solid var(--orange)}
   /* Week by week: a heading where each part of the season begins. */
   .sched-stage{padding:8px 12px 6px;font-family:'Space Grotesk';font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;
     color:var(--orange);background:var(--surface-2);border-bottom:1px solid var(--border)}
@@ -1228,15 +1228,13 @@ function teamCard(t, idx, opts){
 }
 
 // Standings open at the top, with the reader's own team repeated in a row pinned above first place
-// (and still in its own place further down). The pinned row stays in view as the box scrolls.
+// (and still in its own place further down). It scrolls away with the rest of the list.
 function pinMyRows(card){
   card.querySelectorAll('.stand-box table').forEach(tbl => {
     const me = tbl.querySelector('tbody tr.is-you'); if(!me || tbl.querySelector('tr.is-pin')) return;
     const pin = me.cloneNode(true); pin.classList.add('is-pin');
     pin.setAttribute('aria-label', 'Your team, shown again at the top');
     tbl.tBodies[0].insertBefore(pin, tbl.tBodies[0].firstChild);
-    const head = tbl.tHead ? tbl.tHead.getBoundingClientRect().height : 0;
-    pin.querySelectorAll('td').forEach(td => { td.style.top = (head || 0) + 'px'; });
   });
 }
 
