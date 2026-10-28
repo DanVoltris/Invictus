@@ -143,7 +143,9 @@
   // owed — how staff book a team into a week AHEAD of time (a team away that week plays it early).
   function roundTarget({ league, weeks: list = [], dateISO, pick = null }) {
     const wk = weekIn(league, dateISO);
-    if (!list.some((w) => w.start === wk)) return { ok: false, code: 'outside_season' };
+    // Staff who pick the week may book it on any date, even before or after the season; without a
+    // pick there is no week to count a round outside the season for.
+    if (!pick && !list.some((w) => w.start === wk)) return { ok: false, code: 'outside_season' };
     const k = leagueDates(league);
     const late = !!k.regularEnd && dateISO > k.regularEnd;
     if (late && k.playoffsStart && dateISO < k.playoffsStart) {

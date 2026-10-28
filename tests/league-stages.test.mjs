@@ -174,3 +174,18 @@ test('a qualifier week with no scores entered at all is not "everyone missed it"
   const w2 = s.qualifiers.rows.map((r) => r.weeks.find((w) => w.week === 2));
   assert.ok(w2.every((w) => w.pending && !w.points), 'week 2 has no scores yet: nobody gets last place for it');
 });
+
+test('staff who pick the week can book a round before or after the season', () => {
+  const play = (dateISO, pick) => L.roundTarget({ league: WL, weeks: season([], dateISO), dateISO, pick });
+  const early = play('2026-10-27', wk(1));             // the Tuesday before week 1
+  assert.equal(early.ok, true);
+  assert.equal(early.week.start, wk(1));
+  assert.ok(early.makeup && early.early, 'counts for week 1, played early');
+  const after = play('2027-03-09', wk(18));            // the Tuesday after the last week
+  assert.equal(after.ok, true);
+  assert.equal(after.week.start, wk(18));
+  // Without a pick there is no week for it to count for.
+  assert.equal(play('2026-10-27', null).code, 'outside_season');
+  // Catch-up weeks still have no round of their own.
+  assert.equal(play('2026-10-27', wk(9)).code, 'catchup_only');
+});

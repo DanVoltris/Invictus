@@ -3639,8 +3639,9 @@ async function checkLeagueRound(teamId, dateISO, ignoreBookingId, pick){
   const lg=t.league;
   const today=todayISO();
   if(!LG().isCurrent(lg,today)) return { error:`${lg.name} isn’t running any more, so ${t.name} can’t book a round on it.` };
-  if(lg.season_start && dateISO<lg.season_start) return { error:`${lg.name} starts on ${shortDate2(lg.season_start)} — ${dateLabel(dateISO)} is before the season begins.` };
-  if(lg.season_end && dateISO>lg.season_end) return { error:`${lg.name} ended on ${shortDate2(lg.season_end)} — ${dateLabel(dateISO)} is after the season.` };
+  // Outside the season dates staff can still book a round, as long as they say which week it counts for.
+  if(!pick && lg.season_start && dateISO<lg.season_start) return { error:`${lg.name} starts on ${shortDate2(lg.season_start)} — ${dateLabel(dateISO)} is before the season begins. To play a week early, pick it under “Counts for week”.` };
+  if(!pick && lg.season_end && dateISO>lg.season_end) return { error:`${lg.name} ended on ${shortDate2(lg.season_end)} — ${dateLabel(dateISO)} is after the season. To make up a week, pick it under “Counts for week”.` };
   // ROUNDS ARE PLAYED IN ORDER (the league's rules): this booking counts for the earliest week the
   // team has not played — a missed week first — worked out from every live round the team has,
   // with the same shared maths the customer's checkout uses (InvictusLeagues.roundTarget).
