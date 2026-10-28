@@ -6,7 +6,8 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          splitPaymentsReady, confirmLeagueSeatCheckout, teamMoneyFor,
          soloShareCents, joinLeagueSolo, confirmLeagueSoloCheckout, placeSolo, teamFromSolos, staffAddInvitee, withdrawTeamInvite,
          teamInviteForResend, notificationOutcome,
-         teamMembershipFor, saveScorecard, listScorecards, removeScorecard, memberShareNotice, ownShareFor, submitHoleScores } from '../lib/db.js';
+         teamMembershipFor, saveScorecard, listScorecards, removeScorecard, memberShareNotice, ownShareFor, submitHoleScores,
+         teamStatsForViewer } from '../lib/db.js';
 import { notifyTeamInvite, notifyLeaguePlaced, notifyLeagueAdded } from '../lib/notify.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
 const L = globalThis.InvictusLeagues;
@@ -40,6 +41,7 @@ const L = globalThis.InvictusLeagues;
 //   POST ?action=invite-claim   (signed in)     { token } → you're on the team, or Checkout for your seat
 //   POST ?action=pay-seats      (captain)       { teamId, seats } → Checkout to cover seats for friends
 //   POST ?action=my-teams       (signed in)     the teams you play for: roster, weeks, standings
+//   POST ?action=team-stats     (signed in)     { teamId (yours), otherId } → another team's season, for the standings
 //   POST ?action=confirm        { sessionId }   the success page; the Stripe webhook does the same
 //   POST ?action=window         (optional auth) how far ahead this visitor may book
 //
@@ -98,6 +100,7 @@ export default async function handler(req, res) {
     if (action === 'member-added') return await memberAdded(req, res);
     if (action === 'submit-holes') return await submitHoles(req, res);
     if (action === 'my-teams') return await myTeams(req, res);
+    if (action === 'team-stats') return await teamStats(req, res);
     if (action === 'join') return await join(req, res);
     if (action === 'confirm') return await confirm(req, res);
     if (action === 'mine' || action === 'window') return await signedIn(req, res, action);
@@ -615,6 +618,16 @@ async function payShare(req, res) {
     cancel_url: `${origin}/account`,
   });
   return res.status(200).json({ ok: true, url: session.url, amountCents: r.owedCents });
+}
+
+// Another team's season (or your own), opened from the standings in My Account.
+async function teamStats(req, res) {
+  const me = await accountCustomerForRequest(req);
+  if (!me) return res.status(401).json({ ok: false, error: 'Sign in to see team stats.' });
+  const b = req.body || {};
+  const r = await teamStatsForViewer({ customerId: me.id, myTeamId: b.teamId, teamId: b.otherId });
+  if (r.error) return res.status(r.code || 400).json({ ok: false, error: r.error });
+  return res.status(200).json(r);
 }
 
 // A team member enters the team's 18 hole scores for a week (pending until staff confirm).

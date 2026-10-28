@@ -1763,3 +1763,28 @@ test('hole scores wait for the scoreboard photo; staff can add the photo themsel
   assert.equal(ok.code, 200, JSON.stringify(ok.out));
   assert.equal(ok.out.total, 72);
 });
+
+test('team stats: a player sees another team’s published, confirmed rounds — never its roster', async () => {
+  world();
+  const teamId = await ownTeam();
+  const rivalId = (await db.createLeagueTeam({ leagueId: 'L-team', name: 'Birdies', captainCustomerId: 'c-other' })).teamId;
+  S.db.league_results = [
+    { league_id: 'L-team', team_id: rivalId, customer_id: null, score: 70, played_on: addDays(-14) },
+    { league_id: 'L-team', team_id: rivalId, customer_id: null, score: 66, played_on: addDays(-7) },
+    { league_id: 'L-team', team_id: rivalId, customer_id: null, score: 60, played_on: addDays(-7, addDays(14)), status: 'pending' },  // not confirmed
+    { league_id: 'L-team', team_id: rivalId, customer_id: null, score: 50, played_on: addDays(14) },                                 // played early: not published yet
+  ];
+  const ask = (body, who = cap) => run(leaguesApi, { query: { action: 'team-stats' }, body, ...who });
+
+  assert.equal((await ask({ teamId, otherId: rivalId }, {})).code, 401, 'signed out');
+  assert.equal((await ask({ teamId, otherId: rivalId }, friend)).code, 403, 'not on the asking team');
+  const elsewhere = (await db.createLeagueTeam({ leagueId: 'L-free', name: 'Far Away', captainCustomerId: 'c-other' })).teamId;
+  assert.equal((await ask({ teamId, otherId: elsewhere })).code, 404, 'a team in another league');
+
+  const r = await ask({ teamId, otherId: rivalId });
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.team.name, 'Birdies');
+  assert.deepEqual(r.out.rounds.map((x) => x.strokes), [70, 66], 'only confirmed rounds from weeks that have started');
+  assert.deepEqual([r.out.summary.played, r.out.summary.best, r.out.summary.average], [2, 66, 68]);
+  assert.ok(!JSON.stringify(r.out).includes('Lee'), 'no player names');
+});

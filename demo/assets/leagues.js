@@ -570,9 +570,13 @@
     return list.length === HOLES && list.every((n) => Number.isInteger(n) && n >= 1 && n <= 20) ? list : null;
   }
   // The par for each hole of the week weekStart, from the schedule row that covers it.
-  function parsFor(league, weekStart) {
+  // The schedule row (course, location, phase, event, note, pars) covering a league week, or null.
+  function scheduleFor(league, weekStart) {
     const rows = league && league.details && Array.isArray(league.details.schedule) ? league.details.schedule : [];
-    const row = rows.find((r) => r && r.from && weekIn(league, r.from) <= weekStart && weekIn(league, r.to || r.from) >= weekStart);
+    return rows.find((r) => r && r.from && weekIn(league, r.from) <= weekStart && weekIn(league, r.to || r.from) >= weekStart) || null;
+  }
+  function parsFor(league, weekStart) {
+    const row = scheduleFor(league, weekStart);
     return (row && normalizePars(row.pars)) || null;
   }
   const HOLE_KINDS = ['eagles', 'birdies', 'pars', 'bogeys', 'doubles'];
@@ -601,5 +605,5 @@
     seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
     weekIn, weekStartOf, rulesText, roundWeek, leagueDates, rosterLocked, inPlayoffs, roundTarget,
     normalizeStages, stagedStandings, QUAL_POINTS,
-    HOLES, normalizePars, normalizeHoles, parsFor, holeStats, HOLE_KINDS };
+    HOLES, normalizePars, normalizeHoles, parsFor, scheduleFor, holeStats, HOLE_KINDS };
 })(typeof window !== 'undefined' ? window : globalThis);

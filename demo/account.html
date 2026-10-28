@@ -181,6 +181,32 @@
   .stand-box .tbl-wrap{overflow:visible}
   .stand-box .lg-table th{position:sticky;top:0;z-index:1;background:var(--surface)}
   .lg-main .sched{max-height:440px}
+  .sec-hint{font-family:'Raleway';font-weight:500;font-size:12.5px;color:var(--dim)}
+  .stand-box tr[data-team]:not([data-team=""]){cursor:pointer}
+  .stand-box tr[data-team]:not([data-team=""]):hover td{background:rgba(240,82,61,.05)}
+  .stand-box tr[data-team]:focus-visible{outline:2px solid var(--orange);outline-offset:-2px}
+  .sched-row[data-week]{cursor:pointer}
+  .sched-row[data-week]:hover{background:rgba(240,82,61,.05)}
+  .sched-row[data-week]:focus-visible{outline:2px solid var(--orange);outline-offset:-2px}
+  /* This week's course: the first thing on the League tab. */
+  .course-card{border-radius:14px;padding:18px 20px;margin-bottom:12px;color:#fff;
+    background:linear-gradient(135deg,#1F3B2D 0%,#2E5A43 100%)}
+  .course-card .t-k{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.75);font-family:'Space Grotesk'}
+  .cc-name{font-family:'Space Grotesk';font-weight:700;font-size:22px;margin-top:6px;line-height:1.2}
+  .cc-loc{font-size:13.5px;color:rgba(255,255,255,.8);margin-top:2px}
+  .course-card .chip{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);color:#fff}
+  .cc-event{font-size:13px;margin-top:10px;line-height:1.5;color:rgba(255,255,255,.92)}
+  .course-card .cc-more{color:#fff;margin-top:12px;font-size:13.5px}
+  /* The pop-up for a week or a team. */
+  .lg-dlg{margin:auto;border:none;border-radius:18px;padding:0;width:min(640px,calc(100vw - 24px));max-height:calc(100vh - 40px);color:var(--white);background:var(--surface);box-shadow:0 20px 60px rgba(16,24,40,.25)}
+  .lg-dlg::backdrop{background:rgba(16,24,40,.45)}
+  .dlg-in{padding:24px 24px 22px;overflow-y:auto;max-height:calc(100vh - 40px)}
+  .dlg-x{position:sticky;top:0;float:right;border:1px solid var(--border);background:var(--surface);border-radius:10px;width:34px;height:34px;font-size:16px;cursor:pointer;color:var(--muted)}
+  .dlg-in h2{font-size:21px;margin:0 40px 4px 0}
+  .dlg-in .tiles{margin-top:12px;grid-template-columns:repeat(auto-fit,minmax(110px,1fr))}
+  .par-row{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:4px;margin-top:6px;text-align:center;font-size:12.5px}
+  .par-row div{background:var(--near-black);border:1px solid var(--border);border-radius:8px;padding:5px 0}
+  .par-row small{display:block;color:var(--dim);font-size:10px}
   .bk-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
   .bk-cols .sec-title{margin-top:0}
   @media(max-width:880px){ .lg-grid,.bk-cols{grid-template-columns:minmax(0,1fr)} .acct-head{padding:20px} .ah-book{flex:1} }
@@ -947,7 +973,7 @@ function teamCard(t, idx, opts){
     // Once a round has been played (or is today), anyone on the team can add its scoreboard photo.
     const photo = (w.round && w.round.booking_date && w.round.booking_date <= today && team.id)
       ? `<span class="sc-ctl" data-week="${esc(w.start)}"><button type="button" class="sc-btn">Add scoreboard photo</button><input type="file" class="sc-file" accept="image/*" capture="environment" hidden /><span class="sc-state" aria-live="polite"></span></span>` : '';
-    return `<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}">
+    return `<div class="sched-row${w.current ? ' is-current' : ''}${w.missed ? ' is-missed' : ''}" data-week="${esc(w.start)}" role="button" tabindex="0" aria-label="Week ${w.number}: details">
       <span class="sd-n">${w.number}</span>
       <span class="sd-date">${esc(shortDate(w.start))} – ${esc(shortDate(w.end))}</span>
       <span class="sd-what">${what}${photo}</span></div>`;
@@ -970,7 +996,7 @@ function teamCard(t, idx, opts){
       <div class="sub" style="margin:2px 0 6px">Each week teams are placed by strokes, lowest first: 1st 100 points, 2nd 98, and down from there. ${q.closed ? 'The qualifiers are over.' : 'A missed week can be caught up until the qualifiers close; after that it scores last place.'}</div>
       ${myWeeks}
       <div class="tbl-wrap"><table class="lg-table"><thead><tr><th>#</th><th>Team</th><th class="num">Played</th><th class="num">Points</th></tr></thead>
-      <tbody>${q.rows.map(r => `<tr class="${r.you?'is-you':''}"><td>${r.total ? r.rank : '—'}</td><td>${youName(r)}</td><td class="num">${r.played}</td><td class="num">${r.total}</td></tr>`).join('')}</tbody></table></div>`;
+      <tbody>${q.rows.map(r => `<tr class="${r.you?'is-you':''}" data-team="${esc(r.key||'')}" tabindex="0"><td>${r.total ? r.rank : '—'}</td><td>${youName(r)}</td><td class="num">${r.played}</td><td class="num">${r.total}</td></tr>`).join('')}</tbody></table></div>`;
     if (!sg.divisionTable) return sg.phase === 'divisions'
       ? `<div class="lg-note" style="margin:6px 0 10px">The divisions are being set. Your team’s division will show here.</div>${qualTable}` : qualTable;
     const d = sg.divisionTable;
@@ -980,11 +1006,11 @@ function teamCard(t, idx, opts){
       <div class="sub" style="margin:2px 0 6px">Final = (average of weeks ${ra}–${rb} + average of weeks ${pa}–${pb}) ÷ 2. Lowest wins.</div>
       ${earlyLate.length ? `<div class="chips" style="margin:4px 0 8px">${earlyLate.map(e => `<span class="chip">Wk ${e.week}: played early · ${e.strokes} — counts when the week starts</span>`).join('')}</div>` : ''}
       <div class="tbl-wrap"><table class="lg-table"><thead><tr><th>#</th><th>Team</th><th class="num">Wks ${ra}–${rb}</th><th class="num">Playoffs</th><th class="num">Final</th></tr></thead>
-      <tbody>${d.standings.map(r => `<tr class="${r.you?'is-you':''}"><td>${r.final == null ? '—' : r.rank}</td><td>${youName(r)}${flag(r)}</td>
+      <tbody>${d.standings.map(r => `<tr class="${r.you?'is-you':''}" data-team="${esc(r.key||'')}" tabindex="0"><td>${r.final == null ? '—' : r.rank}</td><td>${youName(r)}${flag(r)}</td>
         <td class="num">${val(r.rankingAvg)}</td><td class="num">${val(r.playoffAvg)}</td><td class="num">${val(r.final)}</td></tr>`).join('')}</tbody></table></div>
       ${d.dnf.length ? `<div class="team-h">Did not finish</div><div class="chips">${d.dnf.map(r => `<span class="chip${r.you?' is-you':''}">${esc(r.name)}</span>`).join('')}</div>` : ''}
       <div class="team-h">Playoff seeding · weeks ${ra}–${rb}</div>
-      <div class="tbl-wrap"><table class="lg-table"><tbody>${d.seeding.map(r => `<tr class="${r.you?'is-you':''}"><td>${r.rankingAvg == null ? '—' : r.rank}</td><td>${youName(r)}</td><td class="num">${val(r.rankingAvg)}</td></tr>`).join('')}</tbody></table></div>`;
+      <div class="tbl-wrap"><table class="lg-table"><tbody>${d.seeding.map(r => `<tr class="${r.you?'is-you':''}" data-team="${esc(r.key||'')}" tabindex="0"><td>${r.rankingAvg == null ? '—' : r.rank}</td><td>${youName(r)}</td><td class="num">${val(r.rankingAvg)}</td></tr>`).join('')}</tbody></table></div>`;
   })();
   // Hole-by-hole scores (0047): a scorecard per week the team has played, then the league's stat leaders.
   const hs = t.holes || null;
@@ -1019,7 +1045,7 @@ function teamCard(t, idx, opts){
   const table = sg ? stagedTable : standings.some(r => r.played) ? `<div class="tbl-wrap"><table class="lg-table">
       <thead><tr><th>#</th><th>${by}</th><th class="num">Played</th><th class="num">${strokes ? 'Average' : 'Points'}</th><th class="num">Best</th></tr></thead>
       <tbody>${standings.map(r => { const you = r.you || r.key === team.id;
-        return `<tr class="${you?'is-you':''}"><td>${r.played ? r.rank : '—'}</td><td>${esc(r.name)}${you?' <span style="color:var(--dim)">(your team)</span>':''}</td>
+        return `<tr class="${you?'is-you':''}" data-team="${esc(r.key||'')}" tabindex="0"><td>${r.played ? r.rank : '—'}</td><td>${esc(r.name)}${you?' <span style="color:var(--dim)">(your team)</span>':''}</td>
         <td class="num">${r.played}</td><td class="num">${r.played ? (strokes ? r.average : r.total) : '—'}</td><td class="num">${r.best == null ? '—' : r.best}</td></tr>`; }).join('')}</tbody></table></div>`
     : '<div class="empty" style="padding:10px 0">No results yet — the table fills in once the shop enters the first scores.</div>';
 
@@ -1108,6 +1134,26 @@ function teamCard(t, idx, opts){
   ];
 
   const inviteHTML = iAmSub ? '' : (locked && iAmCaptain !== false ? '' : invite);
+  // What the week details and team stats need once the card is on screen (wireTeams).
+  TEAM_CTX[idx] = { lg, team, weeks, today, bayName, hhmm, shortDate, dayName, nextRound, kd };
+  // This week's course, up top: the week the team's next round counts for (a make-up plays the
+  // missed week's course), this week's otherwise, and week 1 before the season starts.
+  const target = (nextRound.ok && nextRound.week) || cur || (weeks.length && today < weeks[0].start ? weeks[0] : null);
+  const courseCard = target ? (() => {
+    const row = L.scheduleFor(lg, target.start) || {}, pars = L.parsFor(lg, target.start);
+    const head = target === weeks[0] && today < weeks[0].start ? `First up · week ${target.number}`
+      : (cur && target.start !== cur.start) ? `Your next round · week ${target.number} (${target.start < cur.start ? 'make-up' : 'early'})`
+      : `This week's course · week ${target.number}`;
+    const bits = String(row.phase || '').split('·').map(x => x.trim()).filter(Boolean);
+    return `<div class="course-card" data-week="${esc(target.start)}">
+      <div class="t-k">${esc(head)} · ${esc(shortDate(target.start))} – ${esc(shortDate(target.end))}</div>
+      <div class="cc-name">${esc(row.course || (target.catchup ? 'Catch-up week' : 'Course to be announced'))}</div>
+      ${row.location ? `<div class="cc-loc">${esc(row.location)}</div>` : ''}
+      ${bits.length || pars ? `<div class="chips" style="margin-top:8px">${bits.map(b => `<span class="chip">${esc(b)}</span>`).join('')}${pars ? `<span class="chip">Par ${pars.reduce((a, b) => a + b, 0)}</span>` : ''}</div>` : ''}
+      ${row.event ? `<div class="cc-event"><b>${esc(row.event)}</b>${row.note ? ' — ' + esc(row.note) : ''}</div>` : row.note ? `<div class="cc-event">${esc(row.note)}</div>` : ''}
+      <button type="button" class="linkish cc-more" data-week="${esc(target.start)}">Everything about week ${target.number} →</button>
+    </div>`;
+  })() : '';
   // Money owed sits in the side column, which on a phone is far down: say so at the top too.
   const owedNote = !st ? '' : st.myShareCents
     ? `<div class="lg-note is-owed" style="margin-top:10px"><b>Your share of ${money(st.myShareCents)} isn’t paid yet.</b> <a href="#seats-${idx}" style="color:var(--orange);font-weight:700">Pay it now →</a></div>`
@@ -1120,12 +1166,13 @@ function teamCard(t, idx, opts){
     </div>
     <div class="lg-grid">
       <div class="lg-main">
+        ${courseCard}
         ${iAmSub ? '<div class="lg-note">You are a <b>substitute</b> for this team: you fill in when a teammate is away. The team’s players book the weekly round.</div>' : now}
         ${owedNote}
         ${ruleNotes}
-        <div class="sec-title">Standings</div>
+        <div class="sec-title">Standings <span class="sec-hint">· tap a team for its stats</span></div>
         <div class="stand-box">${table}</div>
-        <div class="sec-title">Week by week</div>
+        <div class="sec-title">Week by week <span class="sec-hint">· tap a week for its details</span></div>
         ${weeks.length ? `<div class="sched">${weekRows}</div>${weeks.length > 8 ? `<div class="sched-more">All ${weeks.length} weeks are listed — scroll inside the box for the rest.</div>` : ''}`
           : '<div class="empty" style="padding:8px 0">The shop has not set this season\'s dates yet.</div>'}
         ${holesBlock}
@@ -1139,6 +1186,68 @@ function teamCard(t, idx, opts){
       </aside>
     </div>
   </div>`;
+}
+
+// ---------- The pop-ups: a week of the season, and a team's stats ----------
+const TEAM_CTX = {};
+function openDialog(html){
+  let d = document.getElementById('lg-dlg');
+  if(!d){ d = document.createElement('dialog'); d.id = 'lg-dlg'; d.className = 'lg-dlg'; document.body.appendChild(d);
+    d.addEventListener('click', e => { if(e.target === d) d.close(); }); }
+  d.innerHTML = `<div class="dlg-in"><button type="button" class="dlg-x" aria-label="Close">✕</button>${html}</div>`;
+  d.querySelector('.dlg-x').onclick = () => d.close();
+  if(!d.open) d.showModal();
+  return d;
+}
+function weekDetails(ctx, start){
+  const L = window.InvictusLeagues, { lg, weeks, today, bayName, hhmm, shortDate, dayName, kd } = ctx;
+  const w = weeks.find(x => x.start === start); if(!w) return;
+  const row = L.scheduleFor(lg, w.start) || {}, pars = L.parsFor(lg, w.start);
+  const bits = String(row.phase || '').split('·').map(x => x.trim()).filter(Boolean);
+  const r = w.round;
+  const madeUp = r && r.booking_date && L.weekIn(lg, r.booking_date) !== w.start;
+  const status = r
+    ? `<b>${r.booking_date <= today ? 'Played' : 'Booked'}:</b> ${esc(fmtDate(r.booking_date))}${r.start_min != null ? ' · ' + esc(hhmm(r.start_min)) + '–' + esc(hhmm(r.end_min)) : ''} · ${esc(bayName(r.bay_id))}${madeUp ? ` (${r.booking_date < w.start ? 'played early' : 'a make-up'})` : ''}${w.score != null ? `<br><b>Score:</b> ${esc(w.score)}` : ''}`
+    : w.catchup ? 'A catch-up week: there is no course of its own. A round played this week counts for the earliest week your team missed — and if you have not missed any, there is nothing to play.'
+    : w.off ? 'A break: no round is needed this week, and nothing counts as missed.'
+    : w.missed ? `Your team did not play this week. ${kd.qualifiersEnd && w.end <= kd.qualifiersEnd ? `Qualifier weeks can be made up until ${esc(fmtDate(kd.qualifiersEnd))}; after that a missed one scores last place.` : 'The next league round you book counts for it.'}`
+    : w.current ? `Not booked yet. You have until ${esc(dayName(w.end))} ${esc(shortDate(w.end))}.`
+    : 'Still to come.';
+  const canBook = !r && !w.off && (w.current || w.missed) && (!kd.qualifiersEnd || !(today > kd.qualifiersEnd && w.end <= kd.qualifiersEnd));
+  openDialog(`<h2>Week ${w.number}</h2>
+    <div class="sub" style="margin:0">${esc(fmtDate(w.start))} – ${esc(fmtDate(w.end))}</div>
+    ${row.course ? `<div class="sec-title">Course</div><div style="font-family:'Space Grotesk';font-weight:700;font-size:17px">${esc(row.course)}</div>${row.location ? `<div class="sub" style="margin:2px 0 0">${esc(row.location)}</div>` : ''}` : ''}
+    ${bits.length ? `<div class="chips" style="margin-top:10px">${bits.map(b => `<span class="chip">${esc(b)}</span>`).join('')}</div>` : ''}
+    ${row.event ? `<div class="sec-title">Event</div><div><b>${esc(row.event)}</b></div>` : ''}
+    ${row.note ? `<div class="lg-note" style="margin-top:10px">${esc(row.note)}</div>` : ''}
+    ${pars ? `<div class="sec-title">Par ${pars.reduce((a, b) => a + b, 0)}</div><div class="par-row">${pars.map((p, i) => `<div><small>${i + 1}</small>${p}</div>`).join('')}</div>` : ''}
+    <div class="sec-title">Your team</div><div class="lg-note">${status}</div>
+    ${canBook ? '<a class="btn btn-primary" href="/?league-round=1">Book a league round</a>' : ''}`);
+}
+async function teamStats(ctx, otherId){
+  const L = window.InvictusLeagues;
+  const d = openDialog('<div class="spin">Loading…</div>');
+  const r = await leaguesPost('team-stats', { teamId: ctx.team.id, otherId });
+  if(!d.open) return;
+  if(!r.ok){ openDialog(`<h2>Team stats</h2><div class="err">${esc(r.error || 'Could not load that team. Try again.')}</div>`); return; }
+  const sm = r.summary, num = v => v == null ? '—' : esc(v);
+  const tile = (k, v, s) => `<div class="tile"><div class="t-k">${k}</div><div class="t-v">${v}</div>${s ? `<div class="t-s">${s}</div>` : ''}</div>`;
+  const hs = r.holes;
+  openDialog(`<h2>${esc(r.team.name)}${r.team.you ? ' <span class="pill ok">Your team</span>' : ''}</h2>
+    <div class="sub" style="margin:0">${r.team.division ? `Division ${r.team.division}` : 'This season so far'}</div>
+    <div class="tiles">
+      ${r.qualifiers ? tile('Qualifiers', r.qualifiers.points ? L.ordinal(r.qualifiers.rank) : '—', `${r.qualifiers.points} pts`) : ''}
+      ${r.divisionRow ? tile(`Division ${r.team.division}`, r.divisionRow.final != null ? L.ordinal(r.divisionRow.rank) : '—', r.divisionRow.final != null ? `final ${r.divisionRow.final}` : 'no final yet') : ''}
+      ${r.standing ? tile('Place', r.standing.played ? L.ordinal(r.standing.rank) : '—', '') : ''}
+      ${tile('Rounds', sm.played, '')}
+      ${tile('Average', num(sm.average), 'strokes')}
+      ${tile('Best', num(sm.best), 'strokes')}
+    </div>
+    <div class="sec-title">Week by week</div>
+    ${r.rounds.length ? `<div class="tbl-wrap"><table class="lg-table"><thead><tr><th>Wk</th><th>Course</th><th class="num">Strokes</th>${r.qualifiers ? '<th class="num">Place</th><th class="num">Pts</th>' : ''}</tr></thead><tbody>${
+      r.rounds.map(x => `<tr><td>${x.week || '—'}</td><td>${esc(x.course || '—')}</td><td class="num">${num(x.strokes)}</td>${r.qualifiers ? `<td class="num">${x.place ? L.ordinal(x.place) : '—'}</td><td class="num">${x.points != null ? x.points : '—'}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">No scores yet.</div>'}
+    ${hs && hs.rounds ? `<div class="sec-title">Hole stats</div><div class="tiles">${tile('Eagles+', hs.eagles)}${tile('Birdies', hs.birdies)}${tile('Pars', hs.pars)}${tile('Bogeys', hs.bogeys)}${tile('Doubles+', hs.doubles)}</div>` : ''}`);
 }
 
 // A phone photo is several megabytes; the scoreboard is readable at a fraction of that. Shrunk
@@ -1197,6 +1306,13 @@ function wireScorecards(){
 // The captain's invite control: a phone number in, a single-use link out.
 function wireTeams(teams){
   wireScorecards();
+  // Weeks and standings open their pop-ups (click, or Enter / Space on the focused row).
+  document.querySelectorAll('[data-team-card]').forEach(card => {
+    const ctx = TEAM_CTX[card.dataset.teamCard]; if(!ctx) return;
+    const act = (el, fn) => { el.addEventListener('click', fn); el.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); fn(); } }); };
+    card.querySelectorAll('.sched-row[data-week], .cc-more').forEach(el => act(el, () => weekDetails(ctx, el.dataset.week)));
+    card.querySelectorAll('.stand-box tr[data-team]').forEach(tr => { if(tr.dataset.team) act(tr, () => teamStats(ctx, tr.dataset.team)); });
+  });
   // Scorecards: the total adds itself up as holes are typed; submit sends all 18 for staff to confirm.
   document.querySelectorAll('[data-team-card] .hs-week').forEach(box => {
     const ins = [...box.querySelectorAll('.hs-in')]; if(!ins.length) return;
