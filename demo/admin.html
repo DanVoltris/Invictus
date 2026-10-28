@@ -453,6 +453,7 @@
   .cu-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
   .cu-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 17px;cursor:pointer;transition:.12s}
   .cu-card:hover{border-color:var(--dim)}
+  .dob3{display:grid;grid-template-columns:1.4fr 1fr 1.1fr;gap:8px}
   .cu-card .cuc-name{font-family:'Space Grotesk';font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .cu-card .cuc-contact{color:var(--muted);font-size:12.5px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .cu-card .cuc-meta{color:var(--dim);font-size:12px;margin-top:8px}
@@ -3072,6 +3073,24 @@ $('#cu-who').querySelectorAll('button').forEach(b=>{
     renderCustomers();
   };
 });
+// Date of birth as month / day / year lists (no browser date picker). dobValue → 'YYYY-MM-DD', ''
+// when left blank, or false when the three don't make a real date (31 April).
+const MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function dobPicker(id, iso){
+  const [y,m,d]=(iso||'').slice(0,10).split('-'), y0=Number(todayISO().slice(0,4));
+  const sel=(suffix,label,list,cur)=>`<select class="input" id="${id}-${suffix}" aria-label="Birth ${label.toLowerCase()}"><option value="">${label}</option>${
+    list.map(([v,t])=>`<option value="${v}" ${v===cur?'selected':''}>${t}</option>`).join('')}</select>`;
+  return `<div class="dob3">${sel('m','Month',MONTH_NAMES.map((n,i)=>[String(i+1).padStart(2,'0'),n]),m)}${
+    sel('d','Day',Array.from({length:31},(_,i)=>[String(i+1).padStart(2,'0'),i+1]),d)}${
+    sel('y','Year',Array.from({length:y0-1899},(_,i)=>[String(y0-i),y0-i]),y)}</div>`;
+}
+function dobValue(id){
+  const [m,d,y]=['m','d','y'].map(k=>($('#'+id+'-'+k)||{}).value||'');
+  if(!m && !d && !y) return '';
+  const iso=`${y}-${m}-${d}`;
+  return (m && d && y && new Date(iso+'T00:00:00Z').toISOString().slice(0,10)===iso && iso<=todayISO()) ? iso : false;
+}
+
 function openCustomer(c){
   const isNew=!c; c=c||{};
   const st=isNew?{count:0,last:null}:statsFor(c);
@@ -3079,9 +3098,14 @@ function openCustomer(c){
     <button class="sheet-close" id="x">✕</button>
     <h3>${isNew?'New customer':esc(c.name||'Customer')}</h3>
     <div class="sub">${isNew?'Add someone to your customer database.':`${st.count} booking${st.count===1?'':'s'}${st.mins?' · '+fmtHrs(st.mins)+' booked':''}${st.last?' · last '+shortDate(st.last):''}`}</div>
-    <div class="field"><label>Name</label><input class="input" id="c-name" value="${esc(c.name||'')}" placeholder="Full name" /></div>
+    <div class="grid2">
+      <div class="field"><label>First name</label><input class="input" id="c-first" value="${esc(c.first_name!=null?c.first_name:(c.name||'').split(' ')[0]||'')}" maxlength="60" placeholder="First name" /></div>
+      <div class="field"><label>Last name</label><input class="input" id="c-last" value="${esc(c.last_name!=null?c.last_name:(c.name||'').split(' ').slice(1).join(' '))}" maxlength="60" placeholder="Last name" /></div>
+    </div>
     <div class="field"><label>Email</label><input class="input" id="c-email" value="${esc(c.email||'')}" placeholder="name@email.com" /></div>
     <div class="field"><label>Phone</label><input class="input" id="c-phone" value="${esc(c.phone||'')}" placeholder="Optional" /></div>
+    <div class="field"><label for="c-dob-m">Date of birth${c.date_of_birth?` <span class="dim" style="text-transform:none;letter-spacing:0">· ${ageOf(c.date_of_birth)} years old${ageOf(c.date_of_birth)<18?' · <b>under 18</b>':''}</span>`:''}</label>${dobPicker('c-dob', c.date_of_birth)}
+      <div class="dim" style="font-size:12px;margin-top:6px">Customers can't change it once saved — staff correct it here.</div></div>
     ${isNew?'':`<div class="kv" style="margin-bottom:12px"><span class="k">Leagues</span><span>${leaguePills(c.id)||'<span class="dim">Not in a league — add players from the Leagues tab</span>'}</span></div>`}
     ${c.membership_flag?`<div class="note-flag"><span class="fbadge" data-tip="${esc(c.membership_flag)}">!</span><span>${esc(c.membership_flag)}</span></div>`:''}
     ${c.waiver_code?`<div class="kv" style="margin-bottom:12px"><span class="k">Waiver on file</span><span class="wv-code">${esc(c.waiver_code)}${c.waiver_signed_at?` <span class="dim">· signed ${shortDate(c.waiver_signed_at.slice(0,10))}</span>`:''}</span></div>`:''}
@@ -3119,13 +3143,19 @@ function openCustomer(c){
   }
   $('#c-save').onclick=async()=>{
     if(!$('#c-career').value.trim()){ toast('Enter their career — what they do for work.','err'); $('#c-career').focus(); return; }
-    const patch={ name:$('#c-name').value.trim()||null, email:$('#c-email').value.trim()||null,
+    const first=$('#c-first').value.trim(), last=$('#c-last').value.trim();
+    const dob=dobValue('c-dob');
+    if(dob===false){ toast('That date of birth isn’t a real date — check the month, day and year.','err'); return; }
+    const patch={ name:[first,last].filter(Boolean).join(' ')||null, email:$('#c-email').value.trim()||null,
       phone:$('#c-phone').value.trim()||null, notes:$('#c-notes').value.trim()||null,
       membership_flag:null };   // saving from the editor confirms the data — clears the review badge
     // Address/career (0027): sent only when the database has the columns (they came back on this
     // record) or something was typed, so saving a customer never breaks on a database without them.
     [['address','#c-address'],['career','#c-career']].forEach(([k,id])=>{
       const v=$(id).value.trim(); if(v || (k in c)) patch[k]=v||null; });
+    // First/last name and date of birth (0044): the same, only where the database has them.
+    if(isNew || 'first_name' in c){ patch.first_name=first||null; patch.last_name=last||null; }
+    if(dob || 'date_of_birth' in c) patch.date_of_birth=dob||null;
     $('#c-save').disabled=true;
     const { error } = isNew ? await sb.from('customers').insert(patch) : await sb.from('customers').update(patch).eq('id',c.id);
     $('#c-save').disabled=false;
