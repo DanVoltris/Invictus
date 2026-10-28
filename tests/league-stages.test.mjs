@@ -67,8 +67,7 @@ test('staff can book a week ahead; a customer booking never does', () => {
   assert.ok(early.ok); assert.equal(weekNo(early), 5); assert.ok(early.early);
   const normal = target([1, 2, 3], 4);
   assert.equal(weekNo(normal), 4, 'without a pick the round is this week’s');
-  const cu = target([1], 4, wk(9));
-  assert.ok(cu.ok && weekNo(cu) === 9 && !cu.extra, 'staff may book a round in a catch-up week');
+  assert.equal(target([1], 4, wk(9)).code, 'catchup_only', 'a catch-up week is never a round of its own');
   assert.equal(target([1, 2], 12, wk(3)).code, 'after_deadline', 'nor can staff reopen a closed qualifier week');
   const again = target([1, 2, 3, 4, 5], 4, wk(5));
   assert.ok(again.ok && again.extra && weekNo(again) === 5, 'staff may book a second round for a week that has one');
