@@ -36,6 +36,7 @@
   .btn-primary:disabled{background:#E4E7EC;color:#98A2B3;cursor:not-allowed}
   .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover{color:var(--white);border-color:var(--dim)}
   .err{color:var(--danger);font-size:13px;margin-top:10px;min-height:16px}
+  .dob{display:grid;grid-template-columns:1.4fr 1fr 1.1fr;gap:8px}
   .ph-hint{font-size:12px;color:var(--dim);margin:5px 0 0 2px;min-height:15px;letter-spacing:.01em}
   .ph-hint.on{color:#067647}
   .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:4px 0 4px}
@@ -157,6 +158,13 @@
   .ah-stat b{display:block;font-family:'Space Grotesk';font-size:17px;margin-top:2px}
   .ah-stat a{color:var(--orange);font-weight:700;font-size:12.5px}
   .ah-book{width:auto;margin:0;padding:13px 22px}
+  .ah-spin{display:block;text-decoration:none;color:#fff;border-radius:12px;padding:9px 16px;min-width:150px;
+    background:linear-gradient(135deg,#9A690F,#C08A2A);box-shadow:0 2px 10px rgba(154,105,15,.35);animation:ah-glow 2.4s ease-in-out infinite}
+  .ah-spin b{display:block;font-family:'Space Grotesk';font-size:16px}
+  .ah-spin span{font-size:12px;opacity:.92}
+  .ah-spin:hover{filter:brightness(1.06)}
+  @keyframes ah-glow{0%,100%{box-shadow:0 2px 10px rgba(154,105,15,.3)}50%{box-shadow:0 2px 18px rgba(154,105,15,.6)}}
+  @media (prefers-reduced-motion: reduce){ .ah-spin{animation:none} }
   .tabs{display:flex;gap:6px;margin:0 0 16px;border-bottom:1px solid var(--border);overflow-x:auto}
   .tabs button{font:inherit;font-family:'Space Grotesk';font-weight:700;font-size:15px;color:var(--muted);background:none;border:none;
     border-bottom:3px solid transparent;padding:10px 16px 11px;cursor:pointer;white-space:nowrap}
@@ -295,6 +303,27 @@ function nextUrl(){
 }
 const fmtHrs = min => (Math.round((min||0)/6)/10)+' hrs';
 const fmtDate = iso => { try { return new Date(iso+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}); } catch(e){ return iso; } };
+// Date of birth as three plain lists — month, day, year — instead of a date field, which on an
+// iPhone or Mac opens Apple's calendar picker. The hidden #id holds the date (YYYY-MM-DD) the forms
+// read, and stays empty until all three are picked and make a real date.
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function dobFields(id){
+  const y0 = Number(todayISO().slice(0,4));
+  const opts = (first, list) => `<option value="">${first}</option>` + list.map(([v,t]) => `<option value="${v}">${t}</option>`).join('');
+  return `<div class="dob" data-dob="${id}">
+    <select class="input" id="${id}-m" autocomplete="bday-month" aria-label="Birth month">${opts('Month', MONTHS.map((m,i) => [String(i+1).padStart(2,'0'), m]))}</select>
+    <select class="input" id="${id}-d" autocomplete="bday-day" aria-label="Birth day">${opts('Day', Array.from({length:31}, (_,i) => [String(i+1).padStart(2,'0'), i+1]))}</select>
+    <select class="input" id="${id}-y" autocomplete="bday-year" aria-label="Birth year">${opts('Year', Array.from({length:y0-1900+1}, (_,i) => [y0-i, y0-i]))}</select>
+    <input type="hidden" id="${id}" /></div>`;
+}
+document.addEventListener('change', e => {
+  const box = e.target.closest && e.target.closest('.dob'); if(!box) return;
+  const [m, d, y] = [...box.querySelectorAll('select')].map(x => x.value);
+  const iso = m && d && y ? `${y}-${m}-${d}` : '';
+  const real = iso && new Date(iso + 'T00:00:00Z').toISOString().slice(0,10) === iso;   // not 31 April
+  box.querySelector('input[type=hidden]').value = real ? iso : '';
+});
+
 function render(html){ $('#content').innerHTML = html; document.querySelector('.wrap').classList.remove('is-wide'); }
 /* ============================================================================
    Sign-in is: prove the phone, then use a password.
@@ -540,8 +569,8 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
       <div><label class="fld" for="n-last">Last name</label>
       <input class="input" id="n-last" type="text" autocomplete="family-name" maxlength="80" required value="${esc(splitName(name)[1])}" /></div>
     </div>
-    <label class="fld" for="n-dob" style="margin-top:14px">Date of birth</label>
-    <input class="input" id="n-dob" type="date" autocomplete="bday" min="1900-01-01" max="${todayISO()}" required />
+    <label class="fld" for="n-dob-m" style="margin-top:14px">Date of birth</label>
+    ${dobFields('n-dob')}
     <label class="fld" for="n-address" style="margin-top:14px">Address <span class="opt">(optional${CONTEST_ON ? ' — needed for Spin the Wheel' : ''})</span></label>
     <input class="input" id="n-address" type="text" maxlength="200" placeholder="Start typing your street address" aria-describedby="n-address-hint" />
     <div class="ph-hint" id="n-address-hint">Choose your address from the list as you type.</div>
@@ -569,7 +598,7 @@ function viewSignUp(knownCustomer, name, msg, note, knownEmail){
     const nm = (first + ' ' + last).trim();
     const dob = $('#n-dob').value || '';
     if(!first || !last){ setErr('#n-err','Enter your first and last name.'); $(first ? '#n-last' : '#n-first').focus(); return; }
-    if(!dob || dob > todayISO() || dob < '1900-01-01'){ setErr('#n-err','Enter your date of birth.'); $('#n-dob').focus(); return; }
+    if(!dob || dob > todayISO() || dob < '1900-01-01'){ setErr('#n-err','Enter your date of birth.'); $('#n-dob-m').focus(); return; }
     if(($('#n-address').value||'').trim() && !$('#n-address').dataset.placeId){ setErr('#n-err','Choose your address from the list as you type, or leave it blank for now.'); $('#n-address').focus(); return; }
     if($('#n-address').dataset.needsNumber && !InvictusAddress.houseNumber($('#n-address'))){ setErr('#n-err','Add your house number under the address.'); $('#n-address')._addrNum.focus(); return; }
     const email = ($('#n-email').value||'').trim().toLowerCase();
@@ -776,6 +805,7 @@ function drawProfile(c, bks, justInherited, opts){
       <div class="ah-stats">
         <div class="ah-stat"><div class="t-k">Prepaid hours</div><b>${fmtHrs(c.hours_balance_min)}</b></div>
         <div class="ah-stat"><div class="t-k">Waiver</div>${c.waiver_signed_at ? '<b style="color:var(--ok)">Signed</b>' : '<b style="color:var(--danger)">Not signed</b><a href="/waiver">Sign it now</a>'}</div>
+        <span id="ah-spin" hidden></span>
         <a class="btn btn-primary ah-book" href="/">Book a bay</a>
       </div>
     </div>
@@ -840,7 +870,7 @@ function drawProfile(c, bks, justInherited, opts){
   if(!dev) $('#o-out').onclick = signOut;
   drawDetails(c, dev, fromContest() && contestMissing(c).length > 0);
 
-  if(!dev) loadRewards();
+  if(!dev){ loadRewards(); loadSpinButton(); }
   if(ask) wireFeedback(ask, dev);
   wireTeams(teams);
 }
@@ -1526,10 +1556,10 @@ function drawDetails(c, dev, editing){
       <div><label class="fld" for="d-last">Last name</label>
       <input class="input" id="d-last" type="text" autocomplete="family-name" maxlength="80" value="${esc(c.last_name||'')}" /></div>
     </div>
-    <label class="fld" for="d-dob" style="margin-top:12px">Date of birth</label>
+    <label class="fld" for="${c.date_of_birth ? 'd-dob' : 'd-dob-m'}" style="margin-top:12px">Date of birth</label>
     ${c.date_of_birth
       ? `<input class="input" id="d-dob" type="text" readonly value="${esc(dobText)}" aria-describedby="d-dob-why" /><div class="ph-hint" id="d-dob-why">To correct your date of birth, ask our staff.</div>`
-      : `<input class="input" id="d-dob" type="date" autocomplete="bday" min="1900-01-01" max="${todayISO()}" /><div class="ph-hint">It can't be changed once saved, so check it carefully.</div>`}
+      : `${dobFields('d-dob')}<div class="ph-hint">It can't be changed once saved, so check it carefully.</div>`}
     <label class="fld" for="d-address" style="margin-top:12px">Address${CONTEST_ON ? ' <span class="opt">(needed for Spin the Wheel)</span>' : ''}</label>
     <input class="input" id="d-address" type="text" maxlength="200" value="${esc(c.address||'')}" placeholder="Start typing your street address" aria-describedby="d-address-hint" />
     <div class="ph-hint" id="d-address-hint">${esc(addrNote(c) || 'Choose your address from the list as you type.')}</div>
@@ -1538,7 +1568,7 @@ function drawDetails(c, dev, editing){
     <div class="err" id="d-err"></div>
     <div class="row2"><button class="btn btn-primary" id="d-save">Save</button><button class="btn btn-ghost" id="d-cancel">Cancel</button></div>`;
   $('#d-cancel').onclick = () => drawDetails(c, dev);
-  const firstGap = { first_name:'#d-first', last_name:'#d-last', date_of_birth:'#d-dob', address:'#d-address',
+  const firstGap = { first_name:'#d-first', last_name:'#d-last', date_of_birth:'#d-dob-m', address:'#d-address',
     address_verified:'#d-address', manitoba:'#d-address', career:'#d-career' }[missing[0]];
   if(window.InvictusAddress && !dev) InvictusAddress.attach($('#d-address'), { auth: () => ({ headers: SESSION_TOKEN ? { Authorization:'Bearer '+SESSION_TOKEN } : {} }) });
   if(!dev) supa().then(sb => sb && sb.auth.getSession()).then(r => { SESSION_TOKEN = r && r.data && r.data.session ? r.data.session.access_token : null; });
@@ -1559,7 +1589,7 @@ function drawDetails(c, dev, editing){
     // Sent only while it is still empty: once saved it belongs to staff (migration 0044's guard).
     if(!c.date_of_birth){
       const dob = $('#d-dob').value || '';
-      if(dob && (dob > todayISO() || dob < '1900-01-01')){ setErr('#d-err', 'Enter a real date of birth.'); $('#d-dob').focus(); return; }
+      if(dob && (dob > todayISO() || dob < '1900-01-01')){ setErr('#d-err', 'Enter a real date of birth.'); $('#d-dob-m').focus(); return; }
       if(dob) patch.date_of_birth = dob;
     }
     $('#d-save').disabled = true; $('#d-save').textContent = 'Saving…';
@@ -1595,6 +1625,26 @@ function drawDetails(c, dev, editing){
    POST /api/account?action=contest-rewards → { ok, rewards:[{ id, status, prize, wonAt, redeemedAt,
    returnedToPool }], minor }. Shown only once the person has won something; until then the card
    is a one-line invitation to the wheel, and nothing at all if the contest is not set up. */
+// Spin the Wheel, up in the header beside the prepaid hours: shown while a draw is running and today's
+// spin is still unused (or a prize is waiting for its question). Once they have spun it goes away
+// until tomorrow. The Rewards tab keeps its own link.
+async function loadSpinButton(){
+  const host = $('#ah-spin'); if(!host || !CONTEST_ON) return;
+  let r = null;
+  try{
+    const sb = await supa(); const { data:{ session } } = await sb.auth.getSession();
+    if(!session) return;
+    const res = await fetch('/api/account?action=contest-status', { method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+session.access_token }, body:'{}' });
+    r = await res.json();
+  }catch(e){ return; }
+  if(!r || !r.signedIn) return;
+  const claim = (r.openClaims || []).length > 0, canSpin = !!r.period && !r.nextSpinAt;
+  if(!claim && !canSpin) return;
+  host.innerHTML = `<a class="ah-spin" href="/contest">${claim ? '<b>You won!</b><span>Claim your prize →</span>' : '<b>Spin the Wheel</b><span>Your spin today is waiting →</span>'}</a>`;
+  host.hidden = false;
+}
+
 async function loadRewards(){
   const host = $('#rewards'); if(!host || !CONTEST_ON) return;
   let r = null;
