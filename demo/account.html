@@ -1380,8 +1380,6 @@ function wireTeams(teams){
     card.querySelectorAll('.sched-row[data-week], .cc-more').forEach(el => act(el, () => weekDetails(ctx, el.dataset.week)));
     card.querySelectorAll('.stand-box tr[data-team]').forEach(tr => { if(tr.dataset.team) act(tr, () => teamStats(ctx, tr.dataset.team)); });
   });
-  promptScorecard();
-  if(!SC_TIMER) SC_TIMER = setInterval(promptScorecard, 60000);
   // Scorecards: the total adds itself up as holes are typed; submit sends all 18 for staff to confirm.
   document.querySelectorAll('[data-team-card] .hs-week').forEach(box => {
     const ins = [...box.querySelectorAll('.hs-in')]; if(!ins.length) return;
@@ -1512,6 +1510,9 @@ function wireTeams(teams){
       phone.value = ''; nameEl.value = '';
     };
   });
+  // Last, once every scorecard on the page is wired: the pop-up moves one of them into itself.
+  promptScorecard();
+  if(!SC_TIMER) SC_TIMER = setInterval(promptScorecard, 60000);
 }
 
 // Name, date of birth, address and career: shown on the account, editable in place. Spin the
