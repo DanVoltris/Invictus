@@ -143,9 +143,10 @@
   // owed — how staff book a team into a week AHEAD of time (a team away that week plays it early).
   function roundTarget({ league, weeks: list = [], dateISO, pick = null }) {
     const wk = weekIn(league, dateISO);
-    // Staff who pick the week may book it on any date, even before or after the season; without a
-    // pick there is no week to count a round outside the season for.
-    if (!pick && !list.some((w) => w.start === wk)) return { ok: false, code: 'outside_season' };
+    // Staff who pick the week may book it before the season starts (a team playing early); never
+    // after it ends. Without a pick there is no week to count a round outside the season for.
+    const before = list.length > 0 && wk < list[0].start;
+    if (!list.some((w) => w.start === wk) && !(pick && before)) return { ok: false, code: 'outside_season' };
     const k = leagueDates(league);
     const late = !!k.regularEnd && dateISO > k.regularEnd;
     if (late && k.playoffsStart && dateISO < k.playoffsStart) {
@@ -153,13 +154,14 @@
     }
     // Weeks closed for good on this date: past the regular deadline, or the qualifiers' cut-off.
     const closed = (w) => (late && w.end <= k.regularEnd) || (!!k.qualifiersEnd && dateISO > k.qualifiersEnd && w.end <= k.qualifiersEnd);
+    // A picked week is staff's call (customers never pick): a catch-up week, or a week that already
+    // has a round — then this one is an extra round for it (bookings.league_extra, migration 0048).
     if (pick) {
       const w = list.find((x) => x.start === pick);
       if (!w) return { ok: false, code: 'outside_season' };
-      if (w.catchup) return { ok: false, code: 'catchup_only' };
       if (closed(w)) return { ok: false, code: 'after_deadline', regularEnd: k.regularEnd || k.qualifiersEnd, playoffsStart: k.playoffsStart };
-      if (w.round) return { ok: false, code: 'round_booked', existing: w.round, week: w, playedIn: null };
-      return { ok: true, week: w, makeup: w.start !== wk, ...(w.start > wk ? { early: true } : {}) };
+      return { ok: true, week: w, makeup: w.start !== wk, ...(w.start > wk ? { early: true } : {}),
+        ...(w.round ? { extra: true, existing: w.round } : {}) };
     }
     // In the playoffs only playoff weeks are played (nothing from before them is made up), unless
     // the league lets missed rounds be caught up into the playoffs (playoffMakeups).

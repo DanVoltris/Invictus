@@ -67,9 +67,13 @@ test('staff can book a week ahead; a customer booking never does', () => {
   assert.ok(early.ok); assert.equal(weekNo(early), 5); assert.ok(early.early);
   const normal = target([1, 2, 3], 4);
   assert.equal(weekNo(normal), 4, 'without a pick the round is this week’s');
-  assert.equal(target([1], 4, wk(9)).code, 'catchup_only', 'a catch-up week has no round of its own to play early');
+  const cu = target([1], 4, wk(9));
+  assert.ok(cu.ok && weekNo(cu) === 9 && !cu.extra, 'staff may book a round in a catch-up week');
   assert.equal(target([1, 2], 12, wk(3)).code, 'after_deadline', 'nor can staff reopen a closed qualifier week');
-  assert.equal(target([1, 2, 3, 4, 5], 4, wk(5)).code, 'round_booked', 'a week already played is not booked twice');
+  const again = target([1, 2, 3, 4, 5], 4, wk(5));
+  assert.ok(again.ok && again.extra && weekNo(again) === 5, 'staff may book a second round for a week that has one');
+  assert.ok(again.existing, 'and are told which round already holds it');
+  assert.equal(target([1, 2, 3, 4], 4).code, 'round_booked', 'without a pick a week is still never booked twice');
 });
 
 test('settings survive the manager form round-trip', () => {
@@ -175,17 +179,13 @@ test('a qualifier week with no scores entered at all is not "everyone missed it"
   assert.ok(w2.every((w) => w.pending && !w.points), 'week 2 has no scores yet: nobody gets last place for it');
 });
 
-test('staff who pick the week can book a round before or after the season', () => {
+test('staff who pick the week can book a round before the season, never after it', () => {
   const play = (dateISO, pick) => L.roundTarget({ league: WL, weeks: season([], dateISO), dateISO, pick });
   const early = play('2026-10-27', wk(1));             // the Tuesday before week 1
   assert.equal(early.ok, true);
   assert.equal(early.week.start, wk(1));
   assert.ok(early.makeup && early.early, 'counts for week 1, played early');
-  const after = play('2027-03-09', wk(18));            // the Tuesday after the last week
-  assert.equal(after.ok, true);
-  assert.equal(after.week.start, wk(18));
+  assert.equal(play('2027-03-09', wk(18)).code, 'outside_season', 'the Tuesday after the last week');
   // Without a pick there is no week for it to count for.
   assert.equal(play('2026-10-27', null).code, 'outside_season');
-  // Catch-up weeks still have no round of their own.
-  assert.equal(play('2026-10-27', wk(9)).code, 'catchup_only');
 });
