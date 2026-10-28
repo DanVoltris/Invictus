@@ -1788,3 +1788,23 @@ test('team stats: a player sees another team’s published, confirmed rounds —
   assert.deepEqual([r.out.summary.played, r.out.summary.best, r.out.summary.average], [2, 66, 68]);
   assert.ok(!JSON.stringify(r.out).includes('Lee'), 'no player names');
 });
+
+test('a team staff hid from players (0052): nobody else sees it or its scores; its own players still do', async () => {
+  world();
+  const teamId = await ownTeam();                                                        // the captain's team
+  const testId = (await db.createLeagueTeam({ leagueId: 'L-team', name: 'test', captainCustomerId: 'c-other' })).teamId;
+  S.db.league_teams.find((t) => t.id === testId).hidden = true;
+  S.db.league_results = [
+    { league_id: 'L-team', team_id: teamId, customer_id: null, score: 8, played_on: addDays(-7) },
+    { league_id: 'L-team', team_id: testId, customer_id: null, score: 99, played_on: addDays(-7) },
+  ];
+  const mine = (await run(leaguesApi, { query: { action: 'my-teams' }, ...cap })).out.teams[0];
+  assert.deepEqual(mine.standings.map((r) => r.name), ['Aces'], 'the hidden team is not in anyone else’s standings');
+  assert.equal((await run(leaguesApi, { query: { action: 'team-stats' }, body: { teamId, otherId: testId }, ...cap })).code, 404);
+
+  const theirs = (await run(leaguesApi, { query: { action: 'my-teams' }, ...other })).out.teams[0];
+  assert.deepEqual(theirs.standings.map((r) => r.name).sort(), ['Aces', 'test'], 'its own players still see it');
+
+  const list = await run(leaguesApi, { query: { action: 'list' }, ...cap });
+  assert.equal(list.out.leagues.find((l) => l.id === 'L-team').teamCount, 1, 'and it is not counted on the Leagues page');
+});

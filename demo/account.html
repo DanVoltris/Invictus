@@ -1401,7 +1401,7 @@ function wireTeams(teams){
       err.style.color = 'var(--ok)'; err.textContent = `Sent — ${r.total} for week ${r.week}. Our staff will confirm it against the scorecard.`;
       // Sent from the pop-up: close it, and offer the next round still waiting, if any.
       SC_DONE.add(card.dataset.teamId + '|' + box.dataset.week);
-      if(box.closest('#lg-dlg')) setTimeout(() => { const d = document.getElementById('lg-dlg'); if(d && d.open) d.close(); promptScorecard(); }, 1600);
+      if(box.closest('#lg-dlg')) setTimeout(() => { const d = document.getElementById('lg-dlg'); if(d && d.open) d.close(); promptScorecard(); }, 3000);   // 3 s to read the message
     };
   });
   // A staff-added player paying their own share: straight to Checkout.
