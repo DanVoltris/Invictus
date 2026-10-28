@@ -596,6 +596,17 @@
   .lo-tabs button{flex:1 1 auto}
   .link-btn{border:none;background:none;padding:0;color:var(--orange);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;text-decoration:underline}
   .link-btn:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+  /* Teams board: as many columns as fit at 360px or more — two on a laptop, four or more on a big
+     monitor, TV or projector — and nothing inside a card ever runs out of it. */
+  .tb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr));gap:16px;margin-bottom:18px;align-items:start}
+  .tb-grid .tb-team{min-width:0;overflow:hidden}
+  .tb-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .tb-name{margin:0;flex:1 1 100%;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.25}
+  .tb-head .pill{flex:none}
+  .tb-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .tb-actions .btn{flex:0 1 auto}
+  .tb-team .pill{white-space:normal;max-width:100%}
+  @media (min-width:1900px){ .tb-grid{grid-template-columns:repeat(auto-fill,minmax(400px,1fr))} }
   .tb-list{margin-top:8px}
   .tb-player{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
   .tb-player:first-child{border-top:none}
@@ -4252,12 +4263,15 @@ function leagueTeamsBoard(ctx){
     // Substitutes (0041) are listed apart and never count towards the team's size.
     const list=onCard.filter(x=>x.role!=='sub'), subs=t?onCard.filter(x=>x.role==='sub'):[];
     const cap=t&&teamCaptain(t,members), inv=t?(invites||[]).filter(i=>i.team_id===t.id):[];
+    // The name has a line of its own (it wraps, never runs out of the card); the team's buttons sit
+    // in a row of their own under it.
     return `<div class="card tb-team" data-team="${t?t.id:''}" style="margin:0">
-      <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap"><h3 class="card-h" style="margin:0;flex:1 1 110px;min-width:0;overflow-wrap:break-word">${t?esc(t.name):'Solo players'}</h3>
+      <div class="tb-head"><h3 class="card-h tb-name">${t?esc(t.name):'Solo players'}</h3>
         <span class="pill manager">${list.length}${t&&(t.seats||league.team_size)?' / '+(t.seats||league.team_size):''}</span>
-        ${t&&t.hidden?'<span class="pill warn" title="Only staff and this team’s own players see it">Hidden from players</span>':''}
-        ${edit&&t&&('hidden' in t)?`<button class="btn btn-ghost btn-sm tb-hide">${t.hidden?'Show to players':'Hide from players'}</button>`:''}
-        ${edit&&t?`<button class="btn btn-ghost btn-sm tb-rename">Rename</button><button class="btn btn-ghost btn-sm tb-del" aria-label="Delete team ${esc(t.name)}">Delete</button>`:''}</div>
+        ${t&&t.hidden?'<span class="pill warn" title="Only staff and this team’s own players see it">Hidden from players</span>':''}</div>
+      ${edit&&t?`<div class="tb-actions">
+        ${('hidden' in t)?`<button class="btn btn-ghost btn-sm tb-hide">${t.hidden?'Show to players':'Hide from players'}</button>`:''}
+        <button class="btn btn-ghost btn-sm tb-rename">Rename</button><button class="btn btn-ghost btn-sm tb-del" aria-label="Delete team ${esc(t.name)}">Delete</button></div>`:''}
       ${t?`<div class="dim" style="font-size:12.5px;margin-top:4px">Captain: ${cap?`${esc(cap.name)}${cap.phone?' · '+esc(fmtPhone(cap.phone)):''}${cap.assumed?' (assumed — nobody set)':''}`:'nobody yet'}</div>
         ${payLine(t)}${roundLine(t)}`:`<div class="dim" style="font-size:12.5px;margin-top:4px">Signed up without a team and waiting to be placed. Use each player’s team menu to put them on a team, or make a new team out of them. They are texted when placed.</div>`}
       <div class="sec-h" style="margin:14px 0 0">${t?'Roster':'Waiting for a team'}</div>
@@ -4273,7 +4287,7 @@ function leagueTeamsBoard(ctx){
     ${mig31Flag(mig31.cols && mig31.invites && mig31.rounds)}
     <div class="dim" style="font-size:12.5px;margin-bottom:10px">One captain buys the team and invites the rest by phone. Any member can book the team’s round for the week. A team can name up to 3 substitutes.</div>
     ${edit?`<div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:nowrap"><input class="input" id="tb-new" maxlength="60" placeholder="New team name" style="max-width:280px" /><button class="btn btn-primary btn-sm" id="tb-create">Add team</button></div>`:''}
-    <div class="plans-grid">${teams.map(card).join('')}${unassigned?card(null):''}</div>
+    <div class="tb-grid">${teams.map(card).join('')}${unassigned?card(null):''}</div>
     ${!teams.length?'<div class="empty">No teams yet — add the first one above.</div>':''}`;
   enhanceSelects($('#lo-body'));
   // Opening a round is only looking at it, so it is wired before the read-only bail-out below.
