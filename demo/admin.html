@@ -206,9 +206,9 @@
   .cs-trigger:hover{border-color:var(--dim)}
   .cs-trigger:hover:after{border-top-color:var(--muted)}
   .cs-pop{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:85;background:var(--surface);border:1px solid var(--border);
-    border-radius:10px;padding:5px;max-height:300px;overflow:auto;box-shadow:0 14px 36px rgba(16,24,40,.16)}
+    border-radius:10px;padding:5px;max-height:300px;overflow-y:auto;overflow-x:hidden;box-shadow:0 14px 36px rgba(16,24,40,.16)}
   .cs-pop.up{top:auto;bottom:calc(100% + 6px)}
-  .cs-opt{padding:9px 11px;border-radius:7px;cursor:pointer;font-size:14px;color:var(--muted);white-space:nowrap}
+  .cs-opt{padding:9px 11px;border-radius:7px;cursor:pointer;font-size:14px;color:var(--muted);white-space:normal;overflow-wrap:anywhere}
   .cs-opt:hover{background:var(--surface-2);color:var(--white)}
   .cs-opt.on{color:var(--white);background:rgba(240,82,61,.16)}
   .dp-trigger:hover{border-color:var(--dim)}
@@ -573,6 +573,13 @@
   .tb-list{margin-top:8px}
   .tb-player{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
   .tb-player:first-child{border-top:none}
+  /* A player's buttons wrap under their name when the column is narrow, rather than run out of the card. */
+  .tb-player{flex-wrap:wrap}
+  .tb-player > div:first-child{flex:1 1 130px;min-width:0;overflow-wrap:anywhere}
+  .tb-player > .row{flex-wrap:wrap!important;justify-content:flex-end;max-width:100%;margin-left:auto}
+  .tb-player .cs-wrap{width:auto;max-width:170px;min-width:0}
+  .tb-player .cs-trigger{min-width:0!important;text-overflow:ellipsis}
+  .tb-player .tb-move{min-width:0!important}
   /* Scorecard photos in the staff viewer. */
   .sc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:14px}
   .sc-fig{margin:0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface-2,#F3F5F8)}
@@ -8163,7 +8170,11 @@ function enhanceSelect(sel){
     const below=H-r.bottom-margin, above=r.top-margin;
     const up = below<220 && above>below;                 // flip up only when cramped below and roomier above
     pop.style.position='fixed'; pop.style.right='auto'; pop.style.bottom='auto';
-    pop.style.width=r.width+'px';
+    // As wide as its longest option — never narrower than the button, never past 320px or the screen —
+    // so a long name is not cut off and the list never scrolls sideways.
+    pop.style.width='max-content';
+    const natural=pop.getBoundingClientRect().width;
+    pop.style.width=Math.min(Math.max(r.width, natural), 320, W-2*m)+'px';
     pop.style.maxHeight=Math.max(160,Math.min(320,(up?above:below)))+'px';   // always fits inside the viewport
     pop.style.left='0px'; pop.style.top='0px';
     const base=pop.getBoundingClientRect();          // containing-block origin + real size
