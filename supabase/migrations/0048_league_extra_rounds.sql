@@ -1,4 +1,5 @@
 -- 0048 — Staff may book a second round for a league week that already has one.
+-- UNDONE by 0050: a team never plays the same week twice. Do not run this on a new database.
 -- Paste this whole file into Supabase → SQL Editor → New query → Run. Safe to re-run. Needs 0042.
 --
 -- One live round per team per week (bookings_league_round_once, migration 0031) stays the rule for

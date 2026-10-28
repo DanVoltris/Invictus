@@ -154,16 +154,16 @@
     }
     // Weeks closed for good on this date: past the regular deadline, or the qualifiers' cut-off.
     const closed = (w) => (late && w.end <= k.regularEnd) || (!!k.qualifiersEnd && dateISO > k.qualifiersEnd && w.end <= k.qualifiersEnd);
-    // A picked week is staff's call (customers never pick), even a week that already has a round —
-    // then this one is an extra round for it (bookings.league_extra, migration 0048). Never a
-    // catch-up week: a round played in one counts for the week the team missed.
+    // A picked week is staff's call (customers never pick): a team may play two weeks' rounds in one
+    // calendar week, but never the same week twice, and never a catch-up week — a round played in
+    // one counts for the week the team missed.
     if (pick) {
       const w = list.find((x) => x.start === pick);
       if (!w) return { ok: false, code: 'outside_season' };
       if (w.catchup) return { ok: false, code: 'catchup_only' };
       if (closed(w)) return { ok: false, code: 'after_deadline', regularEnd: k.regularEnd || k.qualifiersEnd, playoffsStart: k.playoffsStart };
-      return { ok: true, week: w, makeup: w.start !== wk, ...(w.start > wk ? { early: true } : {}),
-        ...(w.round ? { extra: true, existing: w.round } : {}) };
+      if (w.round) return { ok: false, code: 'round_booked', existing: w.round, week: w, playedIn: null };
+      return { ok: true, week: w, makeup: w.start !== wk, ...(w.start > wk ? { early: true } : {}) };
     }
     // In the playoffs only playoff weeks are played (nothing from before them is made up), unless
     // the league lets missed rounds be caught up into the playoffs (playoffMakeups).

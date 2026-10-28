@@ -3232,7 +3232,6 @@ async function loadLeagueIndex(){
   ]);
   LG31.rounds = !probe.error;
   LG42.makeups = !(await sb.from('bookings').select('id,league_for_week').limit(1)).error;   // …and 0042?
-  LG48.extra = !(await sb.from('bookings').select('id,league_extra').limit(1)).error;         // …and 0048?
   if(l.error || m.error) return;   // migration 0028 not applied: nobody is in a league yet
   const today=todayISO();
   const currentLeagues=(l.data||[]).filter(x=>LG().isCurrent(x,today));
@@ -3596,7 +3595,6 @@ let LG31 = { league:true, rounds:true, min:true, info:true, week:true };
 let LG41 = { subs:true };
 // Migration 0042: make-up rounds (bookings.league_for_week) and scorecard photos.
 let LG42 = { makeups:true };
-let LG48 = { extra:true };   // migration 0048: staff may book a second round for a week
 const LEAGUE_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];   // 0031 columns: on leagues (loadLeaguesTab) / on bookings (loadLeagueIndex)
 
 // The person staff ring about a team: its captain, or failing that whoever joined first.
@@ -3678,8 +3676,7 @@ async function checkLeagueRound(teamId, dateISO, ignoreBookingId, pick){
     if(tgt.existing) return { error:`${t.name} already has a round this week — ${roundText(tgt.existing)} — and no missed week to make up.`, clash:tgt.existing };
     return { error:`${dateLabel(dateISO)} is not in ${lg.name}’s season.` };
   }
-  if(tgt.extra && !LG48.extra) return { error:`${t.name} already has a round for that week — ${roundText(tgt.existing)}. To book a second one, run migration 0048 in Supabase first.`, clash:tgt.existing };
-  return { ok:true, week:tgt.week, team:t, makeup:!!tgt.makeup, early:!!tgt.early, extra:!!tgt.extra, forWeek: tgt.makeup ? tgt.week.start : null };
+  return { ok:true, week:tgt.week, team:t, makeup:!!tgt.makeup, early:!!tgt.early, forWeek: tgt.makeup ? tgt.week.start : null };
 }
 
 // One place to say no. With a clash it offers to open the round that already holds the week.
@@ -3724,9 +3721,9 @@ function leagueRoundFieldHTML(id, currentTeamId, pickWeek){
     .concat(LG_TEAMS.map(t=>`<option value="${esc(t.id)}" ${t.id===cur?'selected':''}>${esc(t.league.name)} · ${esc(t.name)}</option>`));
   // A round on a league whose season has ended still has to be removable from here.
   if(cur && !known) opts.push(`<option value="${esc(cur)}" selected>Team from a finished league</option>`);
-  // Which week it counts for: automatic (the earliest week the team owes), or a week picked by
-  // staff — early, or a second round for a week that already has one. Catch-up weeks have no round
-  // of their own: one played then counts for the week the team missed, so they are never listed.
+  // Which week it counts for: automatic (the earliest week the team owes), or a later week picked by
+  // staff — a team away that week plays it early. Catch-up weeks have no round of their own: one
+  // played then counts for the week the team missed, so they are never listed.
   const leagues=[...new Map(LG_TEAMS.map(t=>[t.league.id,t.league])).values()];
   const wkOpts=['<option value="">Automatic — the next week they owe</option>'].concat(leagues.flatMap(lg=>
     LG().weeks(lg).filter(w=>!w.catchup).map(w=>`<option value="${esc(lg.id+'|'+w.start)}" ${pickWeek&&pickWeek===w.start?'selected':''}>${leagues.length>1?esc(lg.name)+' · ':''}Week ${w.number} · ${esc(shortDate2(w.start))}–${esc(shortDate2(w.end))}</option>`)));
@@ -3736,7 +3733,7 @@ function leagueRoundFieldHTML(id, currentTeamId, pickWeek){
     <div class="dim" style="font-size:12px;margin-top:6px">Mark this as a team’s round for the week. The team pays for the bay as usual, less the league discount (${leagueOffPerHourCents()?'$'+(leagueOffPerHourCents()/100).toFixed(2)+' an hour':'none set'}). Each team plays one round a week.</div></div>
     <div class="field" id="${id}-wkf" ${cur?'':'hidden'}><label for="${id}-wk">Counts for week</label>
     <select class="input" id="${id}-wk">${wkOpts.join('')}</select>
-    <div class="dim" style="font-size:12px;margin-top:6px">Leave on automatic: a team plays a missed week first. Pick a week to let a team play it early, or play a week again.</div></div>`;
+    <div class="dim" style="font-size:12px;margin-top:6px">Leave on automatic: a team plays a missed week first. Pick a later week only to let a team play it early.</div></div>`;
 }
 // The week picked beside a league-round picker, as the week's start date — or null for automatic.
 function pickedLeagueWeek(id, teamId){
@@ -5618,9 +5615,7 @@ function openAdd(bayId,startMin,dateISO){
       if(!chk.ok){ leagueRoundRefused(chk, teamId); return; }
       row.league_team_id=teamId;   // the tag only: a league round is paid for like any booking
       if(chk.forWeek) row.league_for_week=chk.forWeek;          // a make-up (or played early): the week it counts for
-      if(chk.extra) row.league_extra=true;                      // a second round for a week that already has one
-      if(chk.extra) toast(`This is a second round for ${chk.team.name}’s week ${chk.week.number}`,'ok');
-      else if(chk.early) toast(`This is ${chk.team.name}’s week ${chk.week.number} round, played early`,'ok');
+      if(chk.early) toast(`This is ${chk.team.name}’s week ${chk.week.number} round, played early`,'ok');
       else if(chk.makeup) toast(`This is ${chk.team.name}’s make-up round for week ${chk.week.number}`,'ok');
     }
     $('#s-add').disabled=true;
@@ -6123,11 +6118,9 @@ function openManage(id){
           if(!chk.ok){ leagueRoundRefused(chk, nowTeam); return; }
           patch.league_team_id=nowTeam;                          // the tag only: what was paid stays as it is
           if(LG42.makeups) patch.league_for_week=chk.forWeek||null;   // a make-up counts for the week it missed
-          if(LG48.extra) patch.league_extra=!!chk.extra;
         } else {
           patch.league_team_id=null;                             // back to an ordinary reservation
           if(LG42.makeups) patch.league_for_week=null;
-          if(LG48.extra) patch.league_extra=false;
         }
       }
       $('#m-save').disabled=true;

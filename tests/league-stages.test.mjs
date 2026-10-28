@@ -69,10 +69,11 @@ test('staff can book a week ahead; a customer booking never does', () => {
   assert.equal(weekNo(normal), 4, 'without a pick the round is this week’s');
   assert.equal(target([1], 4, wk(9)).code, 'catchup_only', 'a catch-up week is never a round of its own');
   assert.equal(target([1, 2], 12, wk(3)).code, 'after_deadline', 'nor can staff reopen a closed qualifier week');
-  const again = target([1, 2, 3, 4, 5], 4, wk(5));
-  assert.ok(again.ok && again.extra && weekNo(again) === 5, 'staff may book a second round for a week that has one');
-  assert.ok(again.existing, 'and are told which round already holds it');
-  assert.equal(target([1, 2, 3, 4], 4).code, 'round_booked', 'without a pick a week is still never booked twice');
+  assert.equal(target([1, 2, 3, 4, 5], 4, wk(5)).code, 'round_booked', 'a week already played is not booked twice');
+  assert.equal(target([1, 2, 3, 4], 4, wk(4)).code, 'round_booked', 'nor this week’s, once played');
+  // Two weeks' rounds in one calendar week: week 4 played this week, week 5 picked for the same week.
+  const both = target([1, 2, 3, 4], 4, wk(5));
+  assert.ok(both.ok && weekNo(both) === 5 && both.early, 'week 5 may be played in week 4 too');
 });
 
 test('settings survive the manager form round-trip', () => {
