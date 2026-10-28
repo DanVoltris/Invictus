@@ -574,6 +574,7 @@
   .tb-player{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
   .tb-player:first-child{border-top:none}
   /* A player's buttons wrap under their name when the column is narrow, rather than run out of the card. */
+  .li-week [hidden]{display:none!important}
   .li-pars{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:6px}
   .li-par-cell{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--dim);font-weight:600}
   .li-par-cell .input{width:100%;padding:7px 0;text-align:center;font-size:15px}
@@ -3416,8 +3417,9 @@ function openLeagueEditor(x){
   const readWeeks=()=>[...sheet.querySelectorAll('.li-week')].map(r=>({ ...Object.fromEntries(
     ['from','to','phase','event','course','location','note'].map(k=>[k, (r.querySelector(`[data-k="${k}"]`).value||'').trim()])),
     // The 18 par boxes: nothing typed = no pars for the week; otherwise all 18 (checked on save).
-    pars: (v=>v.every(x=>x==='')?'':v)([...r.querySelectorAll('.li-par')].map(i=>i.value.trim())),
-    optional: r.querySelector('[data-k="optional"]').checked, catchup: r.querySelector('[data-k="catchup"]').checked }));
+    pars: r.querySelector('[data-k="catchup"]').checked ? '' : (v=>v.every(x=>x==='')?'':v)([...r.querySelectorAll('.li-par')].map(i=>i.value.trim())),
+    optional: !r.querySelector('[data-k="catchup"]').checked && r.querySelector('[data-k="optional"]').checked,
+    catchup: r.querySelector('[data-k="catchup"]').checked }));
   // A card's real week number(s), counted in 7-day weeks from the first card — the way the league
   // page numbers them — so a two-week card reads "Weeks 9–10" and the cards after it stay right.
   const weekNo=(w,i)=>{
@@ -3439,11 +3441,11 @@ function openLeagueEditor(x){
         <div><label>Course</label><input class="input" data-k="course" maxlength="120" value="${esc(w.course||'')}" placeholder="e.g. Deer Ridge Golf Club" /></div>
         <div><label>Location</label><input class="input" data-k="location" maxlength="120" value="${esc(w.location||'')}" placeholder="e.g. Kitchener, Ontario" /></div>
         <div class="li-week-note"><label>Notes <span class="dim">(optional)</span></label><input class="input" data-k="note" maxlength="240" value="${esc(w.note||'')}" placeholder="e.g. Sign-ups for the branded event on Nov 17th" /></div>
-        <div class="li-week-note"><label>Par for each hole <span class="dim">(for the birdie, par and bogey counts — leave all empty if you don’t have the card yet)</span></label>
+        <div class="li-week-note li-pars-wrap" ${w.catchup?'hidden':''}><label>Par for each hole <span class="dim">(for the birdie, par and bogey counts — leave all empty if you don’t have the card yet)</span></label>
           <div class="li-pars">${Array.from({length:18},(_,i)=>`<label class="li-par-cell"><span>Hole ${i+1}</span><input class="input li-par" inputmode="numeric" maxlength="1" value="${w.pars&&w.pars[i]!=null?w.pars[i]:''}" aria-label="Par for hole ${i+1}" /></label>`).join('')}</div>
           <div class="dim li-par-total" style="font-size:12px;margin-top:6px">${w.pars&&w.pars.length===18?'Course par '+w.pars.reduce((a,b)=>a+b,0):''}</div></div>
       </div>
-      <label class="row lea-switch li-week-off">
+      <label class="row lea-switch li-week-off li-opt-row" ${w.catchup?'hidden':''}>
         <span class="switch"><input type="checkbox" data-k="optional" ${w.optional?'checked':''} /><span class="track"></span></span>
         <span><b>No league play required</b><span class="dim" style="display:block;font-size:12px">A break. Teams can still play, but not playing is not a missed week and nobody is chased.</span></span></label>
       <label class="row lea-switch li-week-off">
@@ -3451,6 +3453,11 @@ function openLeagueEditor(x){
         <span><b>Catch-up weeks</b><span class="dim" style="display:block;font-size:12px">No course of its own: a round played here only makes up a week the team missed. A team that is up to date plays nothing.</span></span></label>
       </div>`).join('') || '<div class="dim" style="font-size:12.5px;margin-bottom:8px">No weeks yet.</div>';
     host.querySelectorAll('input[type="date"]').forEach(buildDatePicker);
+    // A catch-up week has no course: no par boxes, and no "no league play" switch (it is never owed anyway).
+    host.querySelectorAll('.li-week').forEach(card=>{
+      const cu=card.querySelector('[data-k="catchup"]');
+      cu.addEventListener('change',()=>card.querySelectorAll('.li-pars-wrap,.li-opt-row').forEach(el=>{ el.hidden=cu.checked; }));
+    });
     // Par boxes: one digit each, jump to the next hole, and the course par adds itself up.
     host.querySelectorAll('.li-pars').forEach(grid=>{
       const ins=[...grid.querySelectorAll('.li-par')], tot=grid.parentNode.querySelector('.li-par-total');
