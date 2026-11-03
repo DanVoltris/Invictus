@@ -4215,10 +4215,16 @@ function leagueTeamsBoard(ctx){
   const playerRow=(x,team)=>{ const isCap=team && team.captain_customer_id===x.customer_id;
     // Paid their own seat online (0036)? Players who took a seat the captain covered show nothing.
     const ownSeat=(payments||[]).some(p=>team && p.team_id===team.id && p.for_customer_id===x.customer_id);
+    // What this player paid for, all told: their own seat, or seats for the team too.
+    const mine=(payments||[]).filter(p=>team && p.team_id===team.id && p.payer_customer_id===x.customer_id);
+    const paidSeats=mine.reduce((n,p)=>n+(Number(p.seats)||0),0), paidCents=mine.reduce((n,p)=>n+(Number(p.amount_cents)||0),0);
+    const paidPill=paidSeats>1 ? `<span class="pill confirmed">Paid ${paidSeats} seats · ${esc(money(paidCents))}</span>`
+      : paidSeats===1 ? (ownSeat ? '<span class="pill confirmed">Paid own seat</span>' : `<span class="pill confirmed">Paid 1 seat · ${esc(money(paidCents))}</span>`)
+      : ownSeat ? '<span class="pill confirmed">Paid own seat</span>' : '';
     // No team yet and paid online: a solo sign-up (0041) waiting to be placed.
     const soloPaid=!team && (x.paid_cents||0)>0;
     return `<div class="tb-player" data-id="${x.id}">
-      <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}${ownSeat?' <span class="pill confirmed">Paid own seat</span>':''}${soloPaid?` <span class="pill confirmed">Paid ${esc(money(x.paid_cents))}</span>`:''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
+      <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}${paidPill?' '+paidPill:''}${soloPaid?` <span class="pill confirmed">Paid ${esc(money(x.paid_cents))}</span>`:''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
       ${edit?`<div class="row" style="gap:6px;flex-wrap:nowrap;align-items:center">
         ${team&&!ownSeat&&!soloPaid&&!(x.paid_cents>0)&&league.fee_cents>0&&x.phone?'<button class="btn btn-ghost btn-sm tb-remind" aria-label="Text '+esc(x.name)+' a reminder to pay their share">Resend text</button>':''}
         ${team&&!isCap&&mig31.cols?'<button class="btn btn-ghost btn-sm tb-cap" aria-label="Make '+esc(x.name)+' the captain">Make captain</button>':''}
@@ -7188,24 +7194,31 @@ function oweBoxHTML(b){
       Take it at the till, then mark it collected.
       ${can('money.write')?`<br /><button type="button" class="btn btn-primary btn-sm owe-collect" data-team="${esc(r.team.id)}" style="margin-top:8px">Mark collected</button>`:''}</div></div>`).join('');
 }
-function leagueCollectFlow(r, done){
+async function leagueCollectFlow(r, done){
   if(!can('money.write') || !r) return;
   const m=r.money;
+  // Who handed over the money: anyone on the team (the captain first), or "not recorded".
+  const { data:onTeam } = await sb.from('league_members').select('customer_id,role,customers(name)').eq('team_id', r.team.id).eq('status','active');
+  const capId=r.team.captain_customer_id||null;
+  const people=(onTeam||[]).filter(x=>x.customer_id && x.role!=='sub')
+    .sort((a,b)=>(b.customer_id===capId)-(a.customer_id===capId) || String((a.customers||{}).name||'').localeCompare(String((b.customers||{}).name||'')));
+  const payerOpts=people.map(x=>[x.customer_id, `${(x.customers||{}).name||'Player'}${x.customer_id===capId?' (captain)':''}`]).concat([['', 'Not recorded']]);
   promptSheet({
     title:'Mark league money collected',
     body:`<b>${esc((r.captain&&r.captain.name)||'The captain')}</b> owes <b>${esc(money(m.owedCents))}</b> for ${m.unpaidSeats} unpaid seat${m.unpaidSeats===1?'':'s'}
       on ${esc(r.team.name)} (${esc(r.league.name)}) — ${esc(money(m.shareCents))} a seat.<br /><br />
       Take the money at the till or in Toast first — this only records it. Enter fewer seats for a part payment; the rest stays flagged.`,
-    fields:[{ id:'seats', label:`Seats paid for (1 to ${m.unpaidSeats})`, type:'number', step:'1', min:'1', value:String(m.unpaidSeats) }],
+    fields:[{ id:'seats', label:`Seats paid for (1 to ${m.unpaidSeats})`, type:'number', step:'1', min:'1', value:String(m.unpaidSeats) },
+            { id:'payer', label:'Paid by', value: capId || (payerOpts[0]||[''])[0], options: payerOpts }],
     okLabel:'Record as collected',
     onOk: async v=>{
       const n=Number(v.seats);
       if(!Number.isInteger(n) || n<1 || n>m.unpaidSeats) return `Enter a whole number from 1 to ${m.unpaidSeats}.`;
       const res = DEMO_MODE
         ? await sb.from('league_seat_payments').insert({ team_id:r.team.id, league_id:r.league.id, seats:n, amount_cents:n*m.shareCents,
-            method:'counter', payer_customer_id:r.team.captain_customer_id||null, recorded_by:'demo' })
+            method:'counter', payer_customer_id:v.payer||null, recorded_by:'demo' })
             .then(({ error })=>error?{ ok:false, error:error.message }:{ ok:true, message:`Recorded ${n} seat${n===1?'':'s'} (demo — nothing saved)` })
-        : await apiPost('/api/booking-series?action=league-collect', { teamId:r.team.id, seats:n });
+        : await apiPost('/api/booking-series?action=league-collect', { teamId:r.team.id, seats:n, payerCustomerId:v.payer||'' });
       if(!res.ok) return res.error || 'That could not be recorded.';
       toast(res.message || 'Recorded','ok');
       await fetchLeagueOwed(true); renderSideNav();

@@ -262,6 +262,11 @@
   .seat-bar{display:flex;gap:4px;margin:8px 0 6px}
   .seat-bar i{flex:1;height:8px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border)}
   .seat-bar i.is-paid{background:#4ec06a;border-color:#3aa857}
+  .seat-payers{margin-top:8px;border-top:1px solid var(--border)}
+  .sp-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13.5px}
+  .sp-row:last-child{border-bottom:0}
+  .sp-what{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .sp-you{color:var(--dim)}
   .lg-note.is-owed{background:rgba(154,105,15,.08);border-color:rgba(154,105,15,.4);color:#7A520B}
   .seat-pick,.inv-role{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
   .inv-role{margin:0 0 10px}
@@ -1767,9 +1772,13 @@ function teamCard(t, idx, opts){
         You were added to ${esc(team.name || 'this team')} by our staff. Pay your share to confirm your spot — or pay at the counter.</div>
         <div class="err share-err"></div>
         <button class="btn btn-primary share-go" data-share="${st.myShareCents}" style="margin-top:8px">Pay my share — ${money(st.myShareCents)}</button>` : '';
+    // Who paid: one short line per payer, so a team can see who covered which seats.
+    const payers = (st.payers || []).length ? `<div class="seat-payers" aria-label="Who paid">${st.payers.map(p => `<div class="sp-row">
+        <span>${p.name ? esc(p.name) + (p.you ? ' <span class="sp-you">(you)</span>' : '') : 'Paid at the counter'}</span>
+        <span class="sp-what">${p.seats} seat${p.seats === 1 ? '' : 's'} · ${money(p.cents)}</span></div>`).join('')}</div>` : '';
     seatsBlock = `<div class="sec-title">Seats &amp; payments</div>
       <div class="seat-bar" aria-hidden="true">${bar}</div>
-      <div class="sub" style="margin:0">${intro}</div>${mine}${capPart}`;
+      <div class="sub" style="margin:0">${intro}</div>${payers}${mine}${capPart}`;
   }
   // Designated substitutes (0041): up to three a team. Everyone sees who they are; the captain
   // invites one from the same form as a teammate, by choosing which it is.

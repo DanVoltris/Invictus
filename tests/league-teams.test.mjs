@@ -1808,3 +1808,22 @@ test('a team staff hid from players (0052): nobody else sees it or its scores; i
   const list = await run(leaguesApi, { query: { action: 'list' }, ...cap });
   assert.equal(list.out.leagues.find((l) => l.id === 'L-team').teamCount, 1, 'and it is not counted on the Leagues page');
 });
+
+test('who paid for the seats: "Paid by" at the counter, and the list My Account shows the team', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-range', 'Trio', 3);   // the captain paid one seat online; 2 × $200 owed
+  S.db.league_members.push({ id: 'm-friend', league_id: 'L-range', team_id: teamId, customer_id: 'c-friend', status: 'active', role: 'player' });
+  const collect = (body) => run(seriesApi, { query: { action: 'league-collect' }, body, headers: { authorization: 'Bearer tok-admin' } });
+
+  const stranger = await collect({ teamId, seats: 1, payerCustomerId: 'c-other' });
+  assert.equal(stranger.code, 400, 'the payer has to be on the team');
+  assert.match(stranger.out.error, /isn’t on this team/);
+  assert.equal((await collect({ teamId, seats: 1, payerCustomerId: 'c-friend' })).code, 200);
+  assert.equal((await collect({ teamId, seats: 1, payerCustomerId: '' })).code, 200);
+  const counter = S.db.league_seat_payments.filter((p) => p.method === 'counter').map((p) => p.payer_customer_id);
+  assert.deepEqual(counter, ['c-friend', null], 'a teammate, then "not recorded"');
+
+  const t = (await run(leaguesApi, { query: { action: 'my-teams' }, ...cap })).out.teams.find((x) => x.team.id === teamId);
+  assert.deepEqual(t.seats.payers.map((p) => [p.name, p.seats, p.cents, p.you]),
+    [['Murad C.', 1, 20000, true], ['Sam O.', 1, 20000, false], [null, 1, 20000, false]]);
+});

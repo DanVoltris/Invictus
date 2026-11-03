@@ -917,7 +917,8 @@ async function placeHolds(req, res) {
 
 // ----- league-collect: staff took a captain's money for unpaid seats (migration 0036) ---------
 //
-//   POST /api/booking-series?action=league-collect   { teamId, seats, note? }   money.write
+//   POST /api/booking-series?action=league-collect   { teamId, seats, note?, payerCustomerId? }   money.write
+//   payerCustomerId: who on the team paid ('' = not recorded); left out, the captain.
 //
 // A league team is paid seat by seat, and seats nobody paid for are owed by the captain. Holds to
 // Charge lists them and the tee sheet flags the captain on the days they come in; this is the
@@ -931,6 +932,7 @@ async function leagueCollect(req, res) {
   if (!teamId || teamId.length > 64) return res.status(400).json({ ok: false, error: 'Which team? Send a teamId.' });
   const out = await recordSeatCollection({
     teamId, seats: b.seats, note: b.note || null,
+    ...('payerCustomerId' in b ? { payerCustomerId: b.payerCustomerId } : {}),
     by: (who.user && who.user.email) || (who.staff && who.staff.email) || 'manager',
   });
   if (!out.ok) return res.status(out.code || 400).json({ ok: false, error: out.error });
