@@ -40,3 +40,15 @@ test('/api/config is cached for an hour, and not when a session is sent', () => 
   config({ method: 'GET', headers: { authorization: 'Bearer x' } }, res);
   assert.equal(res.headers['cache-control'], undefined);
 });
+
+test('a day’s availability is never cached; the settings-only answer is', async () => {
+  const { availability } = await import('../api/public.js');
+  const db = await import('../lib/db.js');
+  if (!db.admin()) return;                       // no database configured here: nothing to read
+  let res = fakeRes();
+  await availability({ method: 'GET', headers: {}, query: { date: '2026-11-07' } }, res);
+  assert.equal(res.headers['cache-control'], undefined);
+  res = fakeRes();
+  await availability({ method: 'GET', headers: {}, query: {} }, res);
+  if (res.body && res.body.dbEnabled) assert.equal(res.headers['cache-control'], CACHE.settings);
+});

@@ -20,9 +20,7 @@ import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked, 
 // CDN caching (lib/cache.js): both answers are the same for every visitor.
 //   config                 env only; a deploy replaces the cache anyway        1 hour (+1 day stale)
 //   availability, no date  settings: bays, hours, rates                       60 s (+5 min stale)
-//   availability ?date=    live bookings and holds: 10 s (+20 s stale). Checkout re-checks the slot
-//                          itself, so a copy a few seconds old can never sell a taken slot, and the
-//                          booking page asks for a fresh copy after the customer's own changes.
+//   availability ?date=    never cached: live bookings and holds, read fresh on every request
 
 // Which of the two is being asked for. Normally ?action=, set by the rewrite. `forced` is how
 // server.js names the action for a path it mounts directly — Vercel only ever passes (req, res),
@@ -123,7 +121,7 @@ export async function availability(req, res) {
     }
   }
 
-  cacheable(req, res, /^\d{4}-\d{2}-\d{2}$/.test(dateISO) ? CACHE.day : CACHE.settings);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) cacheable(req, res, CACHE.settings);   // a day's bookings: always live
   res.status(200).json({
     dbEnabled: true,
     settings: {
