@@ -9,6 +9,7 @@ import { getSettings, admin, listPublicLeagues, leagueById, joinLeague, confirmL
          teamMembershipFor, saveScorecard, listScorecards, removeScorecard, memberShareNotice, ownShareFor, submitHoleScores,
          teamStatsForViewer } from '../lib/db.js';
 import { notifyTeamInvite, notifyLeaguePlaced, notifyLeagueAdded } from '../lib/notify.js';
+import { CACHE, cacheable } from '../lib/cache.js';
 // The seat maths (0036), shared with the manager portal. lib/db.js has already loaded it.
 const L = globalThis.InvictusLeagues;
 
@@ -79,6 +80,7 @@ export default async function handler(req, res) {
   const action = (req.query && req.query.action) || '';
   try {
     if (action === 'list' || (req.method === 'GET' && !action)) return await list(req, res);
+    if (action === 'info' && req.method === 'GET') return await info(req, res);   // public; cacheable
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     if (action === 'info') return await info(req, res);
     if (action === 'buy-team') return await buyTeam(req, res);
@@ -119,6 +121,7 @@ async function list(req, res) {
   const me = await accountCustomerForRequest(req);
   const r = await listTeamLeagues({ customerId: me ? me.id : null });
   if (r.error) return res.status(r.code || 503).json({ ok: false, error: r.error, leagues: [] });
+  if (!me) cacheable(req, res, CACHE.settings);   // signed out: the same list for everyone
   return res.status(200).json({ ok: true, leagues: r.leagues });
 }
 
@@ -128,6 +131,7 @@ async function list(req, res) {
 async function info(req, res) {
   const league = await teamLeagueById(String((req.body || {}).leagueId || (req.query || {}).leagueId || ''));
   if (!league || league.is_active === false) return res.status(404).json({ ok: false, error: 'That league is not on the site right now.' });
+  cacheable(req, res, CACHE.settings);            // nothing in it depends on who is asking
   return res.status(200).json({ ok: true, league: {
     id: league.id, name: league.name, description: league.description || null,
     fee_cents: league.fee_cents || 0, team_size: league.team_size ?? null, team_min: league.team_min ?? null,

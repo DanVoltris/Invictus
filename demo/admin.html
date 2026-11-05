@@ -7002,8 +7002,30 @@ function adjustHoldFlow(b, done){
 
 // The auto-release rule (lib/holds.js releaseOverdueHolds): a hold still open 5 hours after its
 // session ended is let go. The server decides; this only asks it to look, from the 2-minute refresh.
+// It asks only when there is one to let go: the portal reads the same rows the server would
+// (lib/db.js openHoldsUpTo) and applies the same 5-hour rule first, so a quiet tick costs one
+// database read instead of a server call. If that read fails, it asks the server as before.
+const AUTO_RELEASE_HOURS=5;
+function hoursSinceSessionEnd(dateISO, endMin, now=new Date()){        // lib/booking.js hoursUntilBooking, negated
+  const p=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Winnipeg',year:'numeric',month:'2-digit',
+    day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(now).map(x=>[x.type,x.value]));
+  const nowMs=Date.UTC(+p.year, +p.month-1, +p.day, +(p.hour==='24'?0:p.hour), +p.minute);
+  const [y,mo,d]=String(dateISO).slice(0,10).split('-').map(Number);
+  return (nowMs-Date.UTC(y, mo-1, d, Math.floor(endMin/60), endMin%60))/3600000;
+}
+async function anyHoldOverdue(){
+  try{
+    const r=await sb.from('bookings').select('booking_date,end_min')
+      .in(HOLD_COLS.state,['held','card_saved','hold_failed']).lte('booking_date', todayISO())
+      .order('booking_date',{ ascending:true }).limit(200);
+    if(r.error) return true;
+    return (r.data||[]).some(b=>Number.isFinite(Number(b.end_min)) && b.booking_date
+      && hoursSinceSessionEnd(b.booking_date, Number(b.end_min))>=AUTO_RELEASE_HOURS);
+  }catch(e){ return true; }
+}
 async function releaseOverdueHolds(){
   if(DEMO_MODE || !sb || !ME || !ME.role) return 0;
+  if(!(await anyHoldOverdue())) return 0;
   const r=await apiPost('/api/booking-series?action=release-overdue', {});
   return (r && r.ok && r.released) || 0;
 }

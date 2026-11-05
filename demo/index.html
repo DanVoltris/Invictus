@@ -913,6 +913,12 @@ async function loadBookingWindow(){
     try{ const r = await fetch('/api/dev/window'); if(r.ok) j = await r.json(); }catch(e){}
     if(j && j.ok) BOOK_WINDOW.devPhone = j.phone || null;
   }
+  // Signed out: the answer is the venue's regular window, which the settings already carry —
+  // so there is nothing to ask the server. Signed in (or an older server without it): ask.
+  if(!(j && j.ok) && !BOOK_WINDOW.token){
+    const d = await settingsOnce(), w = d && d.settings && d.settings.bookingWindow;
+    if(w && Number.isFinite(w.regularDays)) j = { ok:true, league:false, signedIn:false, days:w.regularDays, regularDays:w.regularDays, leagueDays:w.leagueDays };
+  }
   if(!(j && j.ok)){
     try{ j = await (await fetch('/api/leagues?action=window', { method:'POST', headers:{ 'Content-Type':'application/json', ...authHeaders() } })).json(); }catch(e){}
   }
@@ -977,19 +983,25 @@ function startBookable(date, bayId, startMin){
 }
 
 /* ---------- Live availability (settings + real bookings) ---------- */
+// The settings, asked for once per page: loadSettings and loadBookingWindow share the one request.
+let SETTINGS_REQ = null;
+function settingsOnce(){
+  if(!SETTINGS_REQ) SETTINGS_REQ = fetch('/api/availability').then(r => r.ok ? r.json() : null).catch(() => null);
+  return SETTINGS_REQ;
+}
 async function loadSettings(){
   try{
-    const r = await fetch('/api/availability');
-    if(!r.ok) return;
-    const d = await r.json();
-    if(d.dbEnabled && d.settings){ DB = true; applySettings(d.settings); renderAll(); }
+    const d = await settingsOnce();
+    if(d && d.dbEnabled && d.settings){ DB = true; applySettings(d.settings); renderAll(); }
   }catch(e){}
 }
-async function loadAvailability(){
+// A day's bookings. Opening a day may be answered from the CDN's copy (seconds old at most); after
+// the customer's own change ({ fresh:true }) the page asks for a copy made just now.
+async function loadAvailability({ fresh = false } = {}){
   if(!state.date) return;
   if(!DB){ return; }            // fallback mode — deterministic, nothing to fetch
   try{
-    const r = await fetch('/api/availability?date='+isoDate(state.date));
+    const r = await fetch('/api/availability?date='+isoDate(state.date) + (fresh ? '&fresh='+Date.now() : ''));
     if(!r.ok) return;
     const d = await r.json();
     if(d.dbEnabled){ applySettings(d.settings); bookedRanges = d.booked || {}; closedRanges = d.closed || {}; heldRanges = d.held || {}; dateHoursOverride = d.dateHours || null;
@@ -1678,7 +1690,7 @@ async function releaseHeldSlot(){
 async function onHoldExpired(){
   HELD=null; holdActive=false; stopHoldTimer(); piCache=null; elements=null;
   $('#pay-overlay').classList.remove('show'); setStep(2);
-  await loadAvailability(); renderAll();
+  await loadAvailability({ fresh:true }); renderAll();
   toast('Your hold expired and the slot was released — please pick a time again.');
 }
 function toast(msg){
@@ -1741,7 +1753,7 @@ async function mountStripe(){
   try{
     data=(piCache && piCache.key===bookingKey()) ? piCache : await createPI();
   }catch(err){
-    if(err.taken){ stopHoldTimer(); $('#pay-overlay').classList.remove('show'); setStep(2); await loadAvailability(); renderAll(); toast(err.message); return; }
+    if(err.taken){ stopHoldTimer(); $('#pay-overlay').classList.remove('show'); setStep(2); await loadAvailability({ fresh:true }); renderAll(); toast(err.message); return; }
     // Not a league round after all: say why, and price it again as an ordinary session.
     if(err.league && LG.armed){
       LG.armed=null; LG.note=err.message; piCache=null;
@@ -1820,7 +1832,7 @@ function closePayment(){
   const lgh=$('#league-round'); if(lgh) lgh.innerHTML='';
   $('#pay-overlay').classList.remove('show');
   setStep(2);
-  loadAvailability().then(renderAll);   // reflect the released slot
+  loadAvailability({ fresh:true }).then(renderAll);   // reflect the released slot
 }
 $('#pay-cancel').onclick=closePayment;
 $('#pay-close').onclick=closePayment;
@@ -2540,7 +2552,7 @@ async function openWaitlistSlot(){
   const [y,m,day]=d.split('-').map(Number);
   state.date=new Date(y,m-1,day); state.calMonth=new Date(y,m-1,1);
   clearSelection(); bookedRanges={}; closedRanges={}; heldRanges={};
-  await loadAvailability();
+  await loadAvailability({ fresh:true });
   if(!CONFIG.bays.some(b=>b.id===bay) || !endOptions(state.date, bay, start).includes(end)){
     renderAll(); notice('That waiting-list slot is no longer free. Pick another time, or call us.'); return;
   }

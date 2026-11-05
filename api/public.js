@@ -1,4 +1,5 @@
 import { getSettings, getBookingsForDate, getOverridesForDate, cleanupExpiredHolds } from '../lib/db.js';
+import { CACHE, cacheable } from '../lib/cache.js';
 import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked, taxPctOf, holdChangesEnabled, contestEnabled } from '../lib/booking.js';
 
 // The two anonymous reads every visitor makes before they can do anything — what this install is
@@ -15,6 +16,13 @@ import { stripeStatus, normalizeSettings, overrideEffects, weeklyStatusBlocked, 
 // THE OLD URLS ARE UNCHANGED. /api/config and /api/availability still work: vercel.json rewrites
 // each onto this file with the right ?action=, and server.js mounts the same two paths on the same
 // dispatcher below. No page in demo/ was edited.
+
+// CDN caching (lib/cache.js): both answers are the same for every visitor.
+//   config                 env only; a deploy replaces the cache anyway        1 hour (+1 day stale)
+//   availability, no date  settings: bays, hours, rates                       60 s (+5 min stale)
+//   availability ?date=    live bookings and holds: 10 s (+20 s stale). Checkout re-checks the slot
+//                          itself, so a copy a few seconds old can never sell a taken slot, and the
+//                          booking page asks for a fresh copy after the customer's own changes.
 
 // Which of the two is being asked for. Normally ?action=, set by the rewrite. `forced` is how
 // server.js names the action for a path it mounts directly — Vercel only ever passes (req, res),
@@ -43,6 +51,7 @@ export function config(req, res) {
   const url = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
   const dbEnabled = Boolean(url && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  cacheable(req, res, CACHE.config);
   res.status(200).json({
     stripeEnabled: enabled,
     publishableKey: enabled ? publishableKey : null,
@@ -114,6 +123,7 @@ export async function availability(req, res) {
     }
   }
 
+  cacheable(req, res, /^\d{4}-\d{2}-\d{2}$/.test(dateISO) ? CACHE.day : CACHE.settings);
   res.status(200).json({
     dbEnabled: true,
     settings: {
@@ -126,6 +136,9 @@ export async function availability(req, res) {
       rates: settings.rates,
       bayRates: settings.bayRates,
       taxPct: taxPctOf(settings),     // so the page can show the tax the card will be charged
+      // How far ahead a visitor may book. The booking page uses this for signed-out visitors
+      // instead of asking /api/leagues?action=window, whose answer for them is exactly this.
+      bookingWindow: { regularDays: settings.bookingWindow.regularDays, leagueDays: settings.bookingWindow.leagueDays },
     },
     dateHours,
     nextDateHours,   // the next date's hours: its early morning is on this page (0038)

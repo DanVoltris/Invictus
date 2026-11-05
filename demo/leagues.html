@@ -276,9 +276,18 @@ const signInHref = back => '/account?next=' + encodeURIComponent(back);
       my-teams      (signed in)  → { ok, teams:[…] }
     A 404 means the action is not deployed yet; 401/403 means "not signed in". Both get words, never
     a blank screen. */
+// The public reads (the list for a signed-out visitor, a league's brochure) go as a plain GET with
+// no session, so the CDN can answer them; everything else is a POST with the session, as before.
+function publicGet(action, body){
+  if(action==='info') return true;
+  return action==='list' && !accountToken() && !IS_LOCAL;
+}
 async function leaguesApi(action, body){
   let r;
-  try{ r = await fetch('/api/leagues?action='+action, { method:'POST', headers:authHeaders(), body:JSON.stringify(body||{}) }); }
+  const get = publicGet(action, body);
+  const q = get && body && body.leagueId ? '&leagueId='+encodeURIComponent(body.leagueId) : '';
+  try{ r = get ? await fetch('/api/leagues?action='+action+q)
+               : await fetch('/api/leagues?action='+action, { method:'POST', headers:authHeaders(), body:JSON.stringify(body||{}) }); }
   catch(e){ return { status:0, ok:false, error:'Could not reach the server. Check your connection and try again.' }; }
   let j = {};
   try{ j = await r.json(); }catch(e){}
@@ -291,6 +300,8 @@ let MY_TEAMS = null;
 let SIGNED_IN = !!accountToken();
 
 async function loadMyTeams(){
+  // No saved session: the server's answer would be "sign in" (401), so don't ask it.
+  if(!accountToken() && !IS_LOCAL){ MY_TEAMS = []; SIGNED_IN = false; return; }
   const r = await leaguesApi('my-teams');
   if(r.ok && Array.isArray(r.teams)){ MY_TEAMS = r.teams; SIGNED_IN = true; return; }
   if(r.status===401 || r.status===403){ MY_TEAMS = []; SIGNED_IN = false; return; }
