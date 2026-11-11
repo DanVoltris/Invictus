@@ -12,6 +12,7 @@
      Loaded unconditionally (not lazily like demo-mode.js) because the tee sheet needs it too. -->
 <script src="/assets/analytics.js"></script>
 <script src="/assets/leagues.js"></script>
+<script src="/assets/message-texts.js"></script>
 <script src="/assets/password-toggle.js"></script>
 <style>
   :root{
@@ -564,6 +565,19 @@
     border-radius:10px;padding:10px 12px;font-size:12.5px;color:#8A5A2B;line-height:1.5;margin:2px 0 12px}
   .note-flag .fbadge{margin:1px 0 0}
   .chips{display:flex;flex-wrap:wrap;gap:7px}
+  /* Text Messages tab (0054) */
+  .tx-group{margin:22px 0 8px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .tx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}
+  @media (max-width:560px){ .tx-grid{grid-template-columns:1fr} }
+  .tx-card{margin:0}
+  .tx-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tx-head .card-h{margin:0}
+  .tx-text{width:100%;min-height:84px;resize:vertical;margin-top:10px;font-size:14px;line-height:1.45}
+  .tx-vars{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .tx-vars button{font-size:12px;padding:4px 9px;border-radius:999px;border:1px solid var(--border);background:var(--near-black);color:var(--muted);cursor:pointer}
+  .tx-vars button:hover{color:var(--text);border-color:var(--orange)}
+  .tx-prev{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--surface-2,rgba(127,127,127,.08));font-size:13.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+  .tx-meta{display:flex;justify-content:space-between;gap:10px;margin-top:6px;font-size:12px;color:var(--dim)}
   .chip{font-size:12.5px;font-weight:700;padding:6px 11px;border-radius:999px;border:1px solid var(--border);background:var(--near-black);color:var(--muted);cursor:pointer}
   .chip.on{color:var(--white);background:var(--surface-2)}
   /* Leagues (migration 0028) */
@@ -1383,6 +1397,22 @@
         <div class="foot-note">Every message the system sends carries this block at the bottom: your name, your mailing address, a way to contact you and a way to stop hearing from you. A text adds “Reply STOP to opt out”. None of it is guessed for you — what you type here is what goes out.</div>
       </div>
 
+      <!-- TEXT MESSAGES (0054) -->
+      <div id="tab-texts" class="hidden">
+        <div class="toolbar">
+          <div><h2>Text Messages</h2><div class="day-label">The wording of every text the site sends. Change any of them; the details in {curly brackets} are filled in for each customer.</div></div>
+          <div class="day-nav"><span class="dim" id="tx-saved" style="font-size:12px"></span><button class="btn btn-primary" id="tx-save">Save text messages</button></div>
+        </div>
+        <div class="card" style="margin-bottom:6px">
+          <div class="sub" style="margin:0;line-height:1.55">
+            <b>{name}</b>-style details are filled in for each message — click one under a box to add it where your cursor is.
+            Put part of a text in <b>[square brackets]</b> to show it only when the details inside are known: <span class="dim">Yours[ until {expires}].</span>
+            A text you haven’t changed goes out exactly as it does today. Prices and amounts always come from the booking itself, never from the wording.
+          </div>
+        </div>
+        <div id="tx-list"></div>
+      </div>
+
       <!-- GIFT CARDS -->
       <div id="tab-giftcards" class="hidden">
         <div class="toolbar">
@@ -2014,6 +2044,7 @@ const TABS = [
   { id:'tags',                               label:'Tags',               load:loadTags,           cap:'config.write' },
   { id:'paysettings',                        label:'Payment Settings',   load:loadPaySettings,    cap:'config.write' },
   { id:'venue',                              label:'Venue Identity',     load:loadVenueTab,       cap:'config.write' },
+  { id:'texts',                              label:'Text Messages',      load:loadTextsTab,       cap:'config.write', when:()=>!ME.rbac || ME.role==='admin' },
   { id:'contest',                            label:'Contest Setup',      load:loadContestSetup,   cap:'contest.manage', when:()=>CONTEST_ON },
   { id:'staff',       group:'Access',        label:'Staff & Roles',      load:loadStaffTab,       cap:'staff.manage' },
 ];
@@ -2690,6 +2721,77 @@ const venueForm = () => ({
   name:$('#v-name').value.trim(), address:$('#v-address').value.trim(), phone:$('#v-phone').value.trim(),
   email:$('#v-email').value.trim(), website:$('#v-website').value.trim(), unsubscribeUrl:$('#v-unsub').value.trim(),
 });
+/* ---------- Text Messages (migration 0054) ----------
+   demo/assets/message-texts.js lists every text, its details and its default wording — the same
+   file lib/notify.js fills them in with, so the preview here is the real thing with example
+   details. Only texts that differ from the default are saved (settings.message_texts). */
+const TX = () => window.InvictusTexts;
+function loadTextsTab(){
+  const host=$('#tx-list'); if(!host) return;
+  if(!TX()){ host.innerHTML='<div class="empty">The text editor did not load — refresh the page.</div>'; return; }
+  const saved=(SETTINGS && SETTINGS.message_texts && typeof SETTINGS.message_texts==='object') ? SETTINGS.message_texts : {};
+  if(SETTINGS && !('message_texts' in SETTINGS)){
+    host.innerHTML='<div class="empty">Custom text wording needs one database update first — run <b>supabase/migrations/0054_message_texts_and_part_payments.sql</b> in the Supabase SQL editor, then refresh.</div>';
+    $('#tx-save').disabled=true; return;
+  }
+  $('#tx-save').disabled=false;
+  const groups=[...new Set(TX().KINDS.map(k=>k.group))];
+  host.innerHTML=groups.map(g=>`<div class="tx-group">${esc(g)}</div><div class="tx-grid">${TX().KINDS.filter(k=>k.group===g).map(k=>`
+    <div class="card tx-card" data-key="${esc(k.key)}">
+      <div class="tx-head"><h3 class="card-h">${esc(k.label)}</h3><span class="pill tx-state"></span></div>
+      <div class="dim" style="font-size:12.5px;margin-top:4px">${esc(k.when)}</div>
+      <textarea class="input tx-text" maxlength="${TX().MAX_LEN}" aria-label="Wording for ${esc(k.label)}">${esc(typeof saved[k.key]==='string' && saved[k.key].trim() ? saved[k.key] : k.text)}</textarea>
+      <div class="tx-vars" aria-label="Details you can add">${k.vars.map(n=>`<button type="button" data-var="${esc(n)}" title="${esc(TX().VARS[n][0])}">{${esc(n)}}</button>`).join('')}</div>
+      <div class="tx-prev" aria-label="Preview"></div>
+      <div class="tx-meta"><span class="tx-count"></span><button type="button" class="link-btn tx-reset">Back to the default</button></div>
+      <div class="err tx-err"></div>
+    </div>`).join('')}</div>`).join('');
+  const venue=(SETTINGS && SETTINGS.venue) || {};
+  const paint=card=>{
+    const k=TX().BY_KEY[card.dataset.key], ta=card.querySelector('.tx-text'), txt=ta.value;
+    const custom=txt.trim()!==k.text;
+    const st=card.querySelector('.tx-state'); st.textContent=custom?'Custom':'Default'; st.className='pill tx-state '+(custom?'warn':'info');
+    card.querySelector('.tx-reset').style.visibility=custom?'visible':'hidden';
+    const bad=TX().problem(k, txt);
+    card.querySelector('.tx-err').textContent=bad;
+    const vars={ ...TX().sampleVars(k), venue: venue.name || 'Invictus Golf' };
+    let body=TX().plain(TX().fill(txt, vars));
+    if(k.commercial) body+=`\n${venue.name||'Invictus Golf'}${venue.website?' - '+venue.website:''}. Reply STOP to opt out.`;
+    card.querySelector('.tx-prev').textContent=bad?'—':body;
+    const seg=TX().segments(body);
+    card.querySelector('.tx-count').textContent=bad?'':`${seg.chars} characters · ${seg.count} text${seg.count===1?'':'s'}${seg.gsm?'':' (an emoji or special letter makes each text shorter)'}`;
+  };
+  host.querySelectorAll('.tx-card').forEach(card=>{
+    const ta=card.querySelector('.tx-text');
+    ta.addEventListener('input',()=>paint(card));
+    card.querySelectorAll('[data-var]').forEach(b=>b.onclick=()=>{
+      const ins=`{${b.dataset.var}}`, a=ta.selectionStart??ta.value.length, z=ta.selectionEnd??ta.value.length;
+      ta.value=ta.value.slice(0,a)+ins+ta.value.slice(z); ta.focus(); ta.selectionStart=ta.selectionEnd=a+ins.length; paint(card);
+    });
+    card.querySelector('.tx-reset').onclick=()=>{ ta.value=TX().BY_KEY[card.dataset.key].text; paint(card); };
+    paint(card);
+  });
+}
+$('#tx-save').onclick=async()=>{
+  const out={}; let bad=null;
+  $('#tx-list').querySelectorAll('.tx-card').forEach(card=>{
+    const k=TX().BY_KEY[card.dataset.key], txt=card.querySelector('.tx-text').value.trim();
+    const why=TX().problem(k, txt);
+    if(why && !bad) bad={ card, label:k.label, why };
+    if(!why && txt!==k.text) out[k.key]=txt;
+  });
+  if(bad){ bad.card.scrollIntoView({ behavior:'smooth', block:'center' }); toast(`${bad.label}: ${bad.why}`,'err'); return; }
+  $('#tx-save').disabled=true;
+  const ok=await dbUpdate('settings',1,{ message_texts:out, updated_at:new Date().toISOString() });
+  $('#tx-save').disabled=false;
+  if(!ok){ toast('Save failed — run database migration 0054 first.','err'); return; }
+  SETTINGS.message_texts=out;
+  const n=Object.keys(out).length;
+  $('#tx-saved').textContent='Saved ✓'; setTimeout(()=>$('#tx-saved').textContent='',2500);
+  toast(n ? `Saved — ${n} text${n===1?' uses':'s use'} your own wording.` : 'Saved — every text uses the default wording.','ok');
+  loadTextsTab();
+};
+
 function loadVenueTab(){
   const v=(SETTINGS&&SETTINGS.venue)||{};
   $('#v-name').value=v.name||''; $('#v-address').value=v.address||''; $('#v-phone').value=v.phone||'';
@@ -3955,7 +4057,7 @@ function leagueInsight(kind, ctx){
       ${fee?`<div class="sec-h">Still to pay</div>${list([...part,...none].sort((a,b)=>owedOf(b)-owedOf(a)).map(t=>`<div><b>${esc(t.name)}</b><span>${money(owedOf(t))}</span></div>`))}`:''}`;
   } else if(kind==='players'){
     const withLogin=players.filter(x=>{ const c=CUSTOMERS.find(k=>k.id===x.customer_id); return c&&c.user_id; }).length;
-    const paidOwn=players.filter(x=>(payments||[]).some(p=>p.for_customer_id===x.customer_id && p.team_id===x.team_id) || (x.paid_cents||0)>0).length;
+    const paidOwn=players.filter(x=>(payments||[]).some(p=>p.for_customer_id===x.customer_id && p.team_id===x.team_id && Number(p.seats)>0) || (x.paid_cents||0)>0).length;
     const viaOnline=players.filter(x=>x.source==='online').length;
     const waiting=(invites||[]).filter(i=>!i.claimed_at && !i.revoked_at && teams.some(t=>t.id===i.team_id)).length;
     // Same rule as the Teams board: accepted, but the person it names is not on that team (or none is named).
@@ -4207,6 +4309,11 @@ function leagueTeamsBoard(ctx){
   // Seat by seat (0036): a team bought with seats shows its seats, not paid/unpaid for the whole.
   const seatMoney=t=>(payments && t && t.seats && t.share_cents>0)
     ? LG().teamMoney({ league, team:t, payments, members, invites:invites||[], todayISO:today }) : null;
+  // Part payments (0054) need LG().partsOf — the shared file the portal loads.
+  const t0054=t=>!!(payments && t && t.seats && t.share_cents>0 && LG().partsOf);
+  // Who on a team can still part-pay: players (not subs) with no seat paid in their own name.
+  const stillOwe=t=>active.filter(x=>x.team_id===t.id && x.role!=='sub' && !((x.paid_cents||0)>0)
+    && !(payments||[]).some(p=>p.team_id===t.id && p.for_customer_id===x.customer_id && Number(p.seats)>0));
   const week=LG().currentWeek(league, today);
   // Booking a round is free bay time, so it needs the same permission a price does.
   const roundBooking = edit && mig31.rounds && LG31.rounds && canLeagueRound() && !!week;
@@ -4214,17 +4321,20 @@ function leagueTeamsBoard(ctx){
   const moveOpts=(cur)=>`<option value="" ${!cur?'selected':''}>No team</option>`+teams.map(t=>`<option value="${t.id}" ${t.id===cur?'selected':''}>${esc(t.name)}</option>`).join('');
   const playerRow=(x,team)=>{ const isCap=team && team.captain_customer_id===x.customer_id;
     // Paid their own seat online (0036)? Players who took a seat the captain covered show nothing.
-    const ownSeat=(payments||[]).some(p=>team && p.team_id===team.id && p.for_customer_id===x.customer_id);
+    const ownSeat=(payments||[]).some(p=>team && p.team_id===team.id && p.for_customer_id===x.customer_id && Number(p.seats)>0);
     // What this player paid for, all told: their own seat, or seats for the team too.
     const mine=(payments||[]).filter(p=>team && p.team_id===team.id && p.payer_customer_id===x.customer_id);
     const paidSeats=mine.reduce((n,p)=>n+(Number(p.seats)||0),0), paidCents=mine.reduce((n,p)=>n+(Number(p.amount_cents)||0),0);
     const paidPill=paidSeats>1 ? `<span class="pill confirmed">Paid ${paidSeats} seats · ${esc(money(paidCents))}</span>`
       : paidSeats===1 ? (ownSeat ? '<span class="pill confirmed">Paid own seat</span>' : `<span class="pill confirmed">Paid 1 seat · ${esc(money(paidCents))}</span>`)
       : ownSeat ? '<span class="pill confirmed">Paid own seat</span>' : '';
+    // Some of their share paid at the counter (0054), the rest still to come.
+    const partPaid=team && t0054(team) ? (LG().partsOf(payments, team.id).byPlayer[x.customer_id]||0) : 0;
+    const partPill=partPaid ? `<span class="pill warn">Paid ${esc(money(partPaid))} of ${esc(money(team.share_cents))}</span>` : '';
     // No team yet and paid online: a solo sign-up (0041) waiting to be placed.
     const soloPaid=!team && (x.paid_cents||0)>0;
     return `<div class="tb-player" data-id="${x.id}">
-      <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}${paidPill?' '+paidPill:''}${soloPaid?` <span class="pill confirmed">Paid ${esc(money(x.paid_cents))}</span>`:''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
+      <div><b>${esc(x.name)}</b>${isCap?' <span class="pill manager">Captain</span>':''}${paidPill?' '+paidPill:''}${partPill?' '+partPill:''}${soloPaid?` <span class="pill confirmed">Paid ${esc(money(x.paid_cents))}</span>`:''}<div class="dim" style="font-size:12px">${esc(fmtPhone(x.phone)||x.email||'')}</div></div>
       ${edit?`<div class="row" style="gap:6px;flex-wrap:nowrap;align-items:center">
         ${team&&!ownSeat&&!soloPaid&&!(x.paid_cents>0)&&league.fee_cents>0&&x.phone?'<button class="btn btn-ghost btn-sm tb-remind" aria-label="Text '+esc(x.name)+' a reminder to pay their share">Resend text</button>':''}
         ${team&&!isCap&&mig31.cols?'<button class="btn btn-ghost btn-sm tb-cap" aria-label="Make '+esc(x.name)+' the captain">Make captain</button>':''}
@@ -4256,10 +4366,13 @@ function leagueTeamsBoard(ctx){
     const sm=seatMoney(t);
     if(sm){
       const owedRow = sm.unpaidSeats ? `<span class="pill ${sm.due?'cancelled':'warn'}">${esc(money(sm.owedCents))} ${sm.due?'owed by the captain':'unpaid — season not started'}</span>` : '';
+      const partNote = sm.partCents ? ` <span class="dim" style="font-size:12px">${esc(money(sm.partCents))} already paid toward ${sm.unpaidSeats===1?'it':'them'}</span>` : '';
+      const teamPays = (payments||[]).some(p=>p.team_id===t.id);
       return `<div style="padding:6px 0"><span class="pill ${sm.unpaidSeats?'warn':'confirmed'}">${sm.paidSeats} of ${sm.seats} seats paid</span>
         <span class="dim" style="font-size:12px">${esc(money(sm.shareCents))} a seat${sm.freeSeats?` · ${sm.freeSeats} paid seat${sm.freeSeats===1?'':'s'} waiting for a player`:''}</span>
-        ${owedRow ? '<br />'+owedRow : ''}
-        ${sm.unpaidSeats && can('money.write')?' <button class="btn btn-ghost btn-sm tb-collect">Mark collected</button>':''}</div>`;
+        ${owedRow ? '<br />'+owedRow+partNote : ''}
+        ${sm.unpaidSeats && can('money.write')?' <button class="btn btn-ghost btn-sm tb-collect">Mark collected</button>'+(t0054(t) && stillOwe(t).length?' <button class="btn btn-ghost btn-sm tb-part">Part payment</button>':''):''}
+        ${teamPays?' <button class="btn btn-ghost btn-sm tb-payments">Payments</button>':''}</div>`;
     }
     if(teamPaid(t)) return `<div style="padding:6px 0"><span class="pill confirmed">Paid ${money(t.paid_cents||league.fee_cents)}</span>
       <span class="dim" style="font-size:12px">${esc([t.paid_at&&shortDate2(String(t.paid_at).slice(0,10)), t.stripe_session_id&&'online'].filter(Boolean).join(' · '))}</span>
@@ -4314,6 +4427,14 @@ function leagueTeamsBoard(ctx){
   $('#lo-body').querySelectorAll('.tb-collect').forEach(b=>b.onclick=()=>{
     const t=teams.find(x=>x.id===b.closest('.tb-team').dataset.team); if(!t) return;
     leagueCollectFlow({ team:t, league, money:seatMoney(t), captain:CUSTOMERS.find(c=>c.id===t.captain_customer_id)||null }, reload);
+  });
+  $('#lo-body').querySelectorAll('.tb-part').forEach(b=>b.onclick=()=>{
+    const t=teams.find(x=>x.id===b.closest('.tb-team').dataset.team); if(!t) return;
+    leaguePartFlow({ team:t, league, money:seatMoney(t), payments, members:stillOwe(t) }, reload);
+  });
+  $('#lo-body').querySelectorAll('.tb-payments').forEach(b=>b.onclick=()=>{
+    const t=teams.find(x=>x.id===b.closest('.tb-team').dataset.team); if(!t) return;
+    leaguePaymentsSheet({ team:t, league, payments:(payments||[]).filter(p=>p.team_id===t.id), members }, reload);
   });
   if(!edit) return;
   $('#tb-create').onclick=async()=>{
@@ -7175,7 +7296,7 @@ async function fetchLeagueOwed(force){
   const [l,t,p,m,i] = await Promise.all([
     sb.from('leagues').select('*'),
     sb.from('league_teams').select('*'),
-    sb.from('league_seat_payments').select('team_id,seats,amount_cents,method,created_at'),
+    sb.from('league_seat_payments').select('team_id,seats,amount_cents,method,created_at,for_customer_id'),
     sb.from('league_members').select('team_id,customer_id,status'),
     sb.from('league_team_invites').select('team_id,name,phone,claimed_at,revoked_at'),
   ]);
@@ -7228,7 +7349,7 @@ async function leagueCollectFlow(r, done){
   promptSheet({
     title:'Mark league money collected',
     body:`<b>${esc((r.captain&&r.captain.name)||'The captain')}</b> owes <b>${esc(money(m.owedCents))}</b> for ${m.unpaidSeats} unpaid seat${m.unpaidSeats===1?'':'s'}
-      on ${esc(r.team.name)} (${esc(r.league.name)}) — ${esc(money(m.shareCents))} a seat.<br /><br />
+      on ${esc(r.team.name)} (${esc(r.league.name)}) — ${esc(money(m.shareCents))} a seat${m.partCents?`, less ${esc(money(m.partCents))} players already paid toward them`:''}.<br /><br />
       Take the money at the till or in Toast first — this only records it. Enter fewer seats for a part payment; the rest stays flagged.`,
     fields:[{ id:'seats', label:`Seats paid for (1 to ${m.unpaidSeats})`, type:'number', step:'1', min:'1', value:String(m.unpaidSeats) },
             { id:'payer', label:'Paid by', value: capId || (payerOpts[0]||[''])[0], options: payerOpts }],
@@ -7237,7 +7358,7 @@ async function leagueCollectFlow(r, done){
       const n=Number(v.seats);
       if(!Number.isInteger(n) || n<1 || n>m.unpaidSeats) return `Enter a whole number from 1 to ${m.unpaidSeats}.`;
       const res = DEMO_MODE
-        ? await sb.from('league_seat_payments').insert({ team_id:r.team.id, league_id:r.league.id, seats:n, amount_cents:n*m.shareCents,
+        ? await sb.from('league_seat_payments').insert({ team_id:r.team.id, league_id:r.league.id, seats:n, amount_cents:n===m.unpaidSeats?m.owedCents:n*m.shareCents,
             method:'counter', payer_customer_id:v.payer||null, recorded_by:'demo' })
             .then(({ error })=>error?{ ok:false, error:error.message }:{ ok:true, message:`Recorded ${n} seat${n===1?'':'s'} (demo — nothing saved)` })
         : await apiPost('/api/booking-series?action=league-collect', { teamId:r.team.id, seats:n, payerCustomerId:v.payer||'' });
@@ -7247,6 +7368,80 @@ async function leagueCollectFlow(r, done){
       done && done();
       return null;
     },
+  });
+}
+/* ----- Part payments and taking a payment back off (migration 0054) ----------------------
+   "Sam paid $100 of his $285 today": staff pick the player and the amount. It comes off what they
+   owe; the payment that finishes their share pays their seat (lib/db.js recordPartPayment). */
+function leaguePartFlow(r, done){
+  if(!can('money.write') || !r || !r.money) return;
+  const m=r.money, parts=LG().partsOf(r.payments||[], r.team.id).byPlayer;
+  const players=(r.members||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+  if(!players.length){ toast('Everyone on this team has paid their own seat. What is left is owed by the captain — use Mark collected.','err'); return; }
+  const opts=players.map(x=>[x.customer_id, `${x.name||'Player'}${parts[x.customer_id]?` (paid ${money(parts[x.customer_id])} so far)`:''}`]);
+  promptSheet({
+    title:'Record a part payment',
+    body:`A player paid <b>some</b> of their ${esc(money(m.shareCents))} share for ${esc(r.team.name)}. What they paid comes off what they owe,
+      and the rest stays owed. When their share is paid in full, their seat is marked paid.<br /><br />
+      Take the money at the till or in Toast first — this only records it.`,
+    fields:[{ id:'who', label:'Who paid', value:opts[0][0], options:opts },
+            { id:'amt', label:'Amount paid ($)', type:'number', step:'0.01', min:'0.01', placeholder:'100.00' }],
+    okLabel:'Record payment',
+    onOk: async v=>{
+      const cents=Math.round(Number(v.amt)*100);
+      if(!v.amt || !Number.isFinite(cents) || cents<=0) return 'Enter the amount they paid, like 100 or 100.50.';
+      const res = DEMO_MODE
+        ? await sb.from('league_seat_payments').insert({ team_id:r.team.id, league_id:r.league.id, seats:0, amount_cents:cents,
+            method:'counter', payer_customer_id:v.who, for_customer_id:v.who, recorded_by:'demo', note:'Part payment' })
+            .then(({ error })=>error?{ ok:false, error:error.message }:{ ok:true, message:`Recorded ${money(cents)} (demo — nothing saved)` })
+        : await apiPost('/api/booking-series?action=league-part', { teamId:r.team.id, customerId:v.who, amountCents:cents });
+      if(!res.ok) return res.error || 'That could not be recorded.';
+      toast(res.message || 'Recorded','ok');
+      await fetchLeagueOwed(true); renderSideNav();
+      done && done();
+      return null;
+    },
+  });
+}
+// Every payment on one team, newest first, each with a way to take it back off.
+function leaguePaymentsSheet(r, done){
+  const co=$('#confirm-overlay'), cs=$('#confirm-sheet');
+  const nameOf=id=>{ if(!id) return ''; const m=(r.members||[]).find(x=>x.customer_id===id); const c=m||CUSTOMERS.find(x=>x.id===id); return (c&&c.name)||'A former player'; };
+  const how={ stripe:'Paid online', counter:'At the counter', legacy:'Paid before seat-by-seat payments' };
+  const rows=(r.payments||[]).slice().sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+  const line=p=>{ const seats=Number(p.seats)||0, who=nameOf(p.payer_customer_id), forWho=p.for_customer_id&&p.for_customer_id!==p.payer_customer_id?nameOf(p.for_customer_id):'';
+    return `<div class="tb-player" data-pay="${esc(p.id)}">
+      <div><b>${esc(money(p.amount_cents))}</b> · ${seats?`${seats} seat${seats===1?'':'s'}`:'part payment'}
+        <div class="dim" style="font-size:12px">${esc([p.created_at&&shortDate2(String(p.created_at).slice(0,10)), how[p.method]||p.method,
+          who?'paid by '+who:'payer not recorded', forWho&&'for '+forWho, p.recorded_by&&p.method!=='stripe'?'recorded by '+p.recorded_by:''].filter(Boolean).join(' · '))}</div></div>
+      ${can('money.write')?'<button class="btn btn-ghost btn-sm pay-rm">Remove</button>':''}</div>`; };
+  cs.innerHTML=`<button class="sheet-close" id="pmx">✕</button>
+    <h3>Payments — ${esc(r.team.name)}</h3>
+    <div class="sub" style="margin:6px 0 10px;line-height:1.5">Remove a payment that was recorded by mistake. What the team owes goes back up by that amount.</div>
+    <div class="tb-list">${rows.map(line).join('')||'<div class="dim" style="padding:8px 0">No payments recorded.</div>'}</div>
+    <button class="btn btn-ghost" id="pm-done" style="width:100%;margin-top:12px">Done</button>`;
+  co.classList.add('show');
+  const close=()=>{ co.classList.remove('show'); cs.innerHTML=''; };
+  $('#pmx').onclick=close; $('#pm-done').onclick=close; co.onclick=e=>{ if(e.target===co) close(); };
+  cs.querySelectorAll('.pay-rm').forEach(b=>b.onclick=()=>{
+    const p=rows.find(x=>x.id===b.closest('[data-pay]').dataset.pay); if(!p) return;
+    const card=p.method==='stripe';
+    promptSheet({
+      title:'Remove this payment?',
+      body:`<b>${esc(money(p.amount_cents))}</b> ${Number(p.seats)?`for ${p.seats} seat${Number(p.seats)===1?'':'s'}`:'part payment'} on ${esc(r.team.name)} will come off the books, and the team will owe it again.
+        ${card?'<br /><br /><b>This was paid by card online.</b> Removing it here does not give the money back — refund it in Stripe first if it should go back to them.':''}`,
+      okLabel:'Remove payment', danger:true,
+      onOk: async()=>{
+        const res = DEMO_MODE
+          ? await sb.from('league_seat_payments').delete().eq('id',p.id).then(({ error })=>error?{ ok:false, error:error.message }:{ ok:true, message:'Payment removed (demo — nothing saved)' })
+          : await apiPost('/api/booking-series?action=league-payment-remove', { paymentId:p.id });
+        if(!res.ok) return res.error || 'That payment could not be removed.';
+        toast(res.message || 'Payment removed','ok');
+        await fetchLeagueOwed(true); renderSideNav();
+        done && done();
+        return null;
+      },
+    });
   });
 }
 function leagueOweRowHTML(r){

@@ -1827,3 +1827,81 @@ test('who paid for the seats: "Paid by" at the counter, and the list My Account 
   assert.deepEqual(t.seats.payers.map((p) => [p.name, p.seats, p.cents, p.you]),
     [['Murad C.', 1, 20000, true], ['Sam O.', 1, 20000, false], [null, 1, 20000, false]]);
 });
+
+// ---------------------------------------------------------------- part payments and undo (0054)
+
+test('part payments: staff take some of a player’s share; it comes off what they owe, and finishing it pays their seat', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-range', 'Trio', 3);   // the captain paid one seat online; 2 × $200 owed
+  S.db.league_members.push({ id: 'm-friend', league_id: 'L-range', team_id: teamId, customer_id: 'c-friend', status: 'active', role: 'player', paid_cents: 0 });
+  const part = (body, tok = 'tok-admin') => run(seriesApi, { query: { action: 'league-part' }, body: { teamId, ...body }, headers: { authorization: `Bearer ${tok}` } });
+  const money = async () => (await db.teamMoneyFor(teamId)).money;
+  const friendCard = async () => (await run(leaguesApi, { query: { action: 'my-teams' }, ...friend })).out.teams.find((x) => x.team.id === teamId).seats;
+
+  assert.equal((await part({ customerId: 'c-friend', amountCents: 8000 }, 'tok-emp')).code, 403, 'Money permission only');
+  assert.equal((await part({ customerId: 'c-other', amountCents: 8000 })).code, 400, 'a player on this team');
+  assert.equal((await part({ customerId: 'c-friend', amountCents: 0 })).code, 400);
+
+  const first = await part({ customerId: 'c-friend', amountCents: 8000 });
+  assert.equal(first.code, 200, JSON.stringify(first.out));
+  assert.match(first.out.message, /Recorded \$80\.00 from Sam Okafor\. \$120\.00 of their share is still owed\./);
+  let m = await money();
+  assert.deepEqual([m.paidSeats, m.unpaidSeats, m.partCents, m.owedCents], [1, 2, 8000, 32000]);
+  let card = await friendCard();
+  assert.deepEqual([card.myShareCents, card.myPartCents], [12000, 8000], 'My Account: $120 left of their share, $80 paid');
+  assert.deepEqual(card.payers.find((p) => p.name === 'Sam O.'), { name: 'Sam O.', seats: 0, cents: 8000, you: true });
+
+  const over = await part({ customerId: 'c-friend', amountCents: 15000 });
+  assert.equal(over.code, 400);
+  assert.match(over.out.error, /only owes \$120\.00/);
+
+  // They pay the rest online: $120, not $200, and their part payment becomes part of that seat.
+  const pay = await run(leaguesApi, { query: { action: 'pay-share' }, body: { teamId }, ...friend });
+  assert.equal(pay.code, 200, JSON.stringify(pay.out));
+  assert.equal(pay.out.amountCents, 12000);
+  assert.equal((await run(leaguesApi, { query: { action: 'confirm' }, body: { sessionId: sessionOf(pay.out.url) }, ...friend })).code, 200);
+  m = await money();
+  assert.deepEqual([m.paidSeats, m.unpaidSeats, m.partCents, m.owedCents], [2, 1, 0, 20000], 'one seat left, nothing counted twice');
+  assert.equal((await friendCard()).myShareCents, 0);
+  assert.equal(S.db.league_teams.find((t) => t.id === teamId).paid_cents, 20000 + 8000 + 12000);
+
+  // Undo: the online payment was a mistake (refunded in Stripe). They owe $120 again, the $80 stands.
+  const online = S.db.league_seat_payments.find((p) => p.method === 'stripe' && p.for_customer_id === 'c-friend');
+  const remove = (paymentId, tok = 'tok-admin') => run(seriesApi, { query: { action: 'league-payment-remove' }, body: { paymentId }, headers: { authorization: `Bearer ${tok}` } });
+  assert.equal((await remove(online.id, 'tok-emp')).code, 403);
+  const undone = await remove(online.id);
+  assert.equal(undone.code, 200, JSON.stringify(undone.out));
+  assert.match(undone.out.message, /now owes \$320\.00/);
+  assert.equal(S.db.league_members.find((x) => x.id === 'm-friend').paid_cents, 0, 'their roster mark goes too');
+  assert.deepEqual([(await friendCard()).myShareCents, (await money()).owedCents], [12000, 32000]);
+  assert.equal((await remove(online.id)).code, 404, 'already gone');
+
+  // The rest at the counter: their seat is paid.
+  const rest = await part({ customerId: 'c-friend', amountCents: 12000 });
+  assert.match(rest.out.message, /their seat is now paid/);
+  assert.deepEqual(S.db.league_seat_payments.filter((p) => p.for_customer_id === 'c-friend').map((p) => [p.seats, p.amount_cents]), [[0, 8000], [1, 12000]]);
+  assert.equal((await money()).owedCents, 20000);
+  assert.equal((await part({ customerId: 'c-friend', amountCents: 100 })).code, 409, 'nothing left for them to pay');
+});
+
+test('part payments come off "Mark collected" and the captain’s online payment for every seat left', async () => {
+  seatWorld();
+  const teamId = await buySplitTeam('L-range', 'Trio', 3);   // 2 × $200 owed
+  S.db.league_members.push({ id: 'm-friend', league_id: 'L-range', team_id: teamId, customer_id: 'c-friend', status: 'active', role: 'player', paid_cents: 0 });
+  await run(seriesApi, { query: { action: 'league-part' }, body: { teamId, customerId: 'c-friend', amountCents: 5000 }, headers: { authorization: 'Bearer tok-admin' } });
+
+  // The captain covers both seats online: $350, not $400.
+  const pay = await run(leaguesApi, { query: { action: 'pay-seats' }, body: { teamId, seats: 2 }, ...cap });
+  assert.equal(pay.code, 200, JSON.stringify(pay.out));
+  assert.equal(pay.out.amountCents, 35000);
+  // …and one seat only: a full share, the $50 stays toward the other.
+  const one = await run(leaguesApi, { query: { action: 'pay-seats' }, body: { teamId, seats: 1 }, ...cap });
+  assert.equal(one.out.amountCents, 20000);
+
+  // Staff collect every seat left at the counter instead: $350 recorded, nothing owed.
+  const all = await run(seriesApi, { query: { action: 'league-collect' }, body: { teamId, seats: 2 }, headers: { authorization: 'Bearer tok-admin' } });
+  assert.equal(all.out.collectedCents, 35000);
+  const m = (await db.teamMoneyFor(teamId)).money;
+  assert.deepEqual([m.unpaidSeats, m.owedCents], [0, 0]);
+  assert.equal(S.db.league_teams.find((t) => t.id === teamId).paid_cents, 60000, 'the whole $600, once');
+});

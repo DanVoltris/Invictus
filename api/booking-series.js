@@ -9,7 +9,7 @@ import {
   getSettings, getOverridesForDate, staffContext,
   createSeries, seriesById, updateSeries, seriesNeedingHorizon, seriesOccurrences, seriesDatesPreview,
   groupConflicts, bookGroup, groupById, recordSeriesException, cancelGroup, moveGroup, recordRefund,
-  customerHoursByContact, heldBookings, bookingForHold, failedHolds, recordSeatCollection, crossDayProblem,
+  customerHoursByContact, heldBookings, bookingForHold, failedHolds, recordSeatCollection, recordPartPayment, removeSeatPayment, crossDayProblem,
 } from '../lib/db.js';
 
 // Group + recurring bookings. Dispatch on ?action= —
@@ -24,6 +24,8 @@ import {
 //   refund    POST   actually send money back through Stripe, for ONE booking (see below)
 //   adjust-hold      POST  raise or lower a card hold (money.write)
 //   release-overdue  POST  let go of holds nobody dealt with, 5h after the session (any staff login)
+//   league-part      POST  a player paid some of their league share at the counter (money.write)
+//   league-payment-remove  POST  take a league payment recorded by mistake off the books (money.write)
 //
 // WHY `refund` LIVES HERE AND NOT IN A FILE OF ITS OWN. Two reasons, and the second is the real
 // one. Vercel's Hobby plan allows 12 Serverless Functions and api/ holds exactly 12 — a thirteenth
@@ -83,6 +85,8 @@ export default async function handler(req, res) {
   if (action === 'release-overdue') return releaseOverdue(req, res);
   if (action === 'place-holds') return placeHolds(req, res);
   if (action === 'league-collect') return leagueCollect(req, res);
+  if (action === 'league-part') return leaguePart(req, res);
+  if (action === 'league-payment-remove') return leaguePaymentRemove(req, res);
   return res.status(400).json({ ok: false, error: 'Unknown action' });
 }
 
@@ -942,6 +946,39 @@ async function leagueCollect(req, res) {
     message: `Recorded ${out.seats} seat${out.seats === 1 ? '' : 's'} collected for ${out.team.name}.`
       + (out.money && out.money.unpaidSeats ? ` ${out.money.unpaidSeats} still unpaid.` : ' Every seat is now paid.'),
   });
+}
+
+// A player paid part of their share at the counter: { teamId, customerId, amountCents }.
+async function leaguePart(req, res) {
+  const who = await staff(req, res, 'money.write');
+  if (!who) return;
+  const b = req.body || {};
+  const teamId = String(b.teamId || '').trim(), customerId = String(b.customerId || '').trim();
+  if (!teamId || teamId.length > 64 || !customerId || customerId.length > 64) return res.status(400).json({ ok: false, error: 'Which team, and which player?' });
+  const out = await recordPartPayment({ teamId, customerId, amountCents: b.amountCents,
+    by: (who.user && who.user.email) || (who.staff && who.staff.email) || 'manager' });
+  if (!out.ok) return res.status(out.code || 400).json({ ok: false, error: out.error });
+  const usd = (c) => `$${(c / 100).toFixed(2)}`;
+  const name = (out.player && out.player.name) || 'them';
+  return res.status(200).json({ ok: true, collectedCents: out.collectedCents, leftCents: out.leftCents, seatPaid: out.seatPaid,
+    owedCents: out.money ? out.money.owedCents : null,
+    message: out.seatPaid ? `Recorded ${usd(out.collectedCents)} from ${name} — their seat is now paid.`
+      : `Recorded ${usd(out.collectedCents)} from ${name}. ${usd(out.leftCents)} of their share is still owed.` });
+}
+
+// A league payment recorded by mistake: { paymentId }. What the team owes goes back up by it.
+async function leaguePaymentRemove(req, res) {
+  const who = await staff(req, res, 'money.write');
+  if (!who) return;
+  const id = String((req.body || {}).paymentId || '').trim();
+  if (!id || id.length > 64) return res.status(400).json({ ok: false, error: 'Which payment?' });
+  const out = await removeSeatPayment({ paymentId: id });
+  if (!out.ok) return res.status(out.code || 400).json({ ok: false, error: out.error });
+  const p = out.removed;
+  console.log(`league-payment-remove: ${p.amount_cents} cents (${p.method}) off team ${p.team_id} by ${(who.user && who.user.email) || 'staff'}`);
+  const owed = out.money ? out.money.owedCents : 0;
+  return res.status(200).json({ ok: true, owedCents: out.money ? owed : null,
+    message: `Payment removed.${owed ? ` ${(out.team && out.team.name) || 'The team'} now owes $${(owed / 100).toFixed(2)}.` : ''}` });
 }
 
 // ----- end ----------------------------------------------------------------------------------

@@ -313,6 +313,20 @@
   //   freeSeats    paid seats nobody sits in yet — the next friend to join takes one for nothing
   //   unpaidSeats  seats nobody has paid for; owedCents is what the captain owes for them
   //   due          owed AND the season has started: this is when staff are told to collect
+  //   partCents    money paid toward seats not yet paid in full (part payments, below)
+  //
+  // PART PAYMENTS. Staff can record that a player paid some of their share at the counter: a row
+  // with seats = 0, the amount, and for_customer_id = the player. It comes off what is owed until
+  // that player's seat is paid — by them online, or by staff — and from then on it is part of that
+  // seat's money, not a credit twice.
+  function partsOf(payments, teamId) {
+    const mine = (payments || []).filter((p) => p.team_id === teamId);
+    const seated = new Set(mine.filter((p) => (Math.floor(Number(p.seats)) || 0) > 0 && p.for_customer_id).map((p) => p.for_customer_id));
+    const open = mine.filter((p) => !(Math.floor(Number(p.seats)) || 0) && (Number(p.amount_cents) || 0) > 0 && !(p.for_customer_id && seated.has(p.for_customer_id)));
+    const byPlayer = {};
+    open.forEach((p) => { if (p.for_customer_id) byPlayer[p.for_customer_id] = (byPlayer[p.for_customer_id] || 0) + Math.round(Number(p.amount_cents)); });
+    return { cents: open.reduce((n, p) => n + Math.round(Number(p.amount_cents)), 0), byPlayer };
+  }
   function teamMoney({ league, team, payments = [], members = [], invites = [], todayISO }) {
     const seats = Math.floor(Number(team && team.seats)) || 0;
     const share = Math.max(0, Math.round(Number(team && team.share_cents) || 0));
@@ -323,10 +337,11 @@
     const players = members.filter((m) => m.team_id === team.id && m.status === 'active' && m.role !== 'sub').length;
     const openInvites = invites.filter((i) => i.team_id === team.id && i.role !== 'sub' && !i.claimed_at && !i.revoked_at).length;
     const unpaidSeats = split ? Math.max(0, seats - paidSeats) : 0;
-    const owedCents = unpaidSeats * share;
+    const partCents = unpaidSeats ? Math.min(partsOf(payments, team.id).cents, unpaidSeats * share) : 0;
+    const owedCents = Math.max(0, unpaidSeats * share - partCents);
     const started = !league || !league.season_start || !todayISO || league.season_start <= todayISO;
     return {
-      split, seats, shareCents: share, paidSeats, players, openInvites,
+      split, seats, shareCents: share, paidSeats, partCents, players, openInvites,
       freeSeats: split ? Math.max(0, paidSeats - players) : 0,
       emptySeats: seats ? Math.max(0, seats - players - openInvites) : 0,
       unpaidSeats, owedCents, due: owedCents > 0 && started,
@@ -615,7 +630,7 @@
 
   root.InvictusLeagues = { DAY_NAMES, timeLabel, scheduleLabel, weekOf, weeks, currentWeek, progress,
     teamWeeks, teamsWithoutRound, missedWeeks, ordinal, isCurrent, standings, publicName,
-    seatRange, shareOf, teamMoney, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
+    seatRange, shareOf, teamMoney, partsOf, normalizeDetails, hasDetails, dateRangeLabel, schedulePhases,
     weekIn, weekStartOf, rulesText, roundWeek, leagueDates, rosterLocked, inPlayoffs, roundTarget,
     normalizeStages, stagedStandings, QUAL_POINTS,
     HOLES, normalizePars, normalizeHoles, parsFor, scheduleFor, holeStats, HOLE_KINDS, holeResult, HOLE_RESULTS };

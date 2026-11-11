@@ -1768,14 +1768,16 @@ function teamCard(t, idx, opts){
         <button class="btn btn-ghost seat-go" data-share="${st.shareCents}" style="margin-top:8px">Pay for 1 seat — ${money(st.shareCents)}</button>`;
     }
     // A player the shop put on the team pays their own share here (lib/db.js ownShareOwed).
-    const mine = st.myShareCents ? `<div class="lg-note is-owed" style="margin-top:10px"><b>Your share: ${money(st.myShareCents)}.</b>
-        You were added to ${esc(team.name || 'this team')} by our staff. Pay your share to confirm your spot — or pay at the counter.</div>
+    // Some of it already paid at the counter (0054): what is left is what they pay here.
+    const mine = st.myShareCents ? `<div class="lg-note is-owed" style="margin-top:10px"><b>${st.myPartCents ? `Left to pay: ${money(st.myShareCents)}.` : `Your share: ${money(st.myShareCents)}.`}</b>
+        ${st.myPartCents ? `You’ve paid ${money(st.myPartCents)} of your share at the counter. Pay the rest to confirm your spot — online here, or at the counter.`
+          : `You were added to ${esc(team.name || 'this team')} by our staff. Pay your share to confirm your spot — or pay at the counter.`}</div>
         <div class="err share-err"></div>
         <button class="btn btn-primary share-go" data-share="${st.myShareCents}" style="margin-top:8px">Pay my share — ${money(st.myShareCents)}</button>` : '';
     // Who paid: one short line per payer, so a team can see who covered which seats.
     const payers = (st.payers || []).length ? `<div class="seat-payers" aria-label="Who paid">${st.payers.map(p => `<div class="sp-row">
         <span>${p.name ? esc(p.name) + (p.you ? ' <span class="sp-you">(you)</span>' : '') : 'Paid at the counter'}</span>
-        <span class="sp-what">${p.seats} seat${p.seats === 1 ? '' : 's'} · ${money(p.cents)}</span></div>`).join('')}</div>` : '';
+        <span class="sp-what">${p.seats ? `${p.seats} seat${p.seats === 1 ? '' : 's'}` : 'part payment'} · ${money(p.cents)}</span></div>`).join('')}</div>` : '';
     seatsBlock = `<div class="sec-title">Seats &amp; payments</div>
       <div class="seat-bar" aria-hidden="true">${bar}</div>
       <div class="sub" style="margin:0">${intro}</div>${payers}${mine}${capPart}`;
@@ -1851,7 +1853,7 @@ function teamCard(t, idx, opts){
   })() : '';
   // Money owed sits in the side column, which on a phone is far down: say so at the top too.
   const owedNote = !st ? '' : st.myShareCents
-    ? `<div class="lg-note is-owed" style="margin-top:10px"><b>Your share of ${money(st.myShareCents)} isn’t paid yet.</b> <a href="#seats-${idx}" style="color:var(--orange);font-weight:700">Pay it now →</a></div>`
+    ? `<div class="lg-note is-owed" style="margin-top:10px"><b>${st.myPartCents ? `${money(st.myShareCents)} of your share is still to pay.` : `Your share of ${money(st.myShareCents)} isn’t paid yet.`}</b> <a href="#seats-${idx}" style="color:var(--orange);font-weight:700">Pay it now →</a></div>`
     : (iAmCaptain && st.unpaidSeats) ? `<div class="lg-note is-owed" style="margin-top:10px"><b>${money(st.owedCents)} unpaid</b> for ${st.unpaidSeats} seat${st.unpaidSeats===1?'':'s'}. <a href="#seats-${idx}" style="color:var(--orange);font-weight:700">See seats &amp; payments →</a></div>` : '';
   return `<div class="card" data-team-card="${idx}" data-team-id="${esc(team.id || '')}">
     <div class="team-top">

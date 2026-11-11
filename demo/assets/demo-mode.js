@@ -663,6 +663,7 @@
         paymentDisclaimer: 'Cancel at least 24 hours before your tee time for a full refund.',
       },
       booking_window: { regularDays: 10, leagueDays: 60 },
+      message_texts: {},   // 0054: the admin's own wording for texts (none yet)
       updated_at: hoursAgo(20),
     }],
     bookings: BOOKINGS,

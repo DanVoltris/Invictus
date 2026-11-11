@@ -587,17 +587,24 @@ async function paySeats(req, res) {
   if (!enabled) return res.status(503).json({ ok: false, error: 'Online payment isn’t available right now — you can pay at the counter.' });
   const settings = normalizeSettings(await getSettings());
   const origin = req.headers.origin || `https://${req.headers.host}`;
+  // Never more than the team still owes: money players already paid at the counter toward a seat
+  // (part payments, 0054) comes off when the captain pays for every seat that is left.
+  const total = Math.min(n * money.shareCents, money.owedCents);
+  const product = { name: `${(league && league.name) || 'League'} — seat on ${team.name}`,
+    description: 'Paid by the captain. A friend who joins one of these seats pays nothing.' };
   const session = await stripeClient(process.env).checkout.sessions.create({
     mode: 'payment',
-    line_items: [{ quantity: n, price_data: { currency: settings.currency, unit_amount: money.shareCents,
-      product_data: { name: `${(league && league.name) || 'League'} — seat on ${team.name}`,
-        description: 'Paid by the captain. A friend who joins one of these seats pays nothing.' } } }],
+    line_items: total === n * money.shareCents
+      ? [{ quantity: n, price_data: { currency: settings.currency, unit_amount: money.shareCents, product_data: product } }]
+      : [{ quantity: 1, price_data: { currency: settings.currency, unit_amount: total,
+          product_data: { ...product, name: `${(league && league.name) || 'League'} — ${n} seat${n === 1 ? '' : 's'} on ${team.name}`,
+            description: `Less $${(money.partCents / 100).toFixed(2)} already paid at the counter.` } } }],
     customer_email: validEmail(me.email) ? me.email : undefined,
     metadata: { kind: 'league-seat', teamId: team.id, seats: String(n), payerCustomerId: String(me.id) },
     success_url: `${origin}/leagues?success=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/leagues?canceled=1`,
   });
-  return res.status(200).json({ ok: true, url: session.url, amountCents: n * money.shareCents });
+  return res.status(200).json({ ok: true, url: session.url, amountCents: total });
 }
 
 // A player staff put on a team paying their own share, from My Account.
