@@ -3,7 +3,7 @@
 --
 -- 1) settings.message_texts: the admin's own wording for each text the site sends, keyed by which
 --    text it is ("booking.paid", "waitlist.offer", …). A text with no entry here is sent exactly as
---    before. Written from the portal's Venue tab (Setup permission, like the rest of settings).
+--    before. Written from the portal's Text Messages tab (admins; Setup permission in the database).
 --
 -- 2) league_seat_payments: a row may now hold money with no seat yet. Staff record that a player
 --    paid part of their share at the counter ("$100 of $285") as seats = 0 with the amount; it comes
